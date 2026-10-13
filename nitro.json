@@ -1,0 +1,23 @@
+{
+  "cxxNamespace": ["uniwindshadow"],
+  "ios": {
+    "iosModuleName": "UniwindShadow"
+  },
+  "android": {
+    "androidNamespace": ["uniwindshadow"],
+    "androidCxxLibName": "uniwindshadow"
+  },
+  "autolinking": {
+    "UniwindShadow": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "UniwindShadow"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "UniwindShadow"
+      }
+    }
+  },
+  "ignorePaths": ["node_modules"]
+}
