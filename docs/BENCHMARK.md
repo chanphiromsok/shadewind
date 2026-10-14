@@ -93,3 +93,17 @@ uses for commits made off the JS thread) the mount is dispatched to the main que
 the measurement is 11.2-12.0 ms (max 13.7-15.8 ms) for 2003 views on the iOS simulator. The "JS idle" numbers (0.05-0.08 ms for
 `hookAsync`, 3.6-4.9 ms for `hook`) are not affected. Practical reading: `hookAsync` frees the JS thread and the screen updates in
 about 11-12 ms; `hook` returns after 3.6-4.9 ms but includes only the commit, not the main-thread mount, in its number.
+
+## Android with the Uniwind adapter (2026-10-14)
+
+`uniwind-benchmarks/apps/uniwind` (unmodified app code, `className`), `withShadewind` + `shadewind/uniwind`, Release arm64,
+emulator Pixel_8_Pro, intent `uwbench://theme`:
+
+| Run | Average | Min | Max |
+|---|---|---|---|
+| 2003 views x 10 theme changes | 14.59 ms | 6.40 ms | 31.53 ms |
+
+Notes: Android commits synchronously on the JS thread (no background commit yet), so this is the full hook cost. Different
+AVD and no same-run plain-Uniwind run, so it is not comparable to the 303 ms of the earlier emulator; the final colours were
+not pixel-checked for every switch. The public-API example (Home/Settings, Rapid x7, frozen Home) is correct on this emulator
+(`treeOK 31/31`; `viewOK` has no Android probe and reads 0).
