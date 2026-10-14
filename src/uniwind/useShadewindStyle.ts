@@ -164,6 +164,46 @@ const plan = (
   return decide(themed as unknown as ThemedStyles, 'engine');
 };
 
+// The store returns the same object for the same className / state / theme (and a new one after it invalidates its cache), so a
+// plan is a pure function of that object, the inline-overlap flag and the scoped-theme flag. Without this every mounted view
+// re-resolves the style once per theme and compares them as JSON: thousands of identical plans for a handful of classNames.
+const planCache = new WeakMap<object, [Plan | undefined, Plan | undefined]>();
+
+const cachedPlan = (
+  className: string | undefined,
+  props: Record<string, any>,
+  state: State | undefined,
+  context: { scopedTheme: string | null },
+  current: Resolved,
+  hasInlineOverlap: boolean
+): Plan => {
+  if (
+    !className ||
+    context.scopedTheme !== null ||
+    current.hasDataAttributes ||
+    debugOn()
+  ) {
+    return plan(className, props, state, context, current, hasInlineOverlap);
+  }
+
+  const slot = hasInlineOverlap ? 1 : 0;
+  let entry = planCache.get(current);
+
+  if (!entry) {
+    entry = [undefined, undefined];
+    planCache.set(current, entry);
+  }
+
+  return (entry[slot] ??= plan(
+    className,
+    props,
+    state,
+    context,
+    current,
+    hasInlineOverlap
+  ));
+};
+
 export const useShadewindStyle = (
   className: string | undefined,
   props: Record<string, any>,
@@ -193,7 +233,14 @@ export const useShadewindStyle = (
   const planned = useMemo(
     () =>
       active && !failed
-        ? plan(className, props, state, context, current, hasInlineOverlap)
+        ? cachedPlan(
+            className,
+            props,
+            state,
+            context,
+            current,
+            hasInlineOverlap
+          )
         : { themed: null, reason: 'engine inactive' },
     // `current` is cached per theme/state by the store: a new object means a different resolution
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -237,6 +237,11 @@ const scheduleFlush = () => {
   });
 };
 
+const nativeByStyles = new WeakMap<
+  object,
+  Record<string, Record<string, unknown>>
+>();
+
 export const ShadewindEngine = {
   /** Experimental: native tailwind-merge compatible class merge (see docs/ARCHITECTURE.md section 13). */
   loadClassTable(text: string): boolean {
@@ -256,15 +261,20 @@ export const ShadewindEngine = {
       return false;
     }
 
-    getNative().register(
-      node,
-      Object.fromEntries(
+    // the same `styles` object is registered by every view of one className: convert it once
+    let native = nativeByStyles.get(styles);
+
+    if (!native) {
+      native = Object.fromEntries(
         Object.entries(styles).map(([theme, style]) => [
           theme,
           toNativeProps(style),
         ])
-      )
-    );
+      );
+      nativeByStyles.set(styles, native);
+    }
+
+    getNative().register(node, native);
 
     registered.add(ref);
     scheduleFlush();
