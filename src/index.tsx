@@ -16,9 +16,14 @@ type RawMethods = {
   refreshReactNodes(nodes: unknown[]): number;
 };
 
-const native = NitroModules.createHybridObject<Shadewind>(
-  'Shadewind'
-) as Shadewind & RawMethods;
+// Created on first use, not at import: a styling library that imports the engine from a component module can be evaluated before
+// React Native has finished its own setup (the native runtime is not ready then).
+let nativeInstance: (Shadewind & RawMethods) | undefined;
+
+const getNative = () =>
+  (nativeInstance ??= NitroModules.createHybridObject<Shadewind>(
+    'Shadewind'
+  ) as Shadewind & RawMethods);
 
 /** Debug report: where a stale colour comes from. All counts refer to backgroundColor of registered views. */
 export type InspectReport = {
@@ -175,7 +180,7 @@ const refreshReact = () => {
   });
 
   if (nodes.length > 0) {
-    native.refreshReactNodes(nodes);
+    getNative().refreshReactNodes(nodes);
   }
 };
 
@@ -193,7 +198,7 @@ const scheduleFlush = () => {
   flushScheduled = true;
   Promise.resolve().then(() => {
     flushScheduled = false;
-    native.flushPending();
+    getNative().flushPending();
 
     if (needsReactRefresh) {
       refreshReact();
@@ -209,7 +214,7 @@ export const ShadewindEngine = {
       return false;
     }
 
-    native.register(
+    getNative().register(
       node,
       Object.fromEntries(
         Object.entries(styles).map(([theme, style]) => [
@@ -230,12 +235,12 @@ export const ShadewindEngine = {
     registered.delete(ref);
 
     if (node) {
-      native.unregister(node);
+      getNative().unregister(node);
     }
   },
   /** Applies a theme to every registered view without rendering any React component. */
   setTheme(name: string, strategy: ThemeStrategy = 'hookAsync'): ThemeTimings {
-    const timings = native.setTheme(name, strategy);
+    const timings = getNative().setTheme(name, strategy);
 
     // the hook family fixes the tree inside the commit; only the older strategies need React's handles repointed
     needsReactRefresh =
@@ -249,25 +254,25 @@ export const ShadewindEngine = {
   },
   /** Measurement: clears the longest main-thread busy period (iOS only; starts the run loop observer on first call). */
   resetMainBusy(): void {
-    native.resetMainBusy();
+    getNative().resetMainBusy();
   },
   /** Measurement: longest main-thread run loop busy period in ms since resetMainBusy (iOS only). */
   mainBusyMs(): number {
-    return native.mainBusyMs();
+    return getNative().mainBusyMs();
   },
   /**
    * Optional hint that a theme switch is probably coming (call it from `onPressIn` of a theme toggle). It reads, off the
    * JS thread, the memory the switch will use, so a switch after a long idle does not pay for cold caches. Changes nothing.
    */
   prepare(): void {
-    native.prepare();
+    getNative().prepare();
   },
   /** Debug only. Compares committed tree, nativeProps overlay and expected theme colours. */
   inspect(): InspectReport {
-    return native.inspect();
+    return getNative().inspect();
   },
   getTheme(): string {
-    return native.getTheme();
+    return getNative().getTheme();
   },
 };
 

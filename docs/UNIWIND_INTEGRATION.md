@@ -178,3 +178,36 @@ Findings:
 - `light-dark()` inside an `@theme` variable (`--color-ld: light-dark(...)`) fails to compile in Uniwind itself ("Failed to convert
   color ... type light-dark"); only the arbitrary-value form `bg-[light-dark(...)]` works.
 - Not covered by this spike (spike B): state variants, inline `style` overlap, ScopedTheme, more than 6 themes, className changes.
+
+## Spike B result (2026-10-14, Uniwind 1.12.0, iOS simulator, Release, `spikes/uniwind-spike-b`)
+
+Adapter `View` and `Text` (the planning rules from the review: no scoped theme, no state variants, no inline overlap on the
+registered keys, at most 6 themes, every theme defines every key, runtime-swap resolution from spike A), dropped into the
+benchmark app with a throw-away source patch (see the README there).
+
+| Case | Decision | Result across light / dark / ocean and back |
+|---|---|---|
+| `bg-primary` | engine | correct in every theme; 1 render + 0 renders for 3 theme switches |
+| `bg-white dark:bg-black`, `bg-[light-dark(...)]`, `dark:bg-black`-only | fell back (my test rows had inline `borderColor`) | correct (normal Uniwind path), re-rendered on every switch |
+| `text-black active:text-primary` | fell back (state variants) | correct |
+| `bg-primary` + inline `backgroundColor` | fell back (inline overlap) | stayed red, correct |
+| `TouchableOpacity bg-primary` | Uniwind's own component | correct |
+| `ScopedTheme theme="dark"` subtree | not registered (scoped) | stayed dark, did not re-render |
+| className toggled (`bg-primary` / `bg-gray`) after a switch | engine | correct after toggle and after the next switch |
+| outer `text-typography` + nested `text-black` | engine (outer) | outer white in dark, inner stayed dark; the review's nested-colour collision was NOT reproduced (see below) |
+| `updateCSSVariables('dark', {primary: red})` while light, then dark | engine | red in dark, as expected |
+
+Evidence that the engine path really skips React: render counts per component after dark, light, dark (3 switches):
+engine-handled rows 2 renders (initial + one forced parent render), fallback rows 8, scoped row 2.
+
+Notes and open items:
+- The nested-Text collision case was only tried light -> dark with the inner colour equal to the outer's previous colour; the
+  inner stayed dark, so either the fragment colour differs from the paragraph's previous colour in that tree or the recolour did
+  not run. Needs a targeted native test before relying on it.
+- Mount cost, the one-frame flash on a className change, 7 themes, Android, FlatList recycling and the Metro file-path seam are
+  not tested yet.
+- A runtime bug found: the library created its native object at import time and crashed the app during React Native setup when
+  imported from a component module ("runtime not ready"). It is created on first use now (`getNative()`), and the adapter requires
+  the engine lazily.
+- Metro config: dropping the default `react-native` condition from `unstable_conditionNames` breaks React Native's own setup; keep
+  `['shadewind-source', 'react-native']`.
