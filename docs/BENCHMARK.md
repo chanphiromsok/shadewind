@@ -121,3 +121,16 @@ Theme switch, 2003 views x 10 changes, one cold launch discarded. Only 2 warm la
 public `cn()` 813; floors 474 (Nitro) / 302 (global fn). 0 mismatches, 0 fallbacks.
 
 Not run in this baseline: Android, tovtam real-app rAF/stall, Uniwind comparison on this build.
+
+## tovtam real app, current pipeline vs plain Uniwind (2026-10-14, Release, iPhone 17 Pro simulator, iOS 26.5)
+
+In-app stall benchmark (12 `Uniwind.setTheme` switches 300 ms apart; longest JS-thread gap in the 350 ms after each switch; first switch
+cold). 5 launches per arm, median of the 12 per launch:
+
+| Arm | Per-launch medians (ms) | Median of launches | Worst single stall |
+|---|---|---|---|
+| Current pipeline (engine on, `engine: true`) | 37.5, 37.5, 36.7, 37.4, 37.2 | **37.4** | 43.6 |
+| Plain Uniwind (`engine: false`) | 63.5, 61.3, 62.1, 64.7, 64.1 | **63.5** | 67.9 |
+
+Does not reproduce the earlier tovtam run (64.8 -> 60.3 ms); the cause of the larger gain is not identified (different package build,
+later fixes). Metric is JS stall, not time to pixels. `medianBusyMs` (about 352 ms) includes the wait window and is not informative.
