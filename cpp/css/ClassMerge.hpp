@@ -203,6 +203,8 @@ private:
     uint32_t n;
   };
 
+  static constexpr uint64_t kSeed = 1469598103934665603ULL;
+
   static bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
   static size_t toInt(std::string_view s) {
@@ -218,9 +220,22 @@ private:
   }
 
   static uint64_t fnv(const char* p, size_t n, uint64_t h = 1469598103934665603ULL) {
-    for (size_t i = 0; i < n; i++) {
-      h ^= static_cast<unsigned char>(p[i]);
-      h *= 1099511628211ULL;
+    constexpr uint64_t M = 0x9E3779B97F4A7C15ULL;
+    size_t i = 0;
+
+    for (; i + 8 <= n; i += 8) {
+      uint64_t w;
+      std::memcpy(&w, p + i, 8);
+      h = (h ^ w) * M;
+      h ^= h >> 29;
+    }
+
+    uint64_t tail = 0;
+
+    if (i < n) {
+      std::memcpy(&tail, p + i, n - i);
+      h = (h ^ tail ^ (static_cast<uint64_t>(n - i) << 56)) * M;
+      h ^= h >> 29;
     }
 
     return h;
@@ -246,6 +261,18 @@ private:
 
   // modifiers sorted like tailwind-merge (arbitrary variants stay in place as barriers), important marker either side
   bool parse(const char* p, size_t n, Tok& out) const {
+    if (!std::memchr(p, ':', n) && p[0] != '!' && p[n - 1] != '!') {
+      const int g0 = find(p, n);
+
+      if (g0 == -2) {
+        return false;
+      }
+
+      out = Tok{kSeed, g0, p, static_cast<uint32_t>(n)};
+
+      return true;
+    }
+
     std::string_view parts[16];
     int np = 0, depth = 0;
     size_t start = 0;
@@ -291,7 +318,7 @@ private:
       }
     }
 
-    uint64_t h = 1469598103934665603ULL;
+    uint64_t h = kSeed;
 
     for (int i = 0; i < np; i++) {
       h = fnv(parts[i].data(), parts[i].size(), h);
