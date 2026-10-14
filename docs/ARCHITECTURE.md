@@ -43,55 +43,29 @@ pipeline. The Opus memo (docs/STRATEGY.md) advised against building a compiler; 
 
 ## 3. ERD
 
-```mermaid
-erDiagram
-  THEME ||--o{ TOKEN_VALUE : defines
-  TOKEN ||--o{ TOKEN_VALUE : "has one per theme"
-  UTILITY_CLASS ||--o{ CLASS_DECL : expands_to
-  CLASS_DECL }o--|| TOKEN : "references (colour)"
-  CLASS_DECL }o--o| MODIFIER : "guarded by"
-  UTILITY_CLASS ||--|| COMPILED_STYLE : compiles_to
-  COMPILED_STYLE ||--o{ THEMED_PROP : has
-  COMPILED_STYLE ||--o{ STATE_VARIANT : has
-  THEMED_PROP }o--|| TOKEN : "value is token"
-  STATE_VARIANT }o--|| MODIFIER : "when"
-  STYLE_TABLE ||--o{ COMPILED_STYLE : contains
-  STYLE_TABLE ||--|| NATIVE_TABLE : "mirrored as"
-  BINDING }o--|| SHADOW_NODE_FAMILY : "targets"
-  BINDING }o--o{ COMPILED_STYLE : "applies"
-  BINDING }o--o{ THEMED_VALUE : "applies"
-  THEMED_VALUE }o--|| TOKEN : "token per theme"
-  PLATFORM ||--o{ CLASS_DECL : "filters"
+```
+ THEME (name PK, slot 0..N-1)
+   | 1                                  PLATFORM (name PK)
+   | has many                               | filters
+   v *                                      v *
+ TOKEN_VALUE (theme FK, token FK, value) <-- TOKEN (name PK, kind colour|number|string)
+                                              ^ 1            ^ 1             ^ 1
+                          references (colour) |   value is    |   token per   |
+                                              |   token       |   theme       |
+ UTILITY_CLASS (text PK) 1--* CLASS_DECL (property, value, modifier FK) *--0..1 MODIFIER
+   | 1 compiles to 1                                  (theme|platform|pressed|focused|
+   v                                                   disabled|breakpoint)
+ COMPILED_STYLE (classId PK, baseStyle json, layoutPerTheme)        ^ when
+   | 1--* THEMED_PROP (prop, token FK) ----------------> TOKEN        |
+   | 1--* STATE_VARIANT (modifier FK, style json) ------------------'
+   ^ * contains
+   | 1
+ STYLE_TABLE (buildId PK) 1--1 NATIVE_TABLE (buildId PK, colours: classId x slot)
 
-  THEME { string name PK
-          int slot "0..N-1 (runtime sized)" }
-  TOKEN { string name PK
-          string kind "colour|number|string" }
-  TOKEN_VALUE { string theme FK
-                string token FK
-                string value "resolved: colour as ARGB" }
-  UTILITY_CLASS { string text PK "bg-card, p-4, dark:bg-black" }
-  CLASS_DECL { string property
-              string value
-              string modifier FK }
-  MODIFIER { string kind "theme|platform|pressed|focused|disabled|breakpoint" }
-  COMPILED_STYLE { int classId PK
-                   json baseStyle "static RN style"
-                   bool layoutPerTheme "spike 4" }
-  THEMED_PROP { string prop "backgroundColor|borderColor|color|..."
-               string token FK }
-  STATE_VARIANT { string modifier FK
-                  json style }
-  STYLE_TABLE { string buildId PK
-               string source "global.css hash + candidates" }
-  NATIVE_TABLE { string buildId PK
-                bin colours "classId x slot" }
-  BINDING { int id PK
-            string mode "tagged|ref" }
-  THEMED_VALUE { string prop
-                 string kind "colour|colour[]|number" }
-  SHADOW_NODE_FAMILY { ptr family PK }
-  PLATFORM { string name PK }
+ BINDING (id PK, mode tagged|ref)
+   *--1 SHADOW_NODE_FAMILY (ptr PK)          "targets"
+   *--* COMPILED_STYLE                        "applies"
+   *--* THEMED_VALUE (prop, kind) *--1 TOKEN  "token per theme"
 ```
 
 Reading: a **utility class** compiles to one **compiled style** (static base style + themed props that point at **tokens** +
@@ -100,36 +74,40 @@ state variants). Tokens have one value per **theme**. A **binding** ties a shado
 
 ## 4. Pipeline
 
-```mermaid
-flowchart TD
-  subgraph BUILD["Build (Node, Metro transformer)"]
-    A[global.css + @theme + @variant] --> C[Compiler]
-    B[source scan: className candidates] --> C
-    C --> T1[(JS StyleTable: classId -> base, themed, states)]
-    C --> T2[(Native table: classId x slot -> value)]
-  end
-  subgraph XFORM["Transform (Babel/Metro)"]
-    S1["className='bg-card p-4'"] --> S2["__sw(classId)"]
-  end
-  subgraph RUN["Runtime (JS thread)"]
-    R1["cn()/clsx/twMerge/template strings"] --> R2[Resolver: pure, cached, no subscription]
-    R2 --> R3[classIds -> merged style + themed props]
-    R3 --> R4[Render host view with current-theme values + bind]
-  end
-  subgraph NATIVE["Native (C++)"]
-    N1[registry: family -> classIds + themed values]
-    N2[setTheme name -> slot]
-    N3[UIManagerCommitHook: walk, clone, recolour paragraph]
-    N4[mount, Yoga only if layout changed]
-    N2 --> N3 --> N4
-    N1 --> N3
-  end
-  T1 --> R3
-  T2 --> N1
-  S2 --> R3
-  R4 -->|"bind (tag prop or ref)"| N1
-  UI[app: setTheme] --> N2
-  FALLBACK[unbindable view] -.-> R4
+```
+BUILD (Node, Metro transformer)
+  global.css + @theme + @variant --\
+                                    +--> Compiler --> JS StyleTable   (classId -> base, themed, states)
+  source scan: className candidates /              \-> Native table    (classId x slot -> value)
+
+TRANSFORM (Babel/Metro)
+  className="bg-card p-4"  ---->  __sw(classId)
+
+RUNTIME (JS thread)
+  cn() / clsx / twMerge / templates
+        |
+        v
+  Resolver (pure, cached, no subscription)
+        |
+        v
+  classIds -> merged style + themed props
+        |
+        v
+  render host view with current-theme values + bind (tag prop or ref)
+        |                                  . unbindable view -> fallback
+        v
+NATIVE (C++)
+  registry: family -> classIds + themed values
+        |
+  app: setTheme(name) -> slot
+        |
+        v
+  UIManagerCommitHook: walk, clone, recolour paragraph
+        |
+        v
+  mount (Yoga only if layout changed)
+
+  JS StyleTable feeds the resolver; Native table feeds the registry.
 ```
 
 | Stage | Input | Output | Owner / thread |
@@ -237,26 +215,22 @@ Findings that change the design:
 
 ### Pipeline (v2)
 
-```mermaid
-flowchart LR
-  subgraph B["build (Node, Rust libs)"]
-    A1[sources] --> S1[oxide Scanner]
-    G[global.css + shadewind preset] --> C1["tailwindcss compile().build()"]
-    S1 --> C1 --> L1[lightningcss visitor, no targets]
-    L1 --> K1[culori for leftovers]
-    K1 --> E1[emit]
-  end
-  E1 --> BIN[(binary table: classId x slot -> ARGB)]
-  E1 --> JSM[(JS module: classIds, base styles)]
-  subgraph R["runtime"]
-    JSM --> RES[resolver cn/clsx/twMerge, pure + cached]
-    RES -->|packed ids| BIND[bind(ref)]
-    BIN -->|mmap| REG[C++ registry: SIMD family index]
-    BIND --> REG
-    SW[setTheme] --> HOOK[commit hook: pointer-diff walk]
-    REG --> HOOK --> CLONE[clone + paragraph recolour] --> MOUNT[mount]
-    SW -.iOS only.-> TRAIT[window.traitOverrides: dynamic UIColor]
-  end
+```
+BUILD (Node, Rust libs)
+  sources -> oxide Scanner --\
+  global.css + preset ------> tailwindcss compile().build()
+                                   -> lightningcss visitor (no targets)
+                                   -> culori for leftovers
+                                   -> emit
+                                        |-> binary table: classId x slot -> ARGB
+                                        '-> JS module: classIds, base styles
+
+RUNTIME
+  JS module -> resolver cn/clsx/twMerge (pure, cached) -> packed ids -> bind(ref) --\
+  binary table --(mmap)--> C++ registry (SIMD family index) <-----------------------'
+  setTheme --> commit hook (pointer-diff walk) <-- registry
+        -> clone + paragraph recolour -> mount
+  setTheme -.iOS only.-> window.traitOverrides: dynamic UIColor
 ```
 
 ### Not in this pipeline (decided)
