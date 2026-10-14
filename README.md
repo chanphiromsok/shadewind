@@ -82,6 +82,55 @@ engine off and leaves plain Uniwind.
 
 Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIWIND_INTEGRATION.md](docs/UNIWIND_INTEGRATION.md).
 
+## Architecture
+
+Shadewind has two parts: a **native engine** (shipped) and an **own style compiler** (design stage, not built yet).
+
+```mermaid
+flowchart LR
+  subgraph build["build time (Node, Rust libs)  [planned]"]
+    SRC[sources] --> SCAN[oxide scanner]
+    CSS[global.css + preset] --> TW["tailwind compile"]
+    SCAN --> TW --> LCSS[lightningcss visitor] --> EMIT[emit tables]
+    EMIT --> BIN[(binary native table)]
+    EMIT --> JST[(JS module: class ids)]
+    AOT["Babel: className -> ids (AOT)"] --> JST
+  end
+  subgraph js["JS thread"]
+    RENDER[React render] --> BIND["bind(ref) / ids"]
+    SET["setTheme(name)"]
+  end
+  subgraph native["native (C++, Nitro raw JSI)  [shipped]"]
+    BIND --> REG[registry: family -> per-theme props]
+    SET --> HOOK["UIManagerCommitHook"]
+    BIN -.-> REG
+    REG --> HOOK --> CLONE["clone nodes, paragraph recolour (no layout)"] --> MOUNT[mount]
+  end
+```
+
+| Layer | State | Where |
+|---|---|---|
+| Commit hook: per-theme prop slots, text recolour without a layout pass, background commit, Android `rawProps` | shipped, iOS + Android | `cpp/ThemeHook.hpp`, `cpp/HybridShadewind.cpp` |
+| Public API (`configure`, `setTheme`, `useThemed`, `useThemedProps`, `ThemedView`) | shipped | `src/index.tsx`, `docs/API.md` |
+| Uniwind adapter (`shadewind/uniwind`, `shadewind/metro`) | shipped, bridge to be retired | `src/uniwind`, `metro.cjs` |
+| Own Tailwind compiler (scan, compile, lower, binary table) | build chain measured on a real app (about 100 ms cold), compiler not built | `docs/ARCHITECTURE.md` sections 8-9, `spikes/compiler-spike` |
+| AOT `className` resolver | design | `docs/ARCHITECTURE.md` section 10 |
+| SIMD family index | experiment, 2-4x per lookup on large trees, not wired in | `cpp/experiments` |
+
+Rules the design holds to:
+
+1. No React state or subscriptions on the theme-apply path (`useTheme()` / `subscribe()` are an opt-in exception for UI the engine does not own).
+2. Every themed value has a native route.
+3. A view always renders correctly at mount; an unbound view is stale after a switch, with a dev warning.
+4. JS never sits on the switch path: `setTheme` is a native call.
+
+Measured, honestly: on a 2003-view benchmark the engine is about 100x faster than Uniwind. On a real app (tovtam, Release, iOS
+simulator) the gain is small today (about one frame, no stale frames on returning to a hidden tab) because most remaining cost is
+React consumers of theme values; see `docs/TOVTAM_PORT.md`, `docs/STRATEGY.md`, `docs/RENDER_CORE.md`.
+
+Docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [RENDER_CORE](docs/RENDER_CORE.md), [STRATEGY](docs/STRATEGY.md), [API](docs/API.md),
+[DESIGN](docs/DESIGN.md), [BENCHMARK](docs/BENCHMARK.md), [TOVTAM_PORT](docs/TOVTAM_PORT.md).
+
 ## Known limits
 
 - Up to 6 themes; every theme must define every key a view registers.
