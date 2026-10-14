@@ -75,3 +75,11 @@ backgrounds follow the theme in both directions.
 - The engine's `hook` strategy commits synchronously, so the number includes the whole commit. The text redraw on the main thread
   after the switch is not part of this metric for any library (the same holds for Uniwind and Pro).
 - Three warm launches per library, one sweep (their method uses two sweeps, order A and reversed B). Simulator only, iOS only.
+
+### Android: run-to-run machine variance (2026-10-14)
+
+After the review fixes the same screen read 40-55 ms on the emulator instead of 7.0-7.8 ms. An A/B on the same emulator, installing
+the APK from before and after the fixes alternately, gave old 48.3 / 41.8 / 52.4 / 46.4 ms and new 46.8 / 52.0 / 55.3 / 46.2 ms:
+the fixes cost nothing measurable, the emulator (or the host) was simply in a slow state (host load 5+, freshly rebooted AVD, three
+iOS simulators booted). Android numbers need a quiet host and a warmed emulator, and should always be reported next to a same-run
+baseline (free Uniwind) rather than as absolute milliseconds.
