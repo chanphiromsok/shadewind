@@ -43,7 +43,7 @@ double runLoopNowMs() {
 std::string reasonsText() {
   std::string text;
 
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 9; ++i) {
     text += (i ? "," : "") + std::to_string(gReasons[i].exchange(0));
   }
 
@@ -123,26 +123,28 @@ double ms(Clock::time_point from, Clock::time_point to) {
   return std::chrono::duration<double, std::milli>(to - from).count();
 }
 
-// How an update reaches the screen. All of them also merge into nativeProps_DEPRECATED first,
-// so any later React clone of the node keeps the new values.
+// How an update reaches the screen. The two hook strategies keep the theme in the commit hook (no nativeProps overlay);
+// the others merge into nativeProps_DEPRECATED first, so a later React clone of the node keeps the new values (baselines).
 enum class Strategy {
-  HookAsync, // 'hook', but the commit runs on a background thread so the JS thread is free right away
-  Hook,   // typed props applied inside a commit hook (default): no overlay, no JS fiber walk
+  HookAsync, // default: typed props applied inside a commit hook, commit on a background thread (JS thread free right away)
+  Hook,   // the same with a synchronous commit
   Stock,  // UIManager::updateShadowTree (whole-tree walk, linear de-duplication)
-  Fast,   // one ShadowTree::commit + cloneMultiple: only the touched nodes and their ancestors
+  Fast,   // one ShadowTree::commit + cloneMultiple: only the touched nodes and their ancestors (internal: flushPending)
   FastAsync, // same, but the UI thread mounts it later instead of the caller waiting for it
   Direct, // update the native views right away, shadow tree is synced by the next React clone
   Both,   // direct update now + single-pass commit to keep the shadow tree exact
 };
 
-Strategy parseStrategy(const std::string& name) {
-  if (name == "hook") return Strategy::Hook;
-  if (name == "hookAsync") return Strategy::HookAsync;
-  if (name == "stock") return Strategy::Stock;
-  if (name == "fastAsync") return Strategy::FastAsync;
-  if (name == "direct") return Strategy::Direct;
-  if (name == "both") return Strategy::Both;
-  return Strategy::HookAsync;
+bool parseStrategy(const std::string& name, Strategy& out) {
+  if (name == "hook") out = Strategy::Hook;
+  else if (name == "hookAsync") out = Strategy::HookAsync;
+  else if (name == "stock") out = Strategy::Stock;
+  else if (name == "fastAsync") out = Strategy::FastAsync;
+  else if (name == "direct") out = Strategy::Direct;
+  else if (name == "both") out = Strategy::Both;
+  else return false;
+
+  return true;
 }
 
 struct ApplyTimings {
@@ -675,7 +677,15 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   }
 
   auto name = args[0].asString(rt).utf8(rt);
-  auto strategy = count > 1 && args[1].isString() ? parseStrategy(args[1].asString(rt).utf8(rt)) : Strategy::HookAsync;
+  Strategy strategy = Strategy::HookAsync;
+
+  if (count > 1 && args[1].isString()) {
+    const auto requested = args[1].asString(rt).utf8(rt);
+
+    if (!parseStrategy(requested, strategy)) {
+      throw jsi::JSError(rt, "Shadewind.setTheme: unknown strategy '" + requested + "' (hook, hookAsync, stock, fastAsync, direct, both)");
+    }
+  }
 
   {
     std::lock_guard<std::mutex> lock(_themeMutex);

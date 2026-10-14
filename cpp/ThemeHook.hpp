@@ -59,10 +59,10 @@ struct YogaAccess : YogaLayoutableShadowNode {
 struct RecoloredParagraph {
   State::Shared state;
   bool keepClean = false;
-  int reason = 0; // 0 ok, 1 children replaced, 2 no state, 3 not a Paragraph, 4 not Yoga/dirty, 5 state type mismatch, 6 no fragments, 7 no props
+  int reason = 0; // 0 ok, 1 children replaced, 2 no state, 3 not a Paragraph, 4 not Yoga/dirty, 5 state type mismatch, 6 no fragments, 7 no props, 8 no fragment carried the old colour
 };
 
-inline std::atomic<int> gReasons[8];
+inline std::atomic<int> gReasons[9];
 
 inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const SharedColor& color, bool childrenReplaced) {
   RecoloredParagraph out;
@@ -109,12 +109,20 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
     return out;
   }
 
-  // only the fragments that carry the paragraph's own colour (a nested <Text> with its own colour keeps it)
-  const SharedColor previous = sourceProps->textAttributes.foregroundColor;
+  // only the fragments that carry the paragraph's own colour (a nested <Text> with its own colour keeps it). A <Text> without a
+  // colour of its own renders with the default text attributes, so that is the colour its fragments hold.
+  SharedColor previous = sourceProps->textAttributes.foregroundColor;
+
+  if (!previous) {
+    previous = TextAttributes::defaultTextAttributes().foregroundColor;
+  }
+
+  bool changed = false;
 
   for (auto& fragment : data.attributedString.getFragments()) {
     if (fragment.textAttributes.foregroundColor == previous) {
       fragment.textAttributes.foregroundColor = color;
+      changed = true;
     }
   }
 
@@ -123,6 +131,13 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
   if (base.foregroundColor == previous) {
     base.foregroundColor = color;
     data.attributedString.setBaseTextAttributes(base);
+    changed = true;
+  }
+
+  if (!changed) {
+    // nothing carried the old colour: do not claim the state is rebuilt, let layout produce it
+    out.reason = 8;
+    return out;
   }
 
   out.state = source.getComponentDescriptor().createState(source.getFamily(), std::make_shared<const ParagraphState>(std::move(data)));
@@ -581,6 +596,11 @@ private:
 
     auto entryIt = _entries.find(&node.getFamily());
     Entry* entry = entryIt != _entries.end() ? &entryIt->second : nullptr;
+
+    // a family address can be reused by a new view while the old entry has not been purged yet
+    if (entry && entry->family.expired()) {
+      entry = nullptr;
+    }
     const Slot* target = entry ? &entry->slots[walk.theme] : nullptr;
 
     if (target && !target->delta) {
@@ -717,7 +737,7 @@ private:
           continue;
         }
 
-        componentName = entry->second.componentName;
+        componentName = live->getComponentName(); // not the entry's: the live node is what gets cloned
         surface = entry->second.surface;
 
         for (ThemeId id = 0; id < kMaxThemes; id++) {
@@ -800,7 +820,7 @@ private:
       auto props = copyProps<ViewShadowNodeProps>(context, source);
 
       applyViewFields(*props, delta);
-      applyRawFields(*props, delta);
+      applyRawFields(*props, source, delta);
 
       return props;
     }
@@ -809,7 +829,7 @@ private:
       auto props = copyProps<ParagraphProps>(context, source);
 
       applyViewFields(*props, delta);
-      applyRawFields(*props, delta);
+      applyRawFields(*props, source, delta);
 
       if (delta.text) {
         props->textAttributes.foregroundColor = *delta.text;
@@ -834,17 +854,18 @@ private:
 
   // Android's mounting layer sends `Props::rawProps` (a folly::dynamic that React Native accumulates from every raw props update)
   // to the Java view, not the typed fields: a typed-only change never reaches the screen there. Keep the dynamic in step.
-  static void applyRawFields(Props& props, const TypedDelta& delta) {
+  static void applyRawFields(Props& props, const Props& source, const TypedDelta& delta) {
 #ifdef RN_SERIALIZABLE_STATE
-    if (delta.raw.isObject()) {
-      if (!props.rawProps.isObject()) {
-        props.rawProps = folly::dynamic::object();
-      }
+    // the new props are built from an empty RawProps, so their dynamic starts empty: carry over what React last sent (otherwise
+    // React's own later changes on a themed view, e.g. borderWidth or accessibilityLabel, would not reach the Android view)
+    props.rawProps = source.rawProps.isObject() ? source.rawProps : folly::dynamic::object();
 
+    if (delta.raw.isObject()) {
       props.rawProps.update(delta.raw);
     }
 #else
     (void)props;
+    (void)source;
     (void)delta;
 #endif
   }

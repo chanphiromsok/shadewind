@@ -3,7 +3,8 @@ const { withUniwindConfig } = require('uniwind/metro')
 const path = require('node:path')
 
 const workspaceRoot = path.resolve(__dirname, '../../')
-const shadewindRoot = '/Users/phirom/Desktop/uniwind-shadow'
+// root of the shadewind checkout (the symlinked package): SHADEWIND_ROOT, or the repository this spike lives in
+const shadewindRoot = process.env.SHADEWIND_ROOT ?? path.resolve(__dirname, '../..')
 
 const defaultConfig = getDefaultConfig(__dirname)
 const config = {

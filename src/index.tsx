@@ -63,24 +63,21 @@ export type ThemeTimings = {
 };
 
 /**
- * How a theme change reaches the screen.
- * - 'hookAsync' (default): the commit runs on a background thread, so the JS thread is free right away (about 0.05 ms for
- *   2000 views); the screen updates about 3 ms later.
- * - 'hook': typed props applied inside a commit hook, so every commit (React's too) keeps the theme.
- *   No nativeProps overlay and no JS fiber walk.
- * - 'hookAsync': like 'hook' but the commit runs on a background thread (JS thread is free right away).
- *   scan/clone/commit/direct in the timings then belong to the previous call.
- * - 'stock': RN's UIManager::updateShadowTree (whole-tree walk)
- * - 'fast': one single-pass shadow-tree commit that clones only the touched nodes
- * - 'fastAsync': like 'fast' but the UI thread mounts it later instead of the caller waiting
- * - 'direct': update native views immediately, shadow tree catches up on the next React clone
- * - 'both': direct update now + single-pass commit
+ * How a theme change reaches the screen. Unknown names throw.
+ * - 'hookAsync' (default): typed props are applied inside a commit hook (so every commit, React's too, keeps the theme) and the
+ *   commit runs on a background thread: the JS thread is free right away (about 0.05 ms for 2000 views), the screen updates a few
+ *   ms later. On Android the commit is currently synchronous.
+ * - 'hook': the same, but the commit runs synchronously on the JS thread (about 4-8 ms for 2000 views).
+ * - 'stock': React Native's UIManager::updateShadowTree (whole-tree walk). Benchmark baseline.
+ * - 'fastAsync': one single-pass shadow-tree commit that clones only the touched nodes; the UI thread mounts it later.
+ * - 'direct': update the native views immediately, the shadow tree catches up on the next React clone. Benchmark baseline.
+ * - 'both': direct update now plus a single-pass commit. Benchmark baseline.
+ * The last four are measurement baselines and are not supported for production use.
  */
 export type ThemeStrategy =
   | 'hook'
   | 'hookAsync'
   | 'stock'
-  | 'fast'
   | 'fastAsync'
   | 'direct'
   | 'both';
@@ -89,7 +86,7 @@ export type ThemeStrategy =
 export type ThemedStyle = {
   backgroundColor?: ColorValue;
   borderColor?: ColorValue;
-  /** Text colour (Text only). Changing it makes React Native re-measure the paragraph. */
+  /** Text colour (Text only). The engine rebuilds the paragraph state itself, so no layout pass is needed. */
   color?: ColorValue;
   opacity?: number;
 };
