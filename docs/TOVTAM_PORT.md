@@ -70,3 +70,38 @@ Same scenario, same screen, 6 `Uniwind.setTheme` calls in one tick (Debug build,
 Still re-rendering: `Text` x68 (state/pressed variants and parent renders), `TouchableOpacity` x18, `Animated(View)` x6,
 and `Engine` x39 where the view was not handed to the engine. Single runs in a Debug build: treat as indicative, not a
 benchmark. Release build and Android on tovtam are still open.
+
+## Round 3: Release build on the simulator (2026-10-14)
+
+Release builds of the tovtam copy, in-app measurements (iPhone 17 Pro simulator, 12 `Uniwind.setTheme` switches, single run each):
+
+| Metric | Plain Uniwind | With Shadewind |
+|---|---|---|
+| Median time to the 2nd frame (2 x rAF, floor about 33 ms) | 49.5 ms | 33.5 ms |
+| Max | 83.9 ms | 82.8 ms |
+| Longest JS-thread stall after a switch (0 ms timer chain), median | 64.8 ms | 60.3 ms |
+| `setTheme` call itself | 1.04 ms | 0.69 ms |
+
+Reading: a small gain in this app (about one frame by the rAF metric, about 7 % by the stall metric). The stall stays about 60 ms
+in both builds, so most of it is not the theme work the engine removes (parents such as `ExploreItem`, `Animated`,
+`TouchableOpacity`, `Text` with state variants, and a constant per-switch cost). This is nowhere near the benchmark's 100x.
+
+### Stale frames when returning to a tab (user report), 30 fps screen recording
+
+Flow: Account tab -> Theme sheet -> Dark Mode -> back to Explore (hidden while the theme changed).
+
+| Build | Result |
+|---|---|
+| Plain Uniwind | the header and story chips of Explore show the old (light) theme for about 5 frames at 15 fps (about 0.3 s), then flip |
+| With Shadewind | Explore appears in the new theme from the first frame, no stale frames |
+
+The engine updates registered views inside the commit even when their subtree is frozen, so handled views no longer lag the
+unfreeze. Views that stay on the React path (not handled) can still flash. Single run each; frame sheets were checked by eye.
+
+### Other issues found in this round
+
+- The Pressable/TouchableOpacity adapters registered nothing new in this app (their classNames do not differ per theme),
+  they are kept for apps that use theme colours on them.
+- The Debug profile over-reports re-renders: Uniwind subscribes every styled component in `__DEV__`.
+- Measurement tooling: a 0 ms timer chain is clamped by the runtime, so the "busy" total was not informative; the longest
+  stall is the usable number.

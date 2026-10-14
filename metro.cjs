@@ -17,7 +17,7 @@ const PREFIX = 'uniwind-internal/';
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'];
 // files of Uniwind replaced by the engine-aware versions: resolved file path -> `shadewind/uniwind/<name>`
 const REPLACED = [
-  [/[\\/]uniwind[\\/]src[\\/]components[\\/]native[\\/](View|Text)\.tsx$/, (match) => match[1]],
+  [/[\\/]uniwind[\\/]src[\\/]components[\\/]native[\\/](View|Text|Pressable|TouchableOpacity)\.tsx$/, (match) => match[1]],
   [/[\\/]uniwind[\\/]src[\\/]hoc[\\/]withUniwind\.native\.tsx$/, () => 'withUniwind']
 ];
 
