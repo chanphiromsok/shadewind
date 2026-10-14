@@ -117,6 +117,7 @@ flowchart LR
 | Own Tailwind compiler (scan, compile, lower, binary table) | build chain measured on a real app (about 100 ms cold) and reviewed (first extractor was wrong, fixed), compiler not built | `docs/ARCHITECTURE.md` sections 8-9, `spikes/compiler-spike` |
 | AOT `className` resolver | design | `docs/ARCHITECTURE.md` section 10 |
 | SIMD family index | experiment, 2-4x per lookup on large trees, not wired in | `cpp/experiments` |
+| Native CSS colour parser, native `cn` merge, `shadewind-cn-table` | shipped (iOS verified, Android build not run) | `cpp/css`, `bin/cn-table.mjs`, `docs/ARCHITECTURE.md` section 14 |
 
 Rules the design holds to:
 

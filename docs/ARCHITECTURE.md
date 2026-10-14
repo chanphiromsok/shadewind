@@ -432,3 +432,46 @@ What would make it faster still, in order of expected value (none measured yet):
    every call; SIMD or a perfect hash for the token lookup.
 4. **JS-side memo for repeated inputs** (React re-renders pass identical strings): a `Map` hit in Hermes is likely cheaper than a
    crossing; to be measured against the crossing floor, not assumed.
+
+## 14. Pipeline v3 (2026-10-14): what is shipped vs planned
+
+```mermaid
+flowchart LR
+  subgraph B["build (Node, Rust libs)  [planned]"]
+    SRC[sources] --> SCAN[oxide Scanner] --> TW[tailwind compile] --> LC[lightningcss visitor] --> EM[emit]
+    SRC -.-> CNT["shadewind-cn-table [shipped]"]
+    SRC -.-> AOT["className -> ids (AOT) [design]"]
+  end
+  EM --> BIN[(binary class table)]
+  CNT --> TBL[(cn table .tsv)]
+  subgraph J["JS thread"]
+    CN["cn(...) [shipped]"] -->|"__swCn, ~870 ns"| MERGE
+    BIND["useThemed / bind(ref)"]
+    SET["setTheme(name)"]
+  end
+  subgraph N["native (C++, Nitro raw JSI) [shipped]"]
+    TBL --> MERGE["ClassMerge (oracle-derived)"]
+    COL["ColorParser: CSS colour -> ARGB"] --> REG
+    BIND --> COL
+    BIN -.planned.-> REG["registry: family -> per-theme slots"]
+    SET --> HOOK["UIManagerCommitHook"]
+    REG --> HOOK --> CLONE["clone + paragraph recolour (no layout)"] --> MOUNT[mount]
+  end
+```
+
+| Stage | State |
+|---|---|
+| Commit hook, per-theme slots, text recolour without layout | shipped (iOS + Android) |
+| Native CSS colour parser (3,209-case parity vs culori) | shipped, iOS verified |
+| Native `cn` merge, byte-equal to `twMerge(clsx())` on 5,603 cases; public `cn` / `configureCn` | shipped, iOS Release verified |
+| `shadewind-cn-table` CLI | shipped |
+| Own Tailwind compile to binary table | build chain measured, compiler not built |
+| AOT `className` -> ids (removes the JSI crossing for static sites) | design |
+| SIMD family index, pointer-diff walk, batched merges | experiment / unmeasured |
+
+Open: Android build of ColorParser, ClassMerge and `__swCn` has not been run; the Uniwind bridge is still shipped and its
+retirement is undecided.
+
+Observation from the Uniwind Pro demo (shipped binary, strings only, not profiled): it offers Circle / Blur / Fade / None
+transitions on theme change, which suggests the switch is covered by an overlay animation rather than made cheap. Our
+engine's goal is to make the switch itself cheap so no cover is needed; this is unmeasured on that app.
