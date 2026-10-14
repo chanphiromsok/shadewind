@@ -1,4 +1,4 @@
-#import "UniwindShadowNative.hpp"
+#import "ShadewindNative.hpp"
 
 #import <React/RCTConversions.h>
 #import <React/RCTViewComponentView.h>
@@ -7,7 +7,7 @@
 #include <chrono>
 #include <unordered_map>
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 namespace {
 
@@ -87,4 +87,4 @@ std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::r
   return result;
 }
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind

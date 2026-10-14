@@ -27,7 +27,7 @@ layout/measure/state. Decide that separately.
 
 ## Status
 v0 scaffolded with create-react-native-library (nitro-module) and a C++ core in `cpp/`. Verified so far: nitrogen codegen OK, TypeScript typecheck OK, lint OK (0 errors), C++ core
-(`cpp/HybridUniwindShadow.cpp` + generated spec) passes a clang `-fsyntax-only` compile against RN 0.86.3 + Nitro 0.37.1 headers.
+(`cpp/HybridShadewind.cpp` + generated spec) passes a clang `-fsyntax-only` compile against RN 0.86.3 + Nitro 0.37.1 headers.
 NOT verified: linking, running on a device, whether theme props survive React re-renders, performance (nothing measured).
 
 ## v0 limits
@@ -120,7 +120,7 @@ Measured on the same build (Release, iPhone 17 Pro simulator, 1500 views, median
 
 - `hookAsync`: `setTheme` bumps the hook's epoch and dispatches the near-empty commit to a background queue; the hook does
   the scan and clone there. ShadowTree::commit is thread-safe; React's own commits still pass through the hook.
-- `native` (iOS only, ios/UniwindShadowNative.mm): walks the window hierarchy once on the main thread and sets
+- `native` (iOS only, ios/ShadewindNative.mm): walks the window hierarchy once on the main thread and sets
   `backgroundColor` on views found by `UIView.tag` (Fabric stores the React tag there), then the same background commit
   keeps the shadow tree exact. It makes the colour appear sooner (4.4 ms of main-thread work instead of waiting for the
   commit + mount) but does NOT reduce main-thread load, so the frame gap is unchanged. The "sooner" part is inferred
@@ -268,7 +268,7 @@ flicker for components we own, but not the clone/mount cost, so it would not cha
 
 ## Build 41 (final): host load was the dominant noise, plus the `prepare()` hint
 
-Build 41 = build 40 + `_lastRoot` (the hook keeps the last committed tree) + `UniwindShadowEngine.prepare()` (a read-only warm-up pass the
+Build 41 = build 40 + `_lastRoot` (the hook keeps the last committed tree) + `ShadewindEngine.prepare()` (a read-only warm-up pass the
 app may call from `onPressIn`; nothing in the unhinted runs below calls it).
 
 Host load matters a lot. `uptime` at the start of the build 41 runs showed load averages 23 / 46 / 38 (Xcode builds and other apps on the
@@ -381,7 +381,7 @@ Manual run through the Inspect probe on the frozen Home (freezeOnBlur):
 
 Status: rapid toggles on the new default path are not correct yet; the earlier "rapid toggles pass" result came from the old default (`hookAsync`). Not investigated further: whether the stale native colour comes from a superseded native pass finishing after the newer one (needs a generation counter on the pass) or from the Inspect probe reading mid-commit. Android, more than two themes and the text/border colour path remain untested.
 
-Reading `setTheme` (cpp/HybridUniwindShadow.cpp) and `applyBackgroundsOnMain` (ios/UniwindShadowNative.mm) for the rapid-toggle failure: the native passes are FIFO on the main queue and capture their colours at call time, so they cannot reorder among themselves. The commits, however, run on a concurrent global queue (`QOS_CLASS_USER_INTERACTIVE`), and each reads the hook's theme when it executes, then queues its mount on the main queue. A commit that read `light` can mount after the last `dark` native pass and restore light UIKit backgrounds, with no later write fixing them if the final commit's diff against the shadow tree is empty. This is a hypothesis, not confirmed. Next step: log (theme at commit, theme at mount) per commit during a rapid dark/light/dark, or serialise the commits on one serial queue and re-run the three-toggle check.
+Reading `setTheme` (cpp/HybridShadewind.cpp) and `applyBackgroundsOnMain` (ios/ShadewindNative.mm) for the rapid-toggle failure: the native passes are FIFO on the main queue and capture their colours at call time, so they cannot reorder among themselves. The commits, however, run on a concurrent global queue (`QOS_CLASS_USER_INTERACTIVE`), and each reads the hook's theme when it executes, then queues its mount on the main queue. A commit that read `light` can mount after the last `dark` native pass and restore light UIKit backgrounds, with no later write fixing them if the final commit's diff against the shadow tree is empty. This is a hypothesis, not confirmed. Next step: log (theme at commit, theme at mount) per commit during a rapid dark/light/dark, or serialise the commits on one serial queue and re-run the three-toggle check.
 
 ## Port of the uniwind-benchmarks theme scenario (example/src/TheirBench.tsx)
 
@@ -425,7 +425,7 @@ overrides the benchmark colour (screen showed orange items). Treat as indicative
 
 ### Correction (Opus review of the rapid-toggle claim): the "stale native pass" hypothesis above is withdrawn
 
-- `inspect()`'s `native=` / `nativeOK` reads `family->nativeProps_DEPRECATED["backgroundColor"]` (cpp/HybridUniwindShadow.cpp:483-490),
+- `inspect()`'s `native=` / `nativeOK` reads `family->nativeProps_DEPRECATED["backgroundColor"]` (cpp/HybridShadewind.cpp:483-490),
   RN's props overlay, NOT the UIView. `applyBackgroundsOnMain` never touches it. Under `hook`/`hookAsync`/`native` nothing in
   this library refreshes the overlay, so `nativeOK` can read stale light values at any toggle speed. The `nativeOK=0` half of the
   "failure" is a probe artifact until UIKit is read directly.
@@ -467,7 +467,7 @@ engine `hook` 8.6 ms and free Uniwind 91.6-102.6 ms on the same machine and metr
 
 ## Deep dive: where the 8.6 ms of `hook` goes (Instruments, build 51, 2003-view TheirBench, 5 runs x 10 switches)
 
-JS thread, 1151 samples, of which `HybridUniwindShadow::setTheme` = 398 (about 35%, the rest is timers / React / GC):
+JS thread, 1151 samples, of which `HybridShadewind::setTheme` = 398 (about 35%, the rest is timers / React / GC):
 
 | inside setTheme -> commitTick -> ShadowTree::commit (400 samples) | samples | share |
 |---|---|---|

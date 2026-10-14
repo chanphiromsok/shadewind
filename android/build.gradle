@@ -1,5 +1,5 @@
 buildscript {
-  ext.UniwindShadow = [
+  ext.Shadewind = [
     kotlinVersion: "2.0.21",
     minSdkVersion: 24,
     compileSdkVersion: 36
@@ -10,7 +10,7 @@ buildscript {
       return rootProject.ext.get(prop)
     }
 
-    return UniwindShadow[prop]
+    return Shadewind[prop]
   }
 
   repositories {
@@ -36,12 +36,12 @@ if (project.extensions.findByName("kotlin") == null) {
   apply plugin: "kotlin-android"
 }
 
-apply from: '../nitrogen/generated/android/uniwindshadow+autolinking.gradle'
+apply from: '../nitrogen/generated/android/shadewind+autolinking.gradle'
 
 // (no `com.facebook.react` plugin: this module has no codegen spec; applying it generated duplicate classes of other libraries)
 
 android {
-  namespace "com.margelo.nitro.uniwindshadow"
+  namespace "com.margelo.nitro.shadewind"
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
 

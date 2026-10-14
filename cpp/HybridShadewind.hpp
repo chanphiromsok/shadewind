@@ -1,18 +1,18 @@
 #pragma once
 
-#include "HybridUniwindShadowSpec.hpp"
+#include "HybridShadewindSpec.hpp"
 #include "ThemeHook.hpp"
 #include "ThemeRegistry.hpp"
 #include <jsi/jsi.h>
 #include <string>
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 using namespace facebook;
 
-class HybridUniwindShadow : public HybridUniwindShadowSpec {
+class HybridShadewind : public HybridShadewindSpec {
 public:
-  HybridUniwindShadow() : HybridObject(TAG) {}
+  HybridShadewind() : HybridObject(TAG) {}
 
   // typed (generated spec)
   std::string getTheme() override;
@@ -41,4 +41,4 @@ private:
   std::mutex _themeMutex;
 };
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind

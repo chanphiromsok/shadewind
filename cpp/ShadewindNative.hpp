@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 // Debug (iOS only): what UIKit really holds. For each tag, the UIView's backgroundColor
 // and the colour its layer was painted with (set by RCTViewComponentView when the mount finalizes). -1 = view not found or
@@ -20,4 +20,4 @@ struct UIKitBackground {
 
 std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::react::Tag>& tags);
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind

@@ -1,4 +1,4 @@
-#include "HybridUniwindShadow.hpp"
+#include "HybridShadewind.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
@@ -17,13 +17,13 @@
 #include <atomic>
 #include <type_traits>
 #include <unordered_set>
-#include "UniwindShadowNative.hpp"
+#include "ShadewindNative.hpp"
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 using namespace facebook::react;
 
@@ -198,7 +198,7 @@ void commitSingleSurfacePass(UIManager& ui, const std::vector<Update>& updates, 
 } // namespace
 
 // Builds the per-theme props of newly registered views on a background thread (see ThemeHook::prewarm).
-void HybridUniwindShadow::schedulePrewarm() {
+void HybridShadewind::schedulePrewarm() {
 #if defined(__APPLE__)
   auto* task = new std::function<void()>([hook = _hook]() { hook->prewarm(); });
 
@@ -296,38 +296,38 @@ ApplyTimings applyUpdates(UIManager& ui, std::vector<Update>& updates, Strategy 
 
 } // namespace
 
-std::string HybridUniwindShadow::getTheme() {
+std::string HybridShadewind::getTheme() {
   std::lock_guard<std::mutex> lock(_themeMutex);
   return _theme;
 }
 
-void HybridUniwindShadow::loadHybridMethods() {
-  HybridUniwindShadowSpec::loadHybridMethods();
+void HybridShadewind::loadHybridMethods() {
+  HybridShadewindSpec::loadHybridMethods();
 
   registerHybrids(this, [](Prototype& prototype) {
-    prototype.registerRawHybridMethod("register", 2, &HybridUniwindShadow::registerNode);
-    prototype.registerRawHybridMethod("unregister", 1, &HybridUniwindShadow::unregisterNode);
-    prototype.registerRawHybridMethod("refreshReactNodes", 1, &HybridUniwindShadow::refreshReactNodes);
-    prototype.registerRawHybridMethod("inspect", 0, &HybridUniwindShadow::inspect);
-    prototype.registerRawHybridMethod("flushPending", 0, &HybridUniwindShadow::flushPending);
-    prototype.registerRawHybridMethod("prepare", 0, &HybridUniwindShadow::prepare);
-    prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridUniwindShadow::resetMainBusy);
-    prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridUniwindShadow::mainBusyMs);
-    prototype.registerRawHybridMethod("setTheme", 1, &HybridUniwindShadow::setTheme);
+    prototype.registerRawHybridMethod("register", 2, &HybridShadewind::registerNode);
+    prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
+    prototype.registerRawHybridMethod("refreshReactNodes", 1, &HybridShadewind::refreshReactNodes);
+    prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
+    prototype.registerRawHybridMethod("flushPending", 0, &HybridShadewind::flushPending);
+    prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
+    prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
+    prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
+    prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
   });
 }
 
 // register(shadowNode, { light: { backgroundColor: 4294967295 }, dark: { ... } })
 // Props must already be in the raw format React Native sends to native (e.g. processed colors).
-jsi::Value HybridUniwindShadow::registerNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 2 || !args[1].isObject()) {
-    throw jsi::JSError(rt, "UniwindShadow.register(node, propsByTheme) expects 2 arguments");
+    throw jsi::JSError(rt, "Shadewind.register(node, propsByTheme) expects 2 arguments");
   }
 
   auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, args[0]);
 
   if (!node) {
-    throw jsi::JSError(rt, "UniwindShadow.register: first argument is not a ShadowNode");
+    throw jsi::JSError(rt, "Shadewind.register: first argument is not a ShadowNode");
   }
 
   auto themes = args[1].asObject(rt);
@@ -365,7 +365,7 @@ jsi::Value HybridUniwindShadow::registerNode(jsi::Runtime& rt, const jsi::Value&
   return jsi::Value::undefined();
 }
 
-jsi::Value HybridUniwindShadow::unregisterNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+jsi::Value HybridShadewind::unregisterNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1) {
     return jsi::Value::undefined();
   }
@@ -383,7 +383,7 @@ jsi::Value HybridUniwindShadow::unregisterNode(jsi::Runtime& rt, const jsi::Valu
 // refreshReactNodes(nodes): repoint the JS wrappers React holds (fiber.stateNode.node) at the nodes of the committed tree.
 // React rebuilds its tree from those wrappers (un-hiding a frozen screen, re-attaching untouched children), so a wrapper
 // that still points at the pre-update node silently brings the old props back. Returns how many wrappers were updated.
-jsi::Value HybridUniwindShadow::refreshReactNodes(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+jsi::Value HybridShadewind::refreshReactNodes(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   auto binding = UIManagerBinding::getBinding(rt);
 
   if (count < 1 || !args[0].isObject() || !binding) {
@@ -457,7 +457,7 @@ jsi::Value HybridUniwindShadow::refreshReactNodes(jsi::Runtime& rt, const jsi::V
 //   - our nativeProps_DEPRECATED overlay,
 //   - what the registry expects for the current theme.
 // Tells where a stale colour comes from after a freeze / navigation.
-jsi::Value HybridUniwindShadow::inspect(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
+jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
   std::string theme = getTheme();
   auto binding = UIManagerBinding::getBinding(rt);
   auto report = jsi::Object(rt);
@@ -526,7 +526,7 @@ jsi::Value HybridUniwindShadow::inspect(jsi::Runtime& rt, const jsi::Value&, con
     int64_t nativeBg = -1;
 
     {
-#if UNIWIND_SHADOW_HAS_NATIVE_PROPS_MUTEX
+#if SHADEWIND_HAS_NATIVE_PROPS_MUTEX
       std::lock_guard<std::mutex> lock(update.family->nativePropsMutex);
 #endif
       if (update.family->nativeProps_DEPRECATED && update.family->nativeProps_DEPRECATED->isObject()) {
@@ -575,7 +575,7 @@ jsi::Value HybridUniwindShadow::inspect(jsi::Runtime& rt, const jsi::Value&, con
 // Applies the current theme to views registered since the last flush (mounted late, or revealed after a freeze).
 // One commit for all of them. No-op until setTheme was called once.
 // Hint that a theme switch is likely coming: warms the memory the switch will read, off the JS thread.
-jsi::Value HybridUniwindShadow::prepare(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
+jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
   if (!_hookRegistered) {
     return jsi::Value::undefined();
   }
@@ -597,7 +597,7 @@ jsi::Value HybridUniwindShadow::prepare(jsi::Runtime&, const jsi::Value&, const 
 }
 
 // Starts (once) the main run loop observer and clears the longest busy period seen so far.
-jsi::Value HybridUniwindShadow::resetMainBusy(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
+jsi::Value HybridShadewind::resetMainBusy(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
 #if defined(__APPLE__)
   if (!gBusyObserverInstalled.exchange(true)) {
     runOnMain([]() {
@@ -615,7 +615,7 @@ jsi::Value HybridUniwindShadow::resetMainBusy(jsi::Runtime&, const jsi::Value&, 
 }
 
 // Longest main-thread busy period (ms) since resetMainBusy.
-jsi::Value HybridUniwindShadow::mainBusyMs(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
+jsi::Value HybridShadewind::mainBusyMs(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
   double busy = gMaxBusyMs.load();
   const double start = gBusyStartMs.load();
 
@@ -627,7 +627,7 @@ jsi::Value HybridUniwindShadow::mainBusyMs(jsi::Runtime&, const jsi::Value&, con
   return jsi::Value(busy);
 }
 
-jsi::Value HybridUniwindShadow::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
+jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
   if (_hookRegistered) {
     schedulePrewarm();
   }
@@ -669,9 +669,9 @@ jsi::Value HybridUniwindShadow::flushPending(jsi::Runtime& rt, const jsi::Value&
 
 // setTheme(name, strategy?) pushes the registered props of `name` to every live view without touching React.
 // strategy: 'hookAsync' (default) | 'hook' | 'stock' | 'fast' | 'fastAsync' | 'direct' | 'both'
-jsi::Value HybridUniwindShadow::setTheme(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isString()) {
-    throw jsi::JSError(rt, "UniwindShadow.setTheme(name) expects a string");
+    throw jsi::JSError(rt, "Shadewind.setTheme(name) expects a string");
   }
 
   auto name = args[0].asString(rt).utf8(rt);
@@ -685,7 +685,7 @@ jsi::Value HybridUniwindShadow::setTheme(jsi::Runtime& rt, const jsi::Value&, co
   auto binding = UIManagerBinding::getBinding(rt);
 
   if (!binding) {
-    throw jsi::JSError(rt, "UniwindShadow.setTheme: Fabric UIManager is not available (New Architecture only)");
+    throw jsi::JSError(rt, "Shadewind.setTheme: Fabric UIManager is not available (New Architecture only)");
   }
 
   _hookMode = strategy == Strategy::Hook || strategy == Strategy::HookAsync;
@@ -800,4 +800,4 @@ jsi::Value HybridUniwindShadow::setTheme(jsi::Runtime& rt, const jsi::Value&, co
   return timings;
 }
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind

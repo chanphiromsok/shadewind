@@ -9,15 +9,15 @@
 #include <unordered_map>
 #include <vector>
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 using namespace facebook::react;
 
 // RN >= 0.86.1 guards ShadowNodeFamily::nativeProps_DEPRECATED with nativePropsMutex
 #if REACT_NATIVE_VERSION_MINOR > 86 || (REACT_NATIVE_VERSION_MINOR == 86 && REACT_NATIVE_VERSION_PATCH >= 1)
-#define UNIWIND_SHADOW_HAS_NATIVE_PROPS_MUTEX 1
+#define SHADEWIND_HAS_NATIVE_PROPS_MUTEX 1
 #else
-#define UNIWIND_SHADOW_HAS_NATIVE_PROPS_MUTEX 0
+#define SHADEWIND_HAS_NATIVE_PROPS_MUTEX 0
 #endif
 
 // One styled view: its family (weak, so an unmounted view never leaks) and the props to apply per theme.
@@ -119,7 +119,7 @@ private:
 // (React's own props win only for keys React re-sends). RN marks this field "will be removed",
 // so every access lives here.
 inline void mergeNativeProps(const ShadowNodeFamily& family, const folly::dynamic& props) {
-#if UNIWIND_SHADOW_HAS_NATIVE_PROPS_MUTEX
+#if SHADEWIND_HAS_NATIVE_PROPS_MUTEX
   std::lock_guard<std::mutex> lock(family.nativePropsMutex);
 #endif
 
@@ -131,4 +131,4 @@ inline void mergeNativeProps(const ShadowNodeFamily& family, const folly::dynami
   family.nativeProps_DEPRECATED = std::make_unique<folly::dynamic>(props);
 }
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind

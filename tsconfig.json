@@ -2,12 +2,12 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "react-native-uniwind-shadow": ["./src/index"]
+      "shadewind": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
     "customConditions": [
-      "react-native-uniwind-shadow-source",
+      "shadewind-source",
       "react-native-strict-api"
     ],
     "esModuleInterop": true,

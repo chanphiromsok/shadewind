@@ -1962,7 +1962,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - UniwindShadow (0.1.0):
+  - Shadewind (0.1.0):
     - hermes-engine
     - NitroModules
     - RCTRequired
@@ -2067,7 +2067,7 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
   - RNScreens (from `../node_modules/react-native-screens`)
-  - UniwindShadow (from `../..`)
+  - Shadewind (from `../..`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
@@ -2226,7 +2226,7 @@ EXTERNAL SOURCES:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
   RNScreens:
     :path: "../node_modules/react-native-screens"
-  UniwindShadow:
+  Shadewind:
     :path: "../.."
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
@@ -2309,7 +2309,7 @@ SPEC CHECKSUMS:
   ReactCommon: 9002f006f571256348994183f7d4387aa7cf84e8
   ReactNativeDependencies: 2bd6854ade79bf1b60586d1ab7813a389df1b6bf
   RNScreens: 7fb621f7b7bf936e2ca7b25e46e07000d90c794c
-  UniwindShadow: e4e23d639779f1dfc5eba5a7f29378ba3e989b1b
+  Shadewind: 1f9c5d43e089be91bd4f905079a5a90c5301a022
   Yoga: 9891cfb1c680f64de9c41b09e7453dea33454d2b
 
 PODFILE CHECKSUM: a0afafef9695e95f8d8ba4bc4bf1538cf7964c21

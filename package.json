@@ -1,12 +1,12 @@
 {
-  "name": "react-native-uniwind-shadow",
+  "name": "shadewind",
   "version": "0.1.0",
   "description": "Zero-re-render theme styling for React Native (Fabric) via a Nitro module",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
     ".": {
-      "react-native-uniwind-shadow-source": "./src/index.tsx",
+      "shadewind-source": "./src/index.tsx",
       "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
     },
@@ -34,7 +34,7 @@
     "!**/.*"
   ],
   "scripts": {
-    "example": "yarn workspace react-native-uniwind-shadow-example",
+    "example": "yarn workspace shadewind-example",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
     "nitrogen": "nitrogen",
@@ -48,14 +48,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/chanphiromsok/react-native-uniwind-shadow.git"
+    "url": "git+https://github.com/chanphiromsok/shadewind.git"
   },
   "author": "Rom <chanphiromsok2109@gmail.com> (https://github.com/chanphiromsok)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/chanphiromsok/react-native-uniwind-shadow/issues"
+    "url": "https://github.com/chanphiromsok/shadewind/issues"
   },
-  "homepage": "https://github.com/chanphiromsok/react-native-uniwind-shadow#readme",
+  "homepage": "https://github.com/chanphiromsok/shadewind#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },

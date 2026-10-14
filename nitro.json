@@ -1,21 +1,21 @@
 {
   "cxxNamespace": [
-    "uniwindshadow"
+    "shadewind"
   ],
   "ios": {
-    "iosModuleName": "UniwindShadow"
+    "iosModuleName": "Shadewind"
   },
   "android": {
     "androidNamespace": [
-      "uniwindshadow"
+      "shadewind"
     ],
-    "androidCxxLibName": "uniwindshadow"
+    "androidCxxLibName": "shadewind"
   },
   "autolinking": {
-    "UniwindShadow": {
+    "Shadewind": {
       "all": {
-        "language": "cpp",
-        "implementationClassName": "HybridUniwindShadow"
+        "language": "c++",
+        "implementationClassName": "HybridShadewind"
       }
     }
   },

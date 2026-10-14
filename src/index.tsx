@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { processColor, type ColorValue } from 'react-native';
 import { NitroModules } from 'react-native-nitro-modules';
-import type { UniwindShadow } from './UniwindShadow.nitro';
+import type { Shadewind } from './Shadewind.nitro';
 
-// Raw JSI methods registered natively in HybridUniwindShadow::loadHybridMethods.
+// Raw JSI methods registered natively in HybridShadewind::loadHybridMethods.
 type RawMethods = {
   register(shadowNode: unknown, propsByTheme: Record<string, object>): void;
   unregister(shadowNode: unknown): void;
@@ -16,9 +16,9 @@ type RawMethods = {
   refreshReactNodes(nodes: unknown[]): number;
 };
 
-const native = NitroModules.createHybridObject<UniwindShadow>(
-  'UniwindShadow'
-) as UniwindShadow & RawMethods;
+const native = NitroModules.createHybridObject<Shadewind>(
+  'Shadewind'
+) as Shadewind & RawMethods;
 
 /** Debug report: where a stale colour comes from. All counts refer to backgroundColor of registered views. */
 export type InspectReport = {
@@ -201,7 +201,7 @@ const scheduleFlush = () => {
   });
 };
 
-export const UniwindShadowEngine = {
+export const ShadewindEngine = {
   register(ref: unknown, styles: ThemedStyles) {
     const node = getShadowNode(ref);
 
@@ -283,9 +283,9 @@ export function useThemedRef(styles: ThemedStyles) {
     (ref: unknown) => {
       if (ref) {
         current.current = ref;
-        UniwindShadowEngine.register(ref, stable);
+        ShadewindEngine.register(ref, stable);
       } else if (current.current) {
-        UniwindShadowEngine.unregister(current.current);
+        ShadewindEngine.unregister(current.current);
         current.current = null;
       }
     },

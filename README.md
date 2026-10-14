@@ -1,4 +1,4 @@
-# react-native-uniwind-shadow
+# shadewind
 
 Zero-re-render theme styling for React Native (Fabric) via a Nitro module
 
@@ -6,7 +6,7 @@ Zero-re-render theme styling for React Native (Fabric) via a Nitro module
 
 
 ```sh
-npm install react-native-uniwind-shadow react-native-nitro-modules
+npm install shadewind react-native-nitro-modules
 
 > `react-native-nitro-modules` is required as this library relies on [Nitro Modules](https://nitro.margelo.com/).
 ```
@@ -16,7 +16,7 @@ npm install react-native-uniwind-shadow react-native-nitro-modules
 
 
 ```js
-import { multiply } from 'react-native-uniwind-shadow';
+import { multiply } from 'shadewind';
 
 // ...
 

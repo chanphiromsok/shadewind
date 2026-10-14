@@ -7,11 +7,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, Settings, StyleSheet, Text, View } from 'react-native';
 import {
-  UniwindShadowEngine,
+  ShadewindEngine,
   useThemedRef,
   type ThemeStrategy,
   type ThemedStyles,
-} from 'react-native-uniwind-shadow';
+} from 'shadewind';
 
 const RUNS = 10;
 const ITEMS_COUNT = 1000;
@@ -103,7 +103,7 @@ export default function TheirBench({
     js.current = [];
     visual.current = [];
     parts.current = [];
-    UniwindShadowEngine.setTheme('light', strategy); // unmeasured switch to light, like their harness
+    ShadewindEngine.setTheme('light', strategy); // unmeasured switch to light, like their harness
     setResult(null);
     setTimeout(() => setRun(0), 600);
   };
@@ -127,7 +127,7 @@ export default function TheirBench({
 
     const timer = setTimeout(() => {
       const t0 = performance.now();
-      const timings = UniwindShadowEngine.setTheme(
+      const timings = ShadewindEngine.setTheme(
         run % 2 === 0 ? 'dark' : 'light',
         strategy
       );
@@ -164,7 +164,7 @@ export default function TheirBench({
     }
 
     // one more call reports the last switch's visualMs (re-applies the same theme, so it is a no-op change)
-    const last = UniwindShadowEngine.setTheme(
+    const last = ShadewindEngine.setTheme(
       (RUNS - 1) % 2 === 0 ? 'dark' : 'light',
       strategy
     );
@@ -174,7 +174,7 @@ export default function TheirBench({
     }
 
     setTimeout(() => {
-      const r = UniwindShadowEngine.inspect();
+      const r = ShadewindEngine.inspect();
 
       setResult({
         strategy,
@@ -243,14 +243,14 @@ export default function TheirBench({
         <Pressable
           testID="their-dark"
           style={styles.btn}
-          onPress={() => UniwindShadowEngine.setTheme('dark', strategy)}
+          onPress={() => ShadewindEngine.setTheme('dark', strategy)}
         >
           <Text style={styles.btnText}>Dark</Text>
         </Pressable>
         <Pressable
           testID="their-light"
           style={styles.btn}
-          onPress={() => UniwindShadowEngine.setTheme('light', strategy)}
+          onPress={() => ShadewindEngine.setTheme('light', strategy)}
         >
           <Text style={styles.btnText}>Light</Text>
         </Pressable>

@@ -1,7 +1,7 @@
-project(uniwindshadow)
+project(shadewind)
 cmake_minimum_required(VERSION 3.9.0)
 
-set(PACKAGE_NAME uniwindshadow)
+set(PACKAGE_NAME shadewind)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_CXX_STANDARD 20)
 
@@ -10,7 +10,7 @@ file(GLOB CORE_SOURCES "../cpp/*.cpp")
 add_library(${PACKAGE_NAME} SHARED src/main/cpp/cpp-adapter.cpp ${CORE_SOURCES})
 
 # Add Nitrogen specs :)
-include(${CMAKE_SOURCE_DIR}/../nitrogen/generated/android/uniwindshadow+autolinking.cmake)
+include(${CMAKE_SOURCE_DIR}/../nitrogen/generated/android/shadewind+autolinking.cmake)
 
 # Set up local includes
 include_directories("src/main/cpp" "../cpp")

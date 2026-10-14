@@ -6,11 +6,11 @@ import {
 } from '@react-navigation/native-stack';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  UniwindShadowEngine,
+  ShadewindEngine,
   useThemedRef,
   type ThemeStrategy,
   type ThemedStyles,
-} from 'react-native-uniwind-shadow';
+} from 'shadewind';
 import BenchScreen from './BenchScreen';
 import TheirBench from './TheirBench';
 import { Linking, Platform, Settings as RNSettings } from 'react-native';
@@ -76,7 +76,7 @@ function Home({ navigation }: NativeStackScreenProps<Routes, 'Home'>) {
           testID="home-inspect"
           style={styles.button}
           onPress={() => {
-            const r = UniwindShadowEngine.inspect();
+            const r = ShadewindEngine.inspect();
 
             setDebug(
               `theme=${r.theme} registered=${r.registered} inTree=${r.inTree} notInTree=${r.notInTree} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} layerOK=${r.layerMatchesExpected} ${r.samples ?? ''}`
@@ -112,7 +112,7 @@ function Home({ navigation }: NativeStackScreenProps<Routes, 'Home'>) {
 
 function Settings() {
   const set = (name: 'light' | 'dark', strategy: ThemeStrategy) => {
-    UniwindShadowEngine.setTheme(name, strategy);
+    ShadewindEngine.setTheme(name, strategy);
   };
 
   return (
@@ -121,14 +121,14 @@ function Settings() {
       <Pressable
         testID="settings-dark"
         style={styles.button}
-        onPress={() => UniwindShadowEngine.setTheme('dark')}
+        onPress={() => ShadewindEngine.setTheme('dark')}
       >
         <Text style={styles.buttonText}>Dark (default)</Text>
       </Pressable>
       <Pressable
         testID="settings-light"
         style={styles.button}
-        onPress={() => UniwindShadowEngine.setTheme('light')}
+        onPress={() => ShadewindEngine.setTheme('light')}
       >
         <Text style={styles.buttonText}>Light (default)</Text>
       </Pressable>

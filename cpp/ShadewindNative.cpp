@@ -1,7 +1,7 @@
 #if !defined(__APPLE__)
-#include "UniwindShadowNative.hpp"
+#include "ShadewindNative.hpp"
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::react::Tag>& tags) {
   std::vector<UIKitBackground> result;
@@ -15,5 +15,5 @@ std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::r
   return result;
 }
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind
 #endif

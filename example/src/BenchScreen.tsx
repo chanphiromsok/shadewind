@@ -12,12 +12,12 @@ import {
 } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  UniwindShadowEngine,
+  ShadewindEngine,
   useThemedRef,
   type ThemeStrategy,
   type ThemeTimings,
   type ThemedStyles,
-} from 'react-native-uniwind-shadow';
+} from 'shadewind';
 
 declare const performance: { now(): number };
 
@@ -165,7 +165,7 @@ export default function BenchScreen() {
       let native: ThemeTimings | undefined;
 
       if (mode === 'native') {
-        native = UniwindShadowEngine.setTheme(next, strategy);
+        native = ShadewindEngine.setTheme(next, strategy);
       }
 
       const call = performance.now() - t0;
@@ -239,7 +239,7 @@ export default function BenchScreen() {
     setFrozen(true);
     await wait(400);
     setReport('frozen test: switching theme while frozen...');
-    UniwindShadowEngine.setTheme('dark');
+    ShadewindEngine.setTheme('dark');
     themeRef.current = 'dark';
     setTheme('dark');
     await wait(400);
@@ -275,56 +275,56 @@ export default function BenchScreen() {
   // first switch to dark. setTheme returns the stats of the PREVIOUS background commit, so the cold switch is read back by
   // the following call.
   const coldOnce = async (idleMs = 3000, hintMs = 0, strat: 'hookAsync' = 'hookAsync') => {
-    UniwindShadowEngine.setTheme('light', strat);
+    ShadewindEngine.setTheme('light', strat);
     themeRef.current = 'light';
     setTheme('light');
     await wait(800);
     // validation of the probe: remounting 1500 rows is known to keep the main thread busy for hundreds of ms
-    UniwindShadowEngine.resetMainBusy();
+    ShadewindEngine.resetMainBusy();
     await wait(50);
-    UniwindShadowEngine.resetMainBusy();
+    ShadewindEngine.resetMainBusy();
     setEpoch((e) => e + 1);
     await wait(idleMs);
 
-    const remount = UniwindShadowEngine.mainBusyMs();
+    const remount = ShadewindEngine.mainBusyMs();
 
     if (hintMs > 0) {
       // like onPressIn -> onPress: the hint comes a press-duration before the switch
-      UniwindShadowEngine.prepare();
+      ShadewindEngine.prepare();
       await wait(hintMs);
     }
 
     // Do not switch while the main thread is still busy with the remount (a switch queued behind it measures the remount):
     // wait until a 150 ms window shows no busy period, up to 8 s.
     for (let k = 0; k < 50; k++) {
-      UniwindShadowEngine.resetMainBusy();
+      ShadewindEngine.resetMainBusy();
       await wait(150);
 
-      if (UniwindShadowEngine.mainBusyMs() < 3) {
+      if (ShadewindEngine.mainBusyMs() < 3) {
         break;
       }
     }
 
     // Main-thread probe: the longest stretch the main run loop stayed busy (no return to sleep) in the 400 ms before the switch
     // (baseline) and the 300 ms after it. A 1500-view mount shows up as one long busy period; a JS timer cannot see it.
-    UniwindShadowEngine.resetMainBusy();
+    ShadewindEngine.resetMainBusy();
     await wait(400);
 
-    const before = UniwindShadowEngine.mainBusyMs();
+    const before = ShadewindEngine.mainBusyMs();
 
-    UniwindShadowEngine.resetMainBusy();
-    UniwindShadowEngine.setTheme('dark', strat); // the cold switch
+    ShadewindEngine.resetMainBusy();
+    ShadewindEngine.setTheme('dark', strat); // the cold switch
     await wait(300);
 
-    const after = UniwindShadowEngine.mainBusyMs();
+    const after = ShadewindEngine.mainBusyMs();
 
     await wait(1200);
 
     // same window extended to 1.5 s in case the mount is queued later than 300 ms
-    const after1500 = UniwindShadowEngine.mainBusyMs();
+    const after1500 = ShadewindEngine.mainBusyMs();
 
     pacing.current = { before, after, after1500, remount };
-    const t = UniwindShadowEngine.setTheme('light', strat);
+    const t = ShadewindEngine.setTheme('light', strat);
 
     await wait(500);
 
@@ -381,7 +381,7 @@ export default function BenchScreen() {
     const nextTheme = () => (themeRef.current === 'light' ? 'dark' : 'light');
     const switchOnce = () => {
       const next = nextTheme();
-      const t = UniwindShadowEngine.setTheme(next, 'hookAsync');
+      const t = ShadewindEngine.setTheme(next, 'hookAsync');
 
       themeRef.current = next;
       setTheme(next);
@@ -421,7 +421,7 @@ export default function BenchScreen() {
     setMode(next);
     setTheme('light');
     themeRef.current = 'light';
-    UniwindShadowEngine.setTheme('light');
+    ShadewindEngine.setTheme('light');
     setReport('mode changed');
   };
 

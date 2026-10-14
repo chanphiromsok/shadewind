@@ -1,11 +1,11 @@
-package com.margelo.nitro.uniwindshadow
+package com.margelo.nitro.shadewind
 
 import com.facebook.react.BaseReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.model.ReactModuleInfoProvider
 
-class UniwindShadowPackage : BaseReactPackage() {
+class ShadewindPackage : BaseReactPackage() {
     override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
         return null
     }
@@ -16,7 +16,7 @@ class UniwindShadowPackage : BaseReactPackage() {
 
     companion object {
         init {
-            System.loadLibrary("uniwindshadow")
+            System.loadLibrary("shadewind")
         }
     }
 }

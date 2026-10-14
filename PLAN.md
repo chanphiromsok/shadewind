@@ -1,6 +1,6 @@
 # Plan
 
-Status as of 2026-10-14. Working name is still `uniwind-shadow`; a new name without "uniwind" is undecided
+Status as of 2026-10-14. Working name is still `shadewind`; a new name without "uniwind" is undecided
 (candidates: Tinter, Shadowtone, Chroma Shadow, Palette Swap, Hueshift, Skinswap).
 
 ## Goal
@@ -23,7 +23,7 @@ Target: beat Uniwind Pro on the `uniwind-benchmarks` theme-change scenario (2003
 ## Phase 1: Android (first pass done, follow-ups below)
 
 1. Build the example for Android (Release, arm64) and fix compile errors. The engine C++ is shared; platform code is in
-   `HybridUniwindShadow.cpp` (`#if defined(__APPLE__)` branches) and `UniwindShadowNative.cpp`.
+   `HybridShadewind.cpp` (`#if defined(__APPLE__)` branches) and `ShadewindNative.cpp`.
 2. `hookAsync` on Android: the iOS version posts the commit to a GCD queue and the mount completion to the main queue. Add the
    Android equivalents (a background thread for the commit; mount completion via the RN scheduler / `ALooper` main looper) or
    keep the synchronous commit until measured.

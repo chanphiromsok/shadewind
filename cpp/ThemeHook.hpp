@@ -26,7 +26,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace margelo::nitro::uniwindshadow {
+namespace margelo::nitro::shadewind {
 
 using namespace facebook::react;
 
@@ -876,4 +876,4 @@ private:
   std::shared_ptr<const ContextContainer> _contextContainer;
 };
 
-} // namespace margelo::nitro::uniwindshadow
+} // namespace margelo::nitro::shadewind
