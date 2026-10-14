@@ -84,9 +84,10 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
     return out;
   }
 
-  auto* yogaSource = dynamic_cast<const YogaLayoutableShadowNode*>(&source);
+  // a Paragraph is a ConcreteViewShadowNode, hence a YogaLayoutableShadowNode (no RTTI: it is fragile across RN's libraries)
+  const auto* yogaSource = static_cast<const YogaLayoutableShadowNode*>(&source);
 
-  if (yogaSource == nullptr || YogaAccess::node(*yogaSource).isDirty()) {
+  if (YogaAccess::node(*yogaSource).isDirty()) {
     out.reason = 4;
     return out;
   }
@@ -118,11 +119,14 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
   }
 
   bool changed = false;
+  bool alreadyTarget = false; // some fragment already holds the colour we want
 
   for (auto& fragment : data.attributedString.getFragments()) {
     if (fragment.textAttributes.foregroundColor == previous) {
       fragment.textAttributes.foregroundColor = color;
       changed = true;
+    } else if (fragment.textAttributes.foregroundColor == color) {
+      alreadyTarget = true;
     }
   }
 
@@ -132,11 +136,22 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
     base.foregroundColor = color;
     data.attributedString.setBaseTextAttributes(base);
     changed = true;
+  } else if (base.foregroundColor == color) {
+    alreadyTarget = true;
   }
 
   if (!changed) {
-    // nothing carried the old colour: do not claim the state is rebuilt, let layout produce it
+    if (alreadyTarget) {
+      // The state was recoloured by an earlier pass while the props came back from React with the old colour (a React commit
+      // that re-rendered the Text): the state is already right, only the props need the new colour. Keep it clean.
+      out.keepClean = true;
+
+      return out;
+    }
+
+    // nothing carried the old or the new colour (explicit colours set inside nested Text, say): let layout produce the state
     out.reason = 8;
+
     return out;
   }
 
@@ -172,7 +187,7 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
 
     if (recolored.keepClean) {
       ++gRecolored;
-    } else if (auto* y = dynamic_cast<const YogaLayoutableShadowNode*>(&node); y && YogaAccess::node(*y).isDirty()) {
+    } else if (YogaAccess::node(static_cast<const YogaLayoutableShadowNode&>(node)).isDirty()) {
       ++gRecolorSkipDirty;
     } else {
       ++gRecolorSkipState;
@@ -180,9 +195,8 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
   }
 
   if (recolored.keepClean) {
-    if (auto* yoga = dynamic_cast<const YogaLayoutableShadowNode*>(result.get())) {
-      YogaAccess::node(*yoga).setDirty(false);
-    }
+    // the clone of a Paragraph is a Paragraph
+    YogaAccess::node(static_cast<const YogaLayoutableShadowNode&>(*result)).setDirty(false);
   }
 
   return result;
@@ -194,11 +208,10 @@ struct HookStats {
   double propsMs = 0; // of cloneMs: building the typed props only
   int applied = 0;    // nodes cloned in the last commit that did work
   int reused = 0;     // of applied: props reused from the cache instead of rebuilt
-  int precloned = 0;  // of applied: nodes taken from the pre-built buffer instead of cloned
   bool fullApply = false; // the last commit skipped the tree scan (theme change)
   int scanned = 0;    // registered views looked at
-  // why a node was not taken from the pre-built buffer: not ours / no buffer entry / source node differs / props differ / children replaced
-  int missNotOurs = 0, missNoBuffer = 0, missSource = 0, missProps = 0, missChildren = 0;
+  // how a node's props were found: React replaced them (rebuilt) / its children list is being replaced (cloned with new children)
+  int missNotOurs = 0, missChildren = 0;
 };
 
 /**
@@ -312,29 +325,6 @@ public:
     }
   }
 
-  // A hint that a theme switch is probably coming (e.g. a press started on the toggle). Reads, without changing anything, the
-  // memory the next switch will touch (registered views of the last committed tree, their entries and pre-built nodes) so the
-  // switch does not pay for cold caches. Skipped when a commit is running.
-  void touch() {
-    std::unique_lock<std::mutex> lock(_mutex, std::try_to_lock);
-
-    if (!lock.owns_lock() || !_lastRoot || _theme == kNoTheme) {
-      return;
-    }
-
-    uintptr_t sink = 0;
-
-    touchTree(*_lastRoot, sink);
-
-    gTouchSink.store(sink, std::memory_order_relaxed); // keeps the reads from being optimised away
-  }
-
-  // How to run work off the committing thread (set by the platform layer). Without it no nodes are pre-built.
-  void setAsync(std::function<void(std::function<void()>)> async) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _async = std::move(async);
-  }
-
   void remove(const ShadowNodeFamily* family) {
     std::lock_guard<std::mutex> lock(_mutex);
     _entries.erase(family);
@@ -416,7 +406,6 @@ public:
     walk.theme = _theme;
     walk.epoch = _epoch;
     walk.full = _fullPending;
-    walk.liveNodes.reserve(_entries.size());
 
     auto cloned = walkTree(*newRoot, walk);
 
@@ -425,12 +414,9 @@ public:
     if (!cloned) {
       _stats.scanMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
       _stats.scanned = walk.scanned;
-      _lastRoot = newRoot;
 
       return newRoot;
     }
-
-    _lastRoot = cloned;
 
     if (walk.full && _epoch == walk.epoch) {
       _fullPending = false;
@@ -442,46 +428,26 @@ public:
     _stats.propsMs = static_cast<double>(walk.propsNs) / 1e6;
     _stats.applied = walk.applied;
     _stats.reused = walk.reused;
-    _stats.precloned = walk.precloned;
     _stats.missNotOurs = walk.missNotOurs;
-    _stats.missNoBuffer = walk.missNoBuffer;
-    _stats.missSource = walk.missSource;
-    _stats.missProps = walk.missProps;
     _stats.missChildren = walk.missChildren;
     _stats.fullApply = walk.full;
     _stats.scanned = walk.scanned;
-
-    auto async = _async;
-    const auto theme = walk.theme;
-
-    lock.unlock();
-
-    scheduleBuildPreclones(theme, std::move(walk.liveNodes), std::move(async));
 
     return std::static_pointer_cast<RootShadowNode>(cloned);
   }
 
 private:
-  struct PreClone {
-    std::shared_ptr<const ShadowNode> source;
-    std::shared_ptr<ShadowNode> node;
-  };
-
   // Themes are interned to small ids so a view's per-theme data is one flat array instead of three string-keyed hash maps:
   // a theme switch touches every registered view, and chasing map nodes per view is what a cold cache pays for.
   using ThemeId = uint8_t;
   static constexpr ThemeId kMaxThemes = 6;
   static constexpr ThemeId kNoTheme = 0xFF;
 
-  // One cache line per theme slot: the commit reads delta / produced / pre of exactly one slot per view.
+  // One cache line per theme slot: the commit reads delta / produced of exactly one slot per view.
   struct alignas(64) Slot {
     std::shared_ptr<const TypedDelta> delta; // what this theme changes on the view (null: view has no style for the theme)
     // the props we built for this theme earlier; reused while the node still holds one of our props objects
     Props::Shared produced;
-    // Node pre-built for this theme from the node that is live now (`pre.source`). It is only used when the live node is
-    // still exactly `source` (nothing touched it) and its children are not being replaced, so the buffer can never
-    // resurrect old state: anything else takes the normal clone path.
-    PreClone pre;
   };
 
   // Hot fields first (one cache line): the commit reads these for every registered view, so a cold cache pays per line.
@@ -520,40 +486,9 @@ private:
     int scanned = 0;
     int applied = 0;
     int reused = 0;
-    int precloned = 0;
-    int missNotOurs = 0, missNoBuffer = 0, missSource = 0, missProps = 0, missChildren = 0;
+    int missNotOurs = 0, missChildren = 0;
     int64_t propsNs = 0;
-    // the nodes that are live after this commit, for building the other themes' nodes in the background
-    std::vector<std::shared_ptr<ShadowNode>> liveNodes;
   };
-
-  inline static std::atomic<uintptr_t> gTouchSink{0};
-
-  // Caller holds _mutex. Read-only mirror of walkTree.
-  void touchTree(const ShadowNode& node, uintptr_t& sink) {
-    for (const auto& child : node.getChildren()) {
-      touchTree(*child, sink);
-    }
-
-    auto entry = _entries.find(&node.getFamily());
-
-    if (entry == _entries.end()) {
-      return;
-    }
-
-    sink += reinterpret_cast<uintptr_t>(entry->second.appliedProps) + entry->second.appliedEpoch;
-
-    for (ThemeId id = 0; id < kMaxThemes; id++) {
-      const Slot& slot = entry->second.slots[id];
-
-      if (id != _theme && slot.pre.node) {
-        sink += reinterpret_cast<uintptr_t>(slot.pre.node->getProps().get()) + reinterpret_cast<uintptr_t>(slot.pre.source.get());
-        sink += slot.pre.node->getChildren().size();
-      }
-    }
-
-    sink += node.getChildren().size();
-  }
 
   // Returns the replacement for `node`, or nullptr when nothing under it changed. Caller holds _mutex.
   std::shared_ptr<ShadowNode> walkTree(const ShadowNode& node, Walk& walk) {
@@ -621,16 +556,10 @@ private:
         return nullptr;
       }
 
-      auto result = node.clone({.children = newChildren});
-
-      if (target) {
-        walk.liveNodes.push_back(result); // registered, untouched itself but its subtree changed
-      }
-
-      return result;
+      return node.clone({.children = newChildren});
     }
 
-    // the node still holds a props object we made (or the registration props every pre-built one derives from)
+    // the node still holds a props object we made (or the registration props the cached ones derive from)
     bool ours = current == entry->appliedProps || current == entry->base.get();
 
     for (ThemeId id = 0; !ours && id < kMaxThemes; id++) {
@@ -643,25 +572,11 @@ private:
     if (ours && target->produced) {
       ++walk.reused;
 
-      // taken only if built from exactly this live node, with exactly these props, children untouched
-      if (!newChildren) {
-        if (!target->pre.node) {
-          ++walk.missNoBuffer;
-        } else if (target->pre.source.get() != &node) {
-          ++walk.missSource;
-        } else if (target->pre.node->getProps().get() != target->produced.get()) {
-          ++walk.missProps;
-        } else {
-          ++walk.precloned;
-          result = target->pre.node;
-        }
-      } else {
+      if (newChildren) {
         ++walk.missChildren;
       }
 
-      if (!result) {
-        result = cloneThemed(node, target->produced, newChildren, *target->delta);
-      }
+      result = cloneThemed(node, target->produced, newChildren, *target->delta);
 
       applied = target->produced.get();
     } else {
@@ -679,7 +594,6 @@ private:
       if (!ours) {
         for (auto& slot : entry->slots) {
           slot.produced = nullptr;
-          slot.pre = {};
         }
 
         entry->base = nullptr;
@@ -689,98 +603,11 @@ private:
     }
 
     ++walk.applied;
-    walk.liveNodes.push_back(result);
 
     entry->appliedProps = applied;
     entry->appliedEpoch = walk.epoch;
 
     return result;
-  }
-
-  // After a commit: for every view we just styled, build (in the background) the node each OTHER theme would produce from
-  // the live node. The next switch can then take those instead of cloning on the critical path.
-  void scheduleBuildPreclones(
-      ThemeId theme,
-      std::vector<std::shared_ptr<ShadowNode>> liveNodes,
-      std::function<void(std::function<void()>)> async) {
-    if (!async || liveNodes.empty()) {
-      return;
-    }
-
-    async([self = shared_from_this(), theme, nodes = std::move(liveNodes)]() mutable { self->buildPreclones(theme, nodes); });
-  }
-
-  void buildPreclones(
-      ThemeId theme,
-      const std::vector<std::shared_ptr<ShadowNode>>& liveNodes) {
-    for (const auto& live : liveNodes) {
-      const ShadowNodeFamily* family = &live->getFamily();
-
-      // (theme, props if already cached, delta to build it from)
-      struct Other {
-        ThemeId id;
-        Props::Shared props;
-        std::shared_ptr<const TypedDelta> delta;
-      };
-
-      std::vector<Other> others;
-      const char* componentName = nullptr;
-      SurfaceId surface = 0;
-
-      {
-        std::lock_guard<std::mutex> lock(_mutex);
-
-        auto entry = _entries.find(family);
-
-        // only while the live node is still the one we styled (a newer commit may have replaced it)
-        if (entry == _entries.end() || entry->second.appliedProps != live->getProps().get()) {
-          continue;
-        }
-
-        componentName = live->getComponentName(); // not the entry's: the live node is what gets cloned
-        surface = entry->second.surface;
-
-        for (ThemeId id = 0; id < kMaxThemes; id++) {
-          const Slot& slot = entry->second.slots[id];
-
-          if (id != theme && slot.delta) {
-            others.push_back({id, slot.produced, slot.delta});
-          }
-        }
-      }
-
-      std::vector<std::tuple<ThemeId, Props::Shared, std::shared_ptr<ShadowNode>>> built;
-
-      for (auto& other : others) {
-        // The props pre-warm may not have reached this view yet. Build from the live node's props: they are ours, so
-        // only our fields differ from the registration props, and those are overwritten anyway.
-        if (!other.props && componentName) {
-          other.props = buildPropsFrom(surface, componentName, *live->getProps(), *other.delta);
-        }
-
-        if (!other.props) {
-          continue;
-        }
-
-        built.emplace_back(
-            other.id,
-            other.props,
-            cloneThemed(*live, other.props, nullptr, *other.delta));
-      }
-
-      std::lock_guard<std::mutex> lock(_mutex);
-
-      auto entry = _entries.find(family);
-
-      if (entry != _entries.end() && entry->second.appliedProps == live->getProps().get()) {
-        for (auto& [id, props, node] : built) {
-          Slot& slot = entry->second.slots[id];
-
-          slot.produced = props; // the cached props must be the very object the pre-built node carries
-          slot.pre = PreClone{live, std::move(node)};
-        }
-      }
-    }
   }
 
   // One prepared parser per props type, built the same way React Native's ConcreteComponentDescriptor does.
@@ -888,12 +715,10 @@ private:
   std::unordered_map<const ShadowNodeFamily*, Entry> _entries;
   ThemeId _theme = kNoTheme;
   std::vector<std::string> _themeNames;
-  std::function<void(std::function<void()>)> _async;
   uint64_t _epoch = 0;
   uint64_t _commits = 0;
   bool _fullPending = false; // set by setTheme: the next commit applies the theme to every registered view
   HookStats _stats;
-  std::shared_ptr<const ShadowNode> _lastRoot; // the tree of the last commit that passed through the hook
   std::shared_ptr<const ContextContainer> _contextContainer;
 };
 

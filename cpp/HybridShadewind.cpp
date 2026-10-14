@@ -349,7 +349,6 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
       ui.registerCommitHook(*_hook);
       _hookRegistered = true;
 #if defined(__APPLE__)
-      _hook->setAsync(runInBackground);
 #endif
     }
 
@@ -520,8 +519,13 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 
       found = true;
 
-      if (auto viewProps = std::dynamic_pointer_cast<const ViewProps>(node->getProps()); viewProps && viewProps->backgroundColor) {
-        treeBg = colorBits(*viewProps->backgroundColor);
+      if (node->getTraits().check(ShadowNodeTraits::Trait::ViewKind)) {
+        // every ConcreteViewShadowNode carries ViewProps (static_assert in ConcreteViewShadowNode); no RTTI across RN's libraries
+        const auto* viewProps = static_cast<const ViewProps*>(node->getProps().get());
+
+        if (viewProps->backgroundColor) {
+          treeBg = colorBits(*viewProps->backgroundColor);
+        }
       }
     });
 
@@ -576,25 +580,9 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 
 // Applies the current theme to views registered since the last flush (mounted late, or revealed after a freeze).
 // One commit for all of them. No-op until setTheme was called once.
-// Hint that a theme switch is likely coming: warms the memory the switch will read, off the JS thread.
+// Kept for API compatibility: it used to warm the pre-built nodes of the next switch. Those are gone (they were never used and
+// raced with layout), so there is nothing to warm.
 jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
-  if (!_hookRegistered) {
-    return jsi::Value::undefined();
-  }
-
-#if defined(__APPLE__)
-  auto* task = new std::function<void()>([hook = _hook]() { hook->touch(); });
-
-  dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), task, [](void* context) {
-    auto* function = static_cast<std::function<void()>*>(context);
-
-    (*function)();
-    delete function;
-  });
-#else
-  _hook->touch();
-#endif
-
   return jsi::Value::undefined();
 }
 
@@ -707,11 +695,20 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
     // The commit (scan + clone + mount hand-off) runs off the JS thread. The hook keeps working for every commit.
 #if defined(__APPLE__)
-    auto* task = new std::function<void()>([binding, a0]() {
+    // weak: a GCD thread must never drop the last reference of the binding (it owns a jsi::Function)
+    auto* task = new std::function<void()>([weakBinding = std::weak_ptr<UIManagerBinding>(binding), a0]() {
+      auto locked = weakBinding.lock();
+
+      if (!locked) {
+        return;
+      }
+
       const auto c0 = Clock::now();
 
-      // like React's own commits: do not make this thread wait while the main thread mounts 1500 updated views
-      commitTick(binding->getUIManager(), false);
+      // `mountSynchronously = false` would queue a rendering update on the RuntimeScheduler, whose queues only the JS thread
+      // may touch. `true` is what React Native uses for commits made off the JS thread: on iOS the mount itself is still
+      // dispatched asynchronously to the main queue.
+      commitTick(locked->getUIManager(), true);
       gLastAsyncCommitMs = ms(c0, Clock::now());
 
       // The commit queued its mount on the main queue; this block queues behind it, so when it runs the views are mounted
@@ -738,12 +735,10 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     result.setProperty(rt, "cloneMs", stats.cloneMs); // from the previous run
     result.setProperty(rt, "propsMs", stats.propsMs);
     result.setProperty(rt, "reused", static_cast<double>(stats.reused));
-    result.setProperty(rt, "precloned", static_cast<double>(stats.precloned));
     result.setProperty(
         rt,
         "misses",
-        std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missNoBuffer) + "/" + std::to_string(stats.missSource) + "/" +
-            std::to_string(stats.missProps) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
+        std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
             "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
             reasonsText());
     result.setProperty(rt, "collectMs", 0.0);
@@ -770,12 +765,10 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     result.setProperty(rt, "cloneMs", stats.cloneMs);
     result.setProperty(rt, "propsMs", stats.propsMs);
     result.setProperty(rt, "reused", static_cast<double>(stats.reused));
-    result.setProperty(rt, "precloned", static_cast<double>(stats.precloned));
     result.setProperty(
         rt,
         "misses",
-        std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missNoBuffer) + "/" + std::to_string(stats.missSource) + "/" +
-            std::to_string(stats.missProps) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
+        std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
             "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
             reasonsText());
     result.setProperty(rt, "collectMs", 0.0);

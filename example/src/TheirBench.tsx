@@ -185,7 +185,7 @@ export default function TheirBench({
             avg(parts.current.map((p) => Number(p[k] ?? 0))).toFixed(2);
           const last = parts.current[parts.current.length - 1];
 
-          return `clone ${mean('clone')} props ${mean('props')} commit ${mean('commit')} total ${mean('total')} | views ${last?.views} reused ${last?.reused} precloned ${last?.precloned} misses ${last?.misses}`;
+          return `clone ${mean('clone')} props ${mean('props')} commit ${mean('commit')} total ${mean('total')} | views ${last?.views} reused ${last?.reused} misses ${last?.misses}`;
         })(),
         inspect: `theme=${r.theme} registered=${r.registered} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} layerOK=${r.layerMatchesExpected}`,
       });

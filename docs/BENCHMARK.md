@@ -15,11 +15,11 @@ Protocol (their method, shortened): Release builds, same iPhone 17 Pro simulator
 | Library | Version / strategy | Launch 1 | Launch 2 | Launch 3 | **Median (JS idle)** | Mounted (median) | vs `hook` |
 |---|---|---|---|---|---|---|---|
 | **This engine, `hook`** | build 56 | 4.50 ms | 4.89 ms | 4.88 ms | **4.88 ms** | n/a (sync commit) | 1.0x |
-| **This engine, `hookAsync`** | build 56 | 0.05 ms | 0.05 ms | 0.06 ms | **0.05 ms** | 2.84 ms | JS thread free |
+| **This engine, `hookAsync`** | build 56 | 0.05 ms | 0.05 ms | 0.06 ms | **0.05 ms** | ~11-12 ms (corrected, see below) | JS thread free |
 | Uniwind Pro (demo build) | 1.5.1 | 22.64 ms | 20.72 ms | 20.97 ms | **20.97 ms** | n/a | 4.3x slower |
 | Uniwind (free) | 1.12.0 | 106.46 ms | 103.62 ms | 101.96 ms | **103.62 ms** | n/a | 21x slower |
 
-Mounted per launch (`hookAsync`): 2.65 / 2.84 / 3.02 ms. The former `native` strategy (UIKit colour pass + commit) measured
+Mounted per launch (`hookAsync`), build 56: 2.65 / 2.84 / 3.02 ms (**incorrect**, see the correction below); corrected build: 11.99 / 11.24 ms. The former `native` strategy (UIKit colour pass + commit) measured
 3.05 / 3.24 / 3.36 ms mounted and 0.54-0.58 ms JS idle, i.e. no gain over `hookAsync`, and was removed.
 Per-run spread (min - max of the 10 changes in one launch): `hook` 2.6-14.3 ms, `hookAsync` 0.04-0.13 ms,
 Pro demo 12.1-66.3 ms, free 70.0-133.1 ms.
@@ -83,3 +83,13 @@ the APK from before and after the fixes alternately, gave old 48.3 / 41.8 / 52.4
 the fixes cost nothing measurable, the emulator (or the host) was simply in a slow state (host load 5+, freshly rebooted AVD, three
 iOS simulators booted). Android numbers need a quiet host and a warmed emulator, and should always be reported next to a same-run
 baseline (free Uniwind) rather than as absolute milliseconds.
+
+### Correction: the "call to mounted" time of `hookAsync` (2026-10-14)
+
+The 2.7-3.0 ms "mounted" figures were an artifact. The background commit used `mountSynchronously = false`; off the JS thread that
+queues a rendering update on the RuntimeScheduler (whose queues only the JS thread may touch) and the actual mount happens at the
+JS thread's next tick, after the `runOnMain` block that stamps the time. With `mountSynchronously = true` (what React Native itself
+uses for commits made off the JS thread) the mount is dispatched to the main queue during the commit, the stamp runs after it, and
+the measurement is 11.2-12.0 ms (max 13.7-15.8 ms) for 2003 views on the iOS simulator. The "JS idle" numbers (0.05-0.08 ms for
+`hookAsync`, 3.6-4.9 ms for `hook`) are not affected. Practical reading: `hookAsync` frees the JS thread and the screen updates in
+about 11-12 ms; `hook` returns after 3.6-4.9 ms but includes only the commit, not the main-thread mount, in its number.

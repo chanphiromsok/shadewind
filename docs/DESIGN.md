@@ -561,3 +561,21 @@ Needed to build and be correct on Android:
    are correct for backgrounds and text.
 
 Open: `hookAsync` has no background executor on Android; `viewOK`/`layerOK` probes are iOS-only; run on a physical device.
+
+## Opus advice applied (pre-clones removed, background commit fixed)
+
+- **Pre-built nodes are gone** (`scheduleBuildPreclones`, `buildPreclones`, `Slot::pre`, `touch()`/`prepare()` warming, `setAsync`):
+  the builder cloned the very nodes the same commit was about to lay out (hooks run before `layoutIfNeeded`), a data race on
+  `children_` / `state_` / `yogaNode_`; and the feature never paid off (`precloned 0`, structural `missChildren` for every themed
+  view with a themed child). The per-theme `produced` props cache stays (that is the `reused 2002` win).
+- **Background commits use `mountSynchronously = true`.** `false` made an off-thread commit write to RuntimeScheduler queues
+  that only the JS thread may touch, and delayed the mount to the next JS tick (see the correction in BENCHMARK.md).
+- **No `dynamic_cast` for Yoga nodes / ViewProps**: `static_cast` guarded by the Paragraph component name or the `ViewKind` trait.
+- **The background lambda holds a `weak_ptr<UIManagerBinding>`** so a GCD thread can never drop the last reference of an object
+  that owns a `jsi::Function`.
+- **Text recolour:** when no fragment carries the old colour but one already carries the new one (a React commit re-rendered
+  the Text with the old colour while the state was already recoloured), the state is kept and the node stays clean; only when
+  neither colour is present does layout produce the state (reason 8). Without this a plain React re-render during a switch sent
+  1000 paragraphs through layout (visual 12 ms).
+- Open: hook lifetime across Fast Refresh (own the hook in the UIManager's ContextContainer), Android background executor on a
+  serial JNI-attached thread plus a `UIManagerMountHook` for "mounted", whole-tree walk pruning (see PLAN.md).
