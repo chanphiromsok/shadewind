@@ -39,6 +39,10 @@ recorded in `docs/BENCHMARK.md`.
 
 ## Phase 2: Uniwind integration (adapter on top)
 
+Long-term design: `docs/UNIWIND_INTEGRATION.md` (thin versioned seam, engine Uniwind-agnostic, fallbacks, CI matrix, upstream asks).
+The note below is the original sketch.
+
+
 Findings in Uniwind 1.12.0 (MIT): `UniwindStore.getStyles(className, props, state, ctx)` resolves a className for any theme via
 `ctx.scopedTheme`; `useStyle` subscribes every styled component to `StyleDependency.Theme`, which causes the re-render on a switch.
 
