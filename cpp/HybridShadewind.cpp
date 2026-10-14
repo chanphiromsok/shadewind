@@ -1,4 +1,5 @@
 #include "HybridShadewind.hpp"
+#include "css/ColorParser.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
@@ -331,6 +332,41 @@ bool HybridShadewind::hookRegisteredWith(UIManager& ui) {
   return _state.registeredContainer.lock() == ui.getContextContainer();
 }
 
+// Colour props arrive from JS as CSS strings (hex, rgb(), hsl(), oklch()) or as numbers already processed by processColor.
+// Strings are parsed here (css::parseColor) and replaced by the unsigned ARGB number React Native expects.
+static bool isColorKey(const std::string& key) {
+  return key == "colors" || (key.size() >= 5 && (key.compare(key.size() - 5, 5, "Color") == 0 || key.compare(key.size() - 5, 5, "color") == 0)) ||
+         key == "color";
+}
+
+static void normalizeColorStrings(folly::dynamic& props) {
+  if (!props.isObject()) {
+    return;
+  }
+
+  for (auto& item : props.items()) {
+    if (!item.first.isString() || !isColorKey(item.first.getString())) {
+      continue;
+    }
+
+    auto convert = [](folly::dynamic& value) {
+      if (value.isString()) {
+        if (const auto argb = css::parseColor(value.getString())) {
+          value = static_cast<int64_t>(*argb);
+        }
+      }
+    };
+
+    if (item.second.isArray()) {
+      for (auto& entry : item.second) {
+        convert(entry);
+      }
+    } else {
+      convert(item.second);
+    }
+  }
+}
+
 // register(shadowNode, { light: { backgroundColor: 4294967295 }, dark: { ... } })
 // Props must already be in the raw format React Native sends to native (e.g. processed colors).
 jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
@@ -351,7 +387,10 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
   for (size_t i = 0; i < names.size(rt); i++) {
     auto name = names.getValueAtIndex(rt, i).asString(rt);
 
-    propsByTheme.emplace(name.utf8(rt), jsi::dynamicFromValue(rt, themes.getProperty(rt, name)));
+    auto props = jsi::dynamicFromValue(rt, themes.getProperty(rt, name));
+
+    normalizeColorStrings(props);
+    propsByTheme.emplace(name.utf8(rt), std::move(props));
   }
 
   if (auto binding = UIManagerBinding::getBinding(rt)) {

@@ -354,3 +354,17 @@ across versions, plus cache invalidation.
 
 Reviewed extractor output on tovtam: light `primary` `ff1a1a1a`, dark `ffe0e0e0`, yellow `ffffd700`, 28 colour tokens per theme,
 37 non-colour base tokens, system twins equal to their themes, no issues.
+
+## 12. Parser work moved to C++ (2026-10-14)
+
+`cpp/css/ColorParser.hpp` parses CSS colours natively (`#rgb[a]`, `#rrggbb[aa]`, `rgb()`/`rgba()`, `hsl()`/`hsla()`, `oklch()`,
+`transparent`, `white`, `black`; comma and `space / alpha` syntaxes; percentages). `HybridShadewind::registerNode` converts
+colour strings (keys named `color`, `*Color`, `colors`) to unsigned ARGB before building typed deltas, so JS no longer calls
+`processColor` for those values; unsupported values (named colours, `PlatformColor`, `DynamicColorIOS`) still use `processColor`.
+
+Parity (`cpp/tests`, 3,209 generated cases vs `culori`, same clamp policy): 3,205 exact, 4 within one channel step, 0 worse,
+0 parse failures (out-of-gamut `oklch` included). Example app, Release, iOS simulator, `hook`, 2003 views: median 2.38 ms,
+treeOK / viewOK / layerOK 2002 / 2002 / 2002.
+
+Stays out of C++ (decided): Tailwind compile and the Lightning CSS walk (JS/Rust at build time). Candidates next: binary token
+table loader, `var()` / `light-dark()` resolver for runtime variable updates, `color-mix` folding.

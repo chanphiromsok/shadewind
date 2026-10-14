@@ -113,8 +113,8 @@ export function toNativePropsWith(
 
     if (colorKeys.includes(key)) {
       out[key] = Array.isArray(value)
-        ? value.map((color) => processColor(color as ColorValue))
-        : processColor(value as ColorValue);
+        ? value.map((color) => toNativeColor(color as ColorValue))
+        : toNativeColor(value as ColorValue);
     } else {
       out[key] = value;
     }
@@ -122,6 +122,16 @@ export function toNativePropsWith(
 
   return out;
 }
+
+// Colour strings the native parser understands (css/ColorParser.hpp) travel as strings; everything else (named colours,
+// PlatformColor, DynamicColorIOS objects) still goes through React Native's processColor.
+const NATIVE_COLOR =
+  /^\s*(#[0-9a-f]{3,8}|rgba?\(|hsla?\(|oklch\(|transparent$)/i;
+
+const toNativeColor = (value: ColorValue): unknown =>
+  typeof value === 'string' && NATIVE_COLOR.test(value)
+    ? value
+    : processColor(value);
 
 export function toNativeProps(style: ThemedStyle): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -133,7 +143,7 @@ export function toNativeProps(style: ThemedStyle): Record<string, unknown> {
       continue;
     }
 
-    out[key] = COLOR_KEYS.has(key) ? processColor(value as ColorValue) : value;
+    out[key] = COLOR_KEYS.has(key) ? toNativeColor(value as ColorValue) : value;
   }
 
   return out;
