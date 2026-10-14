@@ -319,6 +319,17 @@ void HybridShadewind::loadHybridMethods() {
   });
 }
 
+HybridShadewind::State& HybridShadewind::sharedState() {
+  static State* state = new State(); // never destroyed on purpose: UIManager keeps a pointer to the hook
+
+  return *state;
+}
+
+// The hook keeps the UIManager's ContextContainer alive, so its address cannot be reused by a later UIManager.
+bool HybridShadewind::hookRegisteredWith(UIManager& ui) {
+  return _state.registeredContainer.lock() == ui.getContextContainer();
+}
+
 // register(shadowNode, { light: { backgroundColor: 4294967295 }, dark: { ... } })
 // Props must already be in the raw format React Native sends to native (e.g. processed colors).
 jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
@@ -345,11 +356,9 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
   if (auto binding = UIManagerBinding::getBinding(rt)) {
     auto& ui = binding->getUIManager();
 
-    if (!_hookRegistered) {
+    if (!hookRegisteredWith(ui)) {
       ui.registerCommitHook(*_hook);
-      _hookRegistered = true;
-#if defined(__APPLE__)
-#endif
+      _state.registeredContainer = ui.getContextContainer();
     }
 
     std::unordered_map<std::string, std::shared_ptr<const TypedDelta>> typed;
@@ -618,7 +627,7 @@ jsi::Value HybridShadewind::mainBusyMs(jsi::Runtime&, const jsi::Value&, const j
 }
 
 jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
-  if (_hookRegistered) {
+  if (auto uiBinding = UIManagerBinding::getBinding(rt); uiBinding && hookRegisteredWith(uiBinding->getUIManager())) {
     schedulePrewarm();
   }
 

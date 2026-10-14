@@ -33,12 +33,26 @@ public:
 private:
   void schedulePrewarm();
 
-  ThemeRegistry _registry;
-  std::shared_ptr<ThemeHook> _hook = std::make_shared<ThemeHook>();
-  bool _hookRegistered = false;
-  bool _hookMode = true; // false after a setTheme with an older strategy
-  std::string _theme;
-  std::mutex _themeMutex;
+  // The hook is registered with React Native's UIManager, which keeps a raw pointer to it. A HybridObject dies whenever
+  // Hermes collects it (Fast Refresh creates a new one), so the state lives for the process and every instance shares it.
+  struct State {
+    ThemeRegistry registry;
+    std::shared_ptr<ThemeHook> hook = std::make_shared<ThemeHook>();
+    std::weak_ptr<const ContextContainer> registeredContainer; // identifies the UIManager the hook is registered with
+    bool hookMode = true; // false after a setTheme with an older strategy
+    std::string theme;
+    std::mutex themeMutex;
+  };
+
+  static State& sharedState();
+  bool hookRegisteredWith(UIManager& ui);
+
+  State& _state = sharedState();
+  ThemeRegistry& _registry = _state.registry;
+  std::shared_ptr<ThemeHook>& _hook = _state.hook;
+  bool& _hookMode = _state.hookMode;
+  std::string& _theme = _state.theme;
+  std::mutex& _themeMutex = _state.themeMutex;
 };
 
 } // namespace margelo::nitro::shadewind

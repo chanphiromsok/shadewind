@@ -35,3 +35,12 @@ Source: `jpudysz/react-native-unistyles` (HEAD 3aaf2c1, 2026-10-13), `packages/u
 - Babel plugin: Uniwind has none, our Metro adapter is the right seam.
 - `updateShadowTree` as the mechanism: whole-tree BFS plus full re-parse; the hook plus precomputed deltas is cheaper.
 - Pinning families with `shared_ptr`: keeps nodes alive until unlink; fine for them because unlink is guaranteed by Babel-wrapped refs, riskier for us.
+
+## Applied
+
+- Hook, registry and theme state now live in one process-lifetime `State` shared by every `HybridShadewind` instance
+  (Fast Refresh creates a new instance; the old one being collected can no longer leave a dangling hook in the UIManager).
+- The hook registers once per UIManager, identified by its `ContextContainer`.
+- Unlink on unmount already existed (`useThemedRef` -> `unregister` removes the registry and hook entries).
+- iOS Release check: `hook` 3.35 ms median, treeOK/viewOK/layerOK 2002/2002, hookAsync run completes.
+- Not covered: a real Fast Refresh test and Android re-run.
