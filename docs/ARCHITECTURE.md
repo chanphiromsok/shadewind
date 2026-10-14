@@ -15,13 +15,31 @@ pipeline. The Opus memo (docs/STRATEGY.md) advised against building a compiler; 
 
 ## 2. Hard rules
 
-1. **No React state or subscriptions on a theme path.** A theme change never calls `setState`, never notifies a React listener.
-2. **Every themed value has a native route** (style keys, non-style props, navigation chrome).
-3. **A view that cannot be bound still renders correctly** (the current theme's value is in its first render; it may be stale
-   after a later switch only if the user opted out, never silently wrong at mount).
+1. **No React state or subscriptions on the theme-apply path.** `setTheme` never calls `setState` and never notifies a React
+   listener to re-render styled views. *Scoped exception:* `useTheme()` / `subscribe()` (a `useSyncExternalStore` read) exist for
+   UI the engine does not own (status bar, a text label showing the theme name). They are opt-in, never used by the compiler's
+   output, and the old `useThemed` fallback subscription is **dropped**.
+2. **Every themed value has a native route**: style keys (hook), non-style props (`useThemedProps`), paragraph colour (state
+   rebuild). *Navigation chrome* is **not** claimed here: react-navigation's theme is a JS context object with no engine path.
+   Mechanism: keep the theme object identity stable and theme chrome through bound host views and native tab/header props via
+   `useThemedProps`; anything that cannot be done this way is out of scope until a spike says otherwise (spike 7).
+3. **A view always renders correctly at mount** (its first render uses the current theme's resolved value). *After a later switch*
+   an unbound view is **stale, with a dev warning**: there is no subscription to fix it (rule 1). The guarantee that this
+   never happens in practice depends on spike 1 (every host view bindable); until it passes, binding is by ref and views that
+   hide their ref (custom components that do not forward it) are the stale case.
 4. **JS never sits on the switch path**: `setTheme` is a native call; React is not asked to render.
 5. **Compatibility goal**: tovtam's existing `global.css` (`@variant light/dark`, `@theme`) and `className` strings compile
-   unchanged. Migration = config swap, not a rewrite. (Promise is conditional on the spikes in section 6.)
+   unchanged. Migration = config swap, not a rewrite. (Conditional on the spikes in section 6.)
+
+## 2b. Who merges (single source of truth)
+
+- **Merging is JS**: `cn()` / `clsx` / `twMerge` / template strings are resolved by the runtime resolver in JS, with Tailwind
+  conflict rules, producing one merged style + the themed props per theme.
+- A **binding carries per-theme deltas** (today's `register` path: `{ theme -> props }`). The commit hook applies those.
+- The **native `classId x slot` table is only an optimisation** and only exists if spike 1 (node tagging) passes: then a
+  literal class id can be read natively without a JS merge. It never merges; dynamic strings always go through the JS resolver.
+- Unknown pieces: a dynamic string built from known utilities (`cn('bg-card', cond && 'border-primary')`) resolves from the
+  token table at runtime. Only a truly unknown utility falls back (unthemed style + dev warning).
 
 ## 3. ERD
 
@@ -123,7 +141,7 @@ flowchart TD
 | Switch | `setTheme(name)` | slot id, epoch++ | JS call -> C++, returns immediately |
 | Apply | commit | cloned nodes with theme values | C++ commit hook (JS thread sync, or background) |
 | Interaction state | press/focus/disabled | state variant applied | open spike 3 |
-| Fallback | class not in table / unbindable | plain unthemed style + dev warning | JS |
+| Fallback | truly unknown utility, or unbindable host | current-theme value at mount, stale after a switch, dev warning (rule 3) | JS |
 
 ## 5. Reuse and retire
 
@@ -131,8 +149,9 @@ flowchart TD
   shared process-lifetime state.
 - **New**: compiler (Tailwind v4 candidates + CSS theme blocks), StyleTable, runtime resolver, native table, node tagging
   (if spike 1 passes).
-- **Uniwind seam** (`metro.cjs`, `src/uniwind`): decision needed. Recommended: keep as a *deprecated migration bridge* for one
-  release (apps can adopt the engine before the compiler exists), then delete. Not extended further.
+- **Uniwind seam** (`metro.cjs`, `src/uniwind`): **open question for the owner.** You said you no longer want to run on top of
+  Uniwind. Default in this doc: retire it (delete) once the compiler can compile tovtam. The alternative is a deprecated bridge
+  for one release. Not extended further either way.
 
 ## 6. Open decisions: each needs a spike with a pass criterion (not answered from memory)
 
@@ -143,6 +162,7 @@ flowchart TD
 | 3 Interaction state | `active:`/`focus:`/`disabled:` (21 `active:` in tovtam) without React state | a native route exists; else a documented scoped exception to rule 1 |
 | 4 Per-theme layout | `dark:p-8` | supported (dirty Yoga in the hook) or explicitly out of scope; pick one |
 | 5 Slot count | `kMaxThemes = 6` fixed array | slots sized at runtime from `configure` |
+| 7 Navigation chrome | can react-navigation's theme be driven natively (stable theme object + bound chrome + `useThemedProps`)? | header and tab bar repaint on a switch with no `NavigationContainer` re-render, or documented out of scope |
 | 6 Build pipeline | Tailwind v4 candidate extraction inside Metro/Expo + React Compiler + web | compiles tovtam's `global.css` and sources with no changes |
 
 ## 7. Housekeeping
