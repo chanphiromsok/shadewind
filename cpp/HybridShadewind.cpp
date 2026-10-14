@@ -315,6 +315,7 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
     prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
     prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
+    prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
     prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
   });
 }
@@ -668,6 +669,28 @@ jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, co
 
 // setTheme(name, strategy?) pushes the registered props of `name` to every live view without touching React.
 // strategy: 'hookAsync' (default) | 'hook' | 'stock' | 'fast' | 'fastAsync' | 'direct' | 'both'
+// configure(names): declares the themes in order. Returns { maxThemes, ok } (ok false: more names than slots).
+jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (count < 1 || !args[0].isObject() || !args[0].asObject(rt).isArray(rt)) {
+    throw jsi::JSError(rt, "Shadewind.configure(names) expects an array of theme names");
+  }
+
+  auto array = args[0].asObject(rt).asArray(rt);
+  std::vector<std::string> names;
+
+  for (size_t i = 0; i < array.size(rt); i++) {
+    names.push_back(array.getValueAtIndex(rt, i).asString(rt).utf8(rt));
+  }
+
+  const bool ok = _hook->declareThemes(names);
+  jsi::Object result(rt);
+
+  result.setProperty(rt, "maxThemes", ThemeHook::maxThemes());
+  result.setProperty(rt, "ok", ok);
+
+  return result;
+}
+
 jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isString()) {
     throw jsi::JSError(rt, "Shadewind.setTheme(name) expects a string");

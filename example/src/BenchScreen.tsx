@@ -17,7 +17,7 @@ import {
   type ThemeStrategy,
   type ThemeTimings,
   type ThemedStyles,
-} from 'shadewind';
+} from 'shadewind/internal';
 
 declare const performance: { now(): number };
 

@@ -5,20 +5,26 @@ import {
   type NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ShadewindEngine } from 'shadewind/internal';
 import {
-  ShadewindEngine,
-  useThemedRef,
-  type ThemeStrategy,
+  ThemedView,
+  configure,
+  followSystem,
+  getTheme,
+  setTheme,
+  useTheme,
+  useThemed,
   type ThemedStyles,
 } from 'shadewind';
 import BenchScreen from './BenchScreen';
 import TheirBench from './TheirBench';
 import { Linking, Platform, Settings as RNSettings } from 'react-native';
-import { enableFreeze } from 'react-native-screens';
 
 type Routes = { Home: undefined; Settings: undefined; Bench: undefined };
 
 const Stack = createNativeStackNavigator<Routes>();
+
+configure({ themes: ['light', 'dark'], initialTheme: 'light' });
 
 // Every screen is registered per theme once. Nothing here re-renders on a theme change.
 const SCREEN: ThemedStyles = {
@@ -32,22 +38,23 @@ const CARD: ThemedStyles = {
 };
 
 function Card({ label, pad = 16 }: { label: string; pad?: number }) {
-  const ref = useThemedRef(CARD);
+  const themed = useThemed(CARD);
 
   return (
-    <View ref={ref} style={[styles.card, CARD.light, { padding: pad }]}>
+    <View
+      ref={themed.ref}
+      style={[styles.card, themed.style, { padding: pad }]}
+    >
       <Text>{label}</Text>
     </View>
   );
 }
 
 function Screen({ children }: { children: React.ReactNode }) {
-  const ref = useThemedRef(SCREEN);
-
   return (
-    <View ref={ref} style={[styles.screen, SCREEN.light]}>
+    <ThemedView themed={SCREEN} style={styles.screen}>
       {children}
-    </View>
+    </ThemedView>
   );
 }
 
@@ -111,32 +118,49 @@ function Home({ navigation }: NativeStackScreenProps<Routes, 'Home'>) {
 }
 
 function Settings() {
-  const set = (name: 'light' | 'dark', strategy: ThemeStrategy) => {
-    ShadewindEngine.setTheme(name, strategy);
-  };
+  const theme = useTheme();
 
   return (
     <Screen>
-      <Card label="Settings card" />
+      <Card label={`Settings card, theme ${theme}`} />
       <Pressable
         testID="settings-dark"
         style={styles.button}
-        onPress={() => ShadewindEngine.setTheme('dark')}
+        onPress={() => setTheme('dark')}
       >
-        <Text style={styles.buttonText}>Dark (default)</Text>
+        <Text style={styles.buttonText}>Dark</Text>
       </Pressable>
       <Pressable
         testID="settings-light"
         style={styles.button}
-        onPress={() => ShadewindEngine.setTheme('light')}
+        onPress={() => setTheme('light')}
       >
-        <Text style={styles.buttonText}>Light (default)</Text>
+        <Text style={styles.buttonText}>Light</Text>
       </Pressable>
-      <Pressable style={styles.button} onPress={() => set('dark', 'hook')}>
-        <Text style={styles.buttonText}>Dark (hook)</Text>
+      <Pressable
+        testID="settings-toggle"
+        style={styles.button}
+        onPress={() => setTheme(getTheme() === 'light' ? 'dark' : 'light')}
+      >
+        <Text style={styles.buttonText}>Toggle</Text>
       </Pressable>
-      <Pressable style={styles.button} onPress={() => set('light', 'hook')}>
-        <Text style={styles.buttonText}>Light (hook)</Text>
+      <Pressable
+        testID="settings-rapid"
+        style={styles.button}
+        onPress={() => {
+          for (let i = 0; i < 7; i++) {
+            setTheme(i % 2 === 0 ? 'dark' : 'light');
+          }
+        }}
+      >
+        <Text style={styles.buttonText}>Rapid x7 (ends on dark)</Text>
+      </Pressable>
+      <Pressable
+        testID="settings-system"
+        style={styles.button}
+        onPress={() => followSystem()}
+      >
+        <Text style={styles.buttonText}>Follow system</Text>
       </Pressable>
     </Screen>
   );
@@ -169,7 +193,9 @@ function useLaunchFlags(): LaunchFlags | null {
 
     Linking.getInitialURL()
       .then((url) => {
-        const match = url?.match(/^uwbench:\/\/(theme|bench)(?:\?strategy=(\w+))?/);
+        const match = url?.match(
+          /^uwbench:\/\/(theme|bench)(?:\?strategy=(\w+))?/
+        );
 
         setFlags({
           bench: Boolean(match),

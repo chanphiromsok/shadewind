@@ -2,7 +2,7 @@ import './global.css'
 import { useState } from 'react'
 import { Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native'
 import { ScopedTheme, Uniwind } from 'uniwind'
-import { ShadewindEngine } from 'shadewind'
+import { ShadewindEngine } from 'shadewind/internal'
 import { decisions, renders } from './node_modules/uniwind/src/shadewind/useShadewindStyle'
 
 // Spike B test screen: every row has a known expected colour per theme (see EXPECTED below).

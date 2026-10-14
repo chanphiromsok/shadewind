@@ -1,6 +1,8 @@
 # Shadewind public API (1.0 design)
 
-Status: design, not implemented. Reviewed by Opus on 2026-10-14. Contract: **a binding always renders correctly; the fast
+Status: core implemented on branch `feat/theme-engine-android-benchmark` (configure, setTheme, getTheme, subscribe, useTheme,
+followSystem, capabilities, useThemed, ThemedView/ThemedText, mergeRefs, `shadewind/internal`). Not yet: `shadewind/uniwind`,
+`shadewind/metro`, `whenApplied`. Reviewed by Opus on 2026-10-14. Contract: **a binding always renders correctly; the fast
 path is an optimisation and never changes behaviour.**
 
 ## Facts in the code that shape it
@@ -144,3 +146,12 @@ fast path, components beyond `View`/`Text`.
 4. Mount cost of the Uniwind adapter, scrolling and FlatList recycling unmeasured.
 5. Nested `Text` recolour where an inner explicit colour equals the old colour has no targeted test.
 6. Android: `asyncCommit` false and no `viewOK`/`layerOK` probes; `capabilities` must be truthful.
+
+## Implementation notes (core)
+
+- Native `configure(names)` interns theme names in order and returns `{ maxThemes, ok }`; `capabilities.maxThemes` is 6 (JS const,
+  kept equal to `ThemeHook::kMaxThemes`).
+- `setTheme` validates names in JS (`UNKNOWN_THEME`), so a typo can no longer take a native slot.
+- `capabilities` has no `version`/`textRecolor` yet.
+- iOS Release check with the public API (Settings: Dark, Light, Rapid x7, back to frozen Home, Inspect): screen and cards dark,
+  `treeOK 31/31 viewOK 31/31`. The saved rapid-toggle flow and Android are still open.

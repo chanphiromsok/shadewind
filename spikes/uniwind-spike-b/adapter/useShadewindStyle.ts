@@ -1,6 +1,6 @@
 import { type Ref, useCallback, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
 import { StyleSheet } from 'react-native'
-import type { ThemedStyles } from 'shadewind'
+import type { ThemedStyles } from 'shadewind/internal'
 import { StyleDependency } from '../common/consts'
 import { useUniwindContext } from '../core/context'
 import { UniwindListener } from '../core/listener'

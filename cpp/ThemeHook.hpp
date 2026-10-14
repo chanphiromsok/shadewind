@@ -330,6 +330,23 @@ public:
     _entries.erase(family);
   }
 
+  // Interns the declared theme names in order, so slot ids are deterministic and a later typo cannot take a slot.
+  // Returns false when more than kMaxThemes names are declared.
+  bool declareThemes(const std::vector<std::string>& names) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    bool ok = true;
+
+    for (const auto& name : names) {
+      ok = internTheme(name) != kNoTheme && ok;
+    }
+
+    return ok;
+  }
+
+  static constexpr int maxThemes() {
+    return static_cast<int>(kMaxThemes);
+  }
+
   void setTheme(const std::string& theme) {
     std::lock_guard<std::mutex> lock(_mutex);
     _theme = internTheme(theme);

@@ -11,7 +11,7 @@ import {
   useThemedRef,
   type ThemeStrategy,
   type ThemedStyles,
-} from 'shadewind';
+} from 'shadewind/internal';
 
 const RUNS = 10;
 const ITEMS_COUNT = 1000;

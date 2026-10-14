@@ -1,296 +1,437 @@
-import { useCallback, useMemo, useRef } from 'react';
-import { processColor, type ColorValue } from 'react-native';
-import { NitroModules } from 'react-native-nitro-modules';
-import type { Shadewind } from './Shadewind.nitro';
+import {
+  createElement,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  type ComponentType,
+  type Ref,
+  type RefCallback,
+} from 'react';
+import {
+  Appearance,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ColorValue,
+  type StyleProp,
+  type TextProps,
+  type TextStyle,
+  type ViewProps,
+  type ViewStyle,
+} from 'react-native';
+import { ShadewindEngine, toNativeProps } from './internal';
 
-// Raw JSI methods registered natively in HybridShadewind::loadHybridMethods.
-type RawMethods = {
-  register(shadowNode: unknown, propsByTheme: Record<string, object>): void;
-  unregister(shadowNode: unknown): void;
-  setTheme(name: string, strategy?: ThemeStrategy): ThemeTimings;
-  flushPending(): void;
-  prepare(): void;
-  resetMainBusy(): void;
-  mainBusyMs(): number;
-  inspect(): InspectReport;
-  refreshReactNodes(nodes: unknown[]): number;
-};
+// Public API, see docs/API.md. Everything diagnostic or benchmark-only lives in `shadewind/internal`.
 
-// Created on first use, not at import: a styling library that imports the engine from a component module can be evaluated before
-// React Native has finished its own setup (the native runtime is not ready then).
-let nativeInstance: (Shadewind & RawMethods) | undefined;
+/** Augment to type theme names: `declare module 'shadewind' { interface Register { themes: 'light' | 'dark' } }`. */
+export interface Register {}
 
-const getNative = () =>
-  (nativeInstance ??= NitroModules.createHybridObject<Shadewind>(
-    'Shadewind'
-  ) as Shadewind & RawMethods);
+export type ThemeName = Register extends { themes: infer T extends string }
+  ? T
+  : string;
 
-/** Debug report: where a stale colour comes from. All counts refer to backgroundColor of registered views. */
-export type InspectReport = {
-  theme: string;
-  registered?: number;
-  inTree?: number;
-  notInTree?: number;
-  treeMatchesExpected?: number;
-  /** iOS: registered views whose UIView.backgroundColor equals the expected theme colour. */
-  nativePropsMatchExpected?: number;
-  /** iOS: registered views whose layer was painted with the expected theme colour. */
-  layerMatchesExpected?: number;
-  samples?: string;
-};
+export type ThemeKey = 'backgroundColor' | 'borderColor' | 'color';
 
-/** Native-side breakdown of one setTheme call, in milliseconds. */
-export type ThemeTimings = {
-  views: number;
-  /** 'hook' strategy: time spent finding views that need an update inside the commit hook. */
-  scanMs: number;
-  /** 'hook' strategy: time spent building typed props and cloning the nodes. */
-  cloneMs: number;
-  /** 'hook' strategy: part of cloneMs spent building the typed props. */
-  propsMs: number;
-  /** 'hook' strategies: views whose props came from the per-view cache instead of being rebuilt. */
-  reused?: number;
-  /** 'hook' strategies: views whose node was taken from the pre-built buffer (no clone on the critical path). */
-  precloned?: number;
-  /** 'hook' strategies: why nodes missed the pre-built buffer, as notOurs/noBuffer/source/props/children counts. */
-  misses?: string;
-  /** 'hookAsync': time from the previous setTheme call until the main thread finished mounting it. */
-  visualMs?: number;
-  collectMs: number;
-  directMs: number;
-  commitMs: number;
-  totalMs: number;
-};
-
-/**
- * How a theme change reaches the screen. Unknown names throw.
- * - 'hookAsync' (default): typed props are applied inside a commit hook (so every commit, React's too, keeps the theme) and the
- *   commit runs on a background thread: the JS thread is free right away (about 0.05 ms for 2000 views), the screen updates a few
- *   ms later. On Android the commit is currently synchronous.
- * - 'hook': the same, but the commit runs synchronously on the JS thread (about 4-8 ms for 2000 views).
- * - 'stock': React Native's UIManager::updateShadowTree (whole-tree walk). Benchmark baseline.
- * - 'fastAsync': one single-pass shadow-tree commit that clones only the touched nodes; the UI thread mounts it later.
- * - 'direct': update the native views immediately, the shadow tree catches up on the next React clone. Benchmark baseline.
- * - 'both': direct update now plus a single-pass commit. Benchmark baseline.
- * The last four are measurement baselines and are not supported for production use.
- */
-export type ThemeStrategy =
-  | 'hook'
-  | 'hookAsync'
-  | 'stock'
-  | 'fastAsync'
-  | 'direct'
-  | 'both';
-
-/** Style subset supported in v0: visual-only props that don't need a Yoga layout pass. */
 export type ThemedStyle = {
   backgroundColor?: ColorValue;
   borderColor?: ColorValue;
-  /** Text colour (Text only). The engine rebuilds the paragraph state itself, so no layout pass is needed. */
+  /** Text colour (Text only). */
   color?: ColorValue;
-  opacity?: number;
 };
 
-export type ThemedStyles = Record<string, ThemedStyle>;
+export type ThemedStyles = Readonly<Partial<Record<ThemeName, ThemedStyle>>>;
 
-const COLOR_KEYS = new Set<keyof ThemedStyle>([
+export type Capabilities = Readonly<{
+  maxThemes: number;
+  supportedKeys: readonly ThemeKey[];
+  asyncCommit: boolean;
+  platform: 'ios' | 'android';
+}>;
+
+export type ShadewindErrorCode =
+  'UNKNOWN_THEME' | 'TOO_MANY_THEMES' | 'DUPLICATE_THEME' | 'NOT_CONFIGURED';
+
+export class ShadewindError extends Error {
+  code: ShadewindErrorCode;
+
+  constructor(code: ShadewindErrorCode, message: string) {
+    super(`[shadewind] ${message}`);
+    this.name = 'ShadewindError';
+    this.code = code;
+  }
+}
+
+export type ConfigureOptions = {
+  themes: readonly ThemeName[];
+  initialTheme: ThemeName;
+  /** What to do when a binding cannot use the fast path (it renders through React instead). Default 'warn'. */
+  onUnsupported?: 'warn' | 'throw' | 'silent';
+};
+
+const SUPPORTED_KEYS: readonly ThemeKey[] = [
   'backgroundColor',
   'borderColor',
   'color',
-]);
+];
 
-// UIManager::updateShadowTree takes props in the raw format React Native sends to native,
-// so colors must be processed (numbers) before they cross into C++.
-export function toNativeProps(style: ThemedStyle): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+export const capabilities: Capabilities = Object.freeze({
+  maxThemes: 6,
+  supportedKeys: SUPPORTED_KEYS,
+  // Android commits synchronously for now (no background executor yet).
+  asyncCommit: Platform.OS === 'ios',
+  platform: Platform.OS === 'ios' ? 'ios' : 'android',
+} as const);
 
-  for (const key of Object.keys(style) as Array<keyof ThemedStyle>) {
-    const value = style[key];
+type Config = {
+  themes: readonly string[];
+  onUnsupported: 'warn' | 'throw' | 'silent';
+};
 
-    if (value === undefined) {
-      continue;
+let config: Config | null = null;
+let current: string | null = null;
+let stopFollowing: (() => void) | null = null;
+const listeners = new Set<(theme: ThemeName) => void>();
+
+const assertConfigured = (): Config => {
+  if (!config || current === null) {
+    throw new ShadewindError(
+      'NOT_CONFIGURED',
+      'call configure({ themes, initialTheme }) before using Shadewind'
+    );
+  }
+
+  return config;
+};
+
+/** Declares the themes. Call once, before the first render. A different list needs a reload (native state is per process). */
+export function configure(options: ConfigureOptions): void {
+  const { themes, initialTheme, onUnsupported = 'warn' } = options;
+
+  if (new Set(themes).size !== themes.length) {
+    throw new ShadewindError('DUPLICATE_THEME', 'duplicate theme name');
+  }
+
+  if (themes.length === 0 || themes.some((name) => !name)) {
+    throw new ShadewindError('UNKNOWN_THEME', 'themes must be non-empty names');
+  }
+
+  if (themes.length > capabilities.maxThemes) {
+    throw new ShadewindError(
+      'TOO_MANY_THEMES',
+      `at most ${capabilities.maxThemes} themes are supported, got ${themes.length}`
+    );
+  }
+
+  if (!themes.includes(initialTheme)) {
+    throw new ShadewindError(
+      'UNKNOWN_THEME',
+      `initialTheme '${initialTheme}' is not in themes`
+    );
+  }
+
+  if (config) {
+    const same =
+      config.themes.length === themes.length &&
+      config.themes.every((name, i) => name === themes[i]);
+
+    if (!same && __DEV__) {
+      console.warn(
+        '[shadewind] configure() was called with a different theme list; reload the app, native state is per process.'
+      );
     }
 
-    out[key] = COLOR_KEYS.has(key) ? processColor(value as ColorValue) : value;
-  }
+    config.onUnsupported = onUnsupported;
 
-  return out;
-}
-
-// Private React Native API (same one RN's own DOM APIs use). Isolated here because it can change.
-const getShadowNode = (ref: unknown): unknown => {
-  const handle = (ref as { __internalInstanceHandle?: unknown } | null)
-    ?.__internalInstanceHandle;
-
-  if (!handle) {
-    return null;
-  }
-
-  const {
-    getNodeFromInternalInstanceHandle,
-  } = require('react-native/Libraries/ReactNative/RendererProxy');
-
-  return getNodeFromInternalInstanceHandle(handle);
-};
-
-// Views we manage. Used to find React's own handles to their nodes (fiber.stateNode.node).
-const registered = new Set<unknown>();
-
-type Fiber = {
-  tag: number;
-  return: Fiber | null;
-  alternate: Fiber | null;
-  stateNode?: { node?: unknown };
-};
-
-const HOST_COMPONENT_TAG = 5;
-
-// React rebuilds its tree from these handles, so after a native update they must point at the committed nodes,
-// for the views we changed and for every host ancestor (their child lists come from React's handles too).
-// Private React internals: isolated here, can change between React versions.
-const refreshReact = () => {
-  const nodes: unknown[] = [];
-  const seenNodes = new Set<unknown>();
-  const seenFibers = new Set<Fiber>();
-
-  registered.forEach((ref) => {
-    let fiber =
-      (ref as { __internalInstanceHandle?: Fiber }).__internalInstanceHandle ??
-      null;
-
-    while (fiber && !seenFibers.has(fiber)) {
-      seenFibers.add(fiber);
-
-      if (fiber.tag === HOST_COMPONENT_TAG) {
-        for (const candidate of [fiber, fiber.alternate]) {
-          const node = candidate?.stateNode?.node;
-
-          if (node && !seenNodes.has(node)) {
-            seenNodes.add(node);
-            nodes.push(node);
-          }
-        }
-      }
-
-      fiber = fiber.return;
-    }
-  });
-
-  if (nodes.length > 0) {
-    getNative().refreshReactNodes(nodes);
-  }
-};
-
-// Only the older strategies rely on React's handles being repointed; 'hook' fixes the tree inside the commit.
-let needsReactRefresh = false;
-
-let flushScheduled = false;
-
-// Refs attach during React's commit; the microtask runs right after it, when the nodes are in the committed tree.
-const scheduleFlush = () => {
-  if (flushScheduled) {
     return;
   }
 
-  flushScheduled = true;
-  Promise.resolve().then(() => {
-    flushScheduled = false;
-    getNative().flushPending();
+  const declared = ShadewindEngine.configure([...themes]);
 
-    if (needsReactRefresh) {
-      refreshReact();
-    }
-  });
+  if (!declared.ok) {
+    throw new ShadewindError(
+      'TOO_MANY_THEMES',
+      `native engine supports ${declared.maxThemes} themes`
+    );
+  }
+
+  config = { themes: [...themes], onUnsupported };
+  current = initialTheme;
+  ShadewindEngine.setTheme(initialTheme, 'hook');
+}
+
+export function getTheme(): ThemeName {
+  assertConfigured();
+
+  return current as ThemeName;
+}
+
+export function subscribe(listener: (theme: ThemeName) => void): () => void {
+  listeners.add(listener);
+
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+const applyTheme = (name: string) => {
+  const { themes } = assertConfigured();
+
+  if (!themes.includes(name)) {
+    throw new ShadewindError(
+      'UNKNOWN_THEME',
+      `theme '${name}' was not declared`
+    );
+  }
+
+  if (name === current) {
+    return;
+  }
+
+  current = name;
+  ShadewindEngine.setTheme(name);
+  listeners.forEach((listener) => listener(name as ThemeName));
 };
 
-export const ShadewindEngine = {
-  register(ref: unknown, styles: ThemedStyles) {
-    const node = getShadowNode(ref);
+/** Switches every bound view without rendering React components. Rapid calls: the last one wins. */
+export function setTheme(name: ThemeName): void {
+  stopFollowing?.();
+  applyTheme(name);
+}
 
-    if (!node) {
-      return false;
+/** Follows the OS appearance. An explicit setTheme() stops following. Returns an unsubscribe. */
+export function followSystem(
+  map: { light: ThemeName; dark: ThemeName } = {
+    light: 'light' as ThemeName,
+    dark: 'dark' as ThemeName,
+  }
+): () => void {
+  stopFollowing?.();
+
+  const apply = (scheme: string | null | undefined) => {
+    applyTheme(scheme === 'dark' ? map.dark : map.light);
+  };
+  const subscription = Appearance.addChangeListener(({ colorScheme }) =>
+    apply(colorScheme)
+  );
+
+  apply(Appearance.getColorScheme());
+
+  const stop = () => {
+    subscription.remove();
+
+    if (stopFollowing === stop) {
+      stopFollowing = null;
+    }
+  };
+
+  stopFollowing = stop;
+
+  return stop;
+}
+
+/** The current theme as React state, for UI the engine does not update (status bar, navigation theme). */
+export function useTheme(): ThemeName {
+  return useSyncExternalStore(subscribe, getTheme);
+}
+
+export function mergeRefs<T>(
+  ...refs: Array<Ref<T> | undefined>
+): RefCallback<T> {
+  return (value) => {
+    const cleanups: Array<() => void> = [];
+
+    for (const ref of refs) {
+      if (typeof ref === 'function') {
+        const cleanup = ref(value);
+
+        if (typeof cleanup === 'function') {
+          cleanups.push(cleanup);
+        }
+      } else if (ref) {
+        (ref as { current: T | null }).current = value;
+      }
     }
 
-    getNative().register(
-      node,
-      Object.fromEntries(
-        Object.entries(styles).map(([theme, style]) => [
-          theme,
-          toNativeProps(style),
-        ])
-      )
-    );
+    return cleanups.length > 0
+      ? () => cleanups.forEach((cleanup) => cleanup())
+      : undefined;
+  };
+}
 
-    registered.add(ref);
-    scheduleFlush();
+const warned = new Set<string>();
 
-    return true;
-  },
-  unregister(ref: unknown) {
-    const node = getShadowNode(ref);
+const unsupported = (reason: string, key: string) => {
+  const mode = config?.onUnsupported ?? 'warn';
 
-    registered.delete(ref);
+  if (mode === 'silent') {
+    return;
+  }
 
-    if (node) {
-      getNative().unregister(node);
+  const message = `[shadewind] view uses the React path: ${reason}`;
+
+  if (mode === 'throw') {
+    throw new Error(message);
+  }
+
+  if (__DEV__ && !warned.has(key)) {
+    warned.add(key);
+    console.warn(message);
+  }
+};
+
+// Returns why the styles cannot use the engine, or null when they can.
+const checkStyles = (styles: ThemedStyles, themes: readonly string[]) => {
+  const defined = Object.keys(styles);
+  const keys = new Set<string>();
+
+  for (const name of defined) {
+    if (!themes.includes(name)) {
+      return `theme '${name}' was not declared`;
     }
-  },
-  /** Applies a theme to every registered view without rendering any React component. */
-  setTheme(name: string, strategy: ThemeStrategy = 'hookAsync'): ThemeTimings {
-    const timings = getNative().setTheme(name, strategy);
 
-    // the hook family fixes the tree inside the commit; only the older strategies need React's handles repointed
-    needsReactRefresh =
-      strategy !== 'hook' && strategy !== 'hookAsync';
-
-    if (needsReactRefresh) {
-      refreshReact();
+    for (const key of Object.keys(styles[name as ThemeName] ?? {})) {
+      keys.add(key);
     }
+  }
 
-    return timings;
-  },
-  /** Measurement: clears the longest main-thread busy period (iOS only; starts the run loop observer on first call). */
-  resetMainBusy(): void {
-    getNative().resetMainBusy();
-  },
-  /** Measurement: longest main-thread run loop busy period in ms since resetMainBusy (iOS only). */
-  mainBusyMs(): number {
-    return getNative().mainBusyMs();
-  },
-  /**
-   * Optional hint that a theme switch is probably coming (call it from `onPressIn` of a theme toggle). It reads, off the
-   * JS thread, the memory the switch will use, so a switch after a long idle does not pay for cold caches. Changes nothing.
-   */
-  prepare(): void {
-    getNative().prepare();
-  },
-  /** Debug only. Compares committed tree, nativeProps overlay and expected theme colours. */
-  inspect(): InspectReport {
-    return getNative().inspect();
-  },
-  getTheme(): string {
-    return getNative().getTheme();
-  },
+  for (const key of keys) {
+    if (!SUPPORTED_KEYS.includes(key as ThemeKey)) {
+      return `'${key}' is not supported (supported: ${SUPPORTED_KEYS.join(', ')})`;
+    }
+  }
+
+  for (const name of themes) {
+    const style = (styles[name as ThemeName] ?? {}) as Record<string, unknown>;
+
+    for (const key of keys) {
+      if (style[key] === undefined) {
+        return `theme '${name}' does not define '${key}'`;
+      }
+    }
+  }
+
+  return keys.size === 0 ? 'no style keys' : null;
+};
+
+const noopSubscribe = () => () => {};
+
+export type UseThemedResult<T extends object> = {
+  // any: a host component's ref type differs per component (View, Text, ScrollView, ...)
+
+  ref: (instance: any) => void;
+  /** Style of the current theme, so mount, re-render and fallback always show the right colour. */
+  style: T;
+  /** true: the engine updates this view; false: it re-renders through React on a switch. */
+  engine: boolean;
 };
 
 /**
- * Callback ref that registers a view's per-theme style on mount and unregisters on unmount.
- * Keep `styles` referentially stable (module constant or useMemo), or the view re-registers every render.
+ * Binds one view to per-theme styles. Pass `ref` and `style` to a host component.
+ * Anything the engine cannot handle falls back to a normal React render for this view.
  */
-export function useThemedRef(styles: ThemedStyles) {
-  const current = useRef<unknown>(null);
-  const stable = useMemo(() => styles, [styles]);
+export function useThemed<T extends object = ViewStyle>(
+  styles: ThemedStyles,
+  options?: { forceFallback?: string }
+): UseThemedResult<T> {
+  const cfg = assertConfigured();
+  // inline objects are fine: identity is the content
+  const key = JSON.stringify(styles);
+  const stable = useMemo(() => styles, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const reason = options?.forceFallback ?? checkStyles(stable, cfg.themes);
+  const engine = reason === null;
 
-  return useCallback(
-    (ref: unknown) => {
-      if (ref) {
-        current.current = ref;
-        ShadewindEngine.register(ref, stable);
-      } else if (current.current) {
-        ShadewindEngine.unregister(current.current);
-        current.current = null;
-      }
-    },
-    [stable]
+  if (reason !== null) {
+    unsupported(reason, key);
+  }
+
+  // only the fallback subscribes; engine views do not re-render on a switch
+  const theme = useSyncExternalStore(
+    engine ? noopSubscribe : subscribe,
+    getTheme
   );
+  const native = useMemo(
+    () =>
+      engine
+        ? Object.fromEntries(
+            Object.entries(stable).map(([name, style]) => [
+              name,
+              toNativeProps(style as ThemedStyle),
+            ])
+          )
+        : null,
+    [engine, stable]
+  );
+
+  // React 19 calls the returned function on detach; typed as void so any host ref type accepts it
+  const ref = useCallback<RefCallback<unknown>>(
+    (node) => {
+      if (!node || !native) {
+        return undefined;
+      }
+
+      ShadewindEngine.registerRaw(node, native);
+
+      return () => ShadewindEngine.unregister(node);
+    },
+    [native]
+  );
+
+  return {
+    ref,
+    style: (stable[theme] ?? {}) as unknown as T,
+    engine,
+  };
 }
+
+const overlap = (style: StyleProp<object>, styles: ThemedStyles) => {
+  const flat = (StyleSheet.flatten(style) ?? {}) as Record<string, unknown>;
+  const registered = new Set<string>();
+
+  for (const name of Object.keys(styles)) {
+    for (const key of Object.keys(styles[name as ThemeName] ?? {})) {
+      registered.add(key);
+    }
+  }
+
+  for (const key of registered) {
+    if (flat[key] !== undefined) {
+      return `inline style overrides '${key}'`;
+    }
+  }
+
+  return undefined;
+};
+
+export type ThemedViewProps = ViewProps & { themed: ThemedStyles };
+export type ThemedTextProps = TextProps & { themed: ThemedStyles };
+
+function makeThemed<
+  P extends { style?: StyleProp<object>; ref?: Ref<unknown> },
+>(Base: ComponentType<P>, displayName: string) {
+  const Themed = ({ themed, ...props }: P & { themed: ThemedStyles }) => {
+    const bound = useThemed(themed, {
+      forceFallback: overlap(props.style, themed),
+    });
+
+    return createElement(Base, {
+      ...(props as unknown as P),
+      ref: mergeRefs(bound.ref, props.ref),
+      style: [bound.style, props.style],
+    } as unknown as P);
+  };
+
+  Themed.displayName = displayName;
+
+  return Themed;
+}
+
+export const ThemedView = makeThemed<ViewProps & { ref?: Ref<unknown> }>(
+  View as ComponentType<ViewProps & { ref?: Ref<unknown> }>,
+  'ThemedView'
+) as ComponentType<ThemedViewProps & { style?: StyleProp<ViewStyle> }>;
+
+export const ThemedText = makeThemed<TextProps & { ref?: Ref<unknown> }>(
+  Text as ComponentType<TextProps & { ref?: Ref<unknown> }>,
+  'ThemedText'
+) as ComponentType<ThemedTextProps & { style?: StyleProp<TextStyle> }>;
