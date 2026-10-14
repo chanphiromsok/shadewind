@@ -449,3 +449,27 @@ retirement is undecided.
 Observation from the Uniwind Pro demo (shipped binary, strings only, not profiled): it offers Circle / Blur / Fade / None
 transitions on theme change, which suggests the switch is covered by an overlay animation rather than made cheap. Our
 engine's goal is to make the switch itself cheap so no cover is needed; this is unmeasured on that app.
+
+## 15. Render path vs theme-switch path, measured on Uniwind's own benchmark app (2026-10-15)
+
+Their app (`apps/uniwind`, `App.tsx` and `useBenchmark` untouched), Release, iPhone 17 Pro simulator, 2003 views, average of 10 per
+launch. Engine arm = their app plus `withShadewind` and `installUniwind()`.
+
+| Scenario | Plain Uniwind | Engine arm (before `b16ac9f`) |
+|---|---|---|
+| Render (re-mount 2003 views) | ~63 ms (62.9, 63.2, 62.6) | 74.4 ms (one valid launch) |
+| Theme switch | ~110 ms warm (109.9, 110.1, 103.0) | not yet measured on this app |
+
+Finding: the engine is slower than plain on mount (about +11 ms, +18 %, single launch). A theme switch is where it wins; the
+cost is paid at mount. This is the context their chart measures twice (render and theme), and our earlier numbers covered only
+the switch.
+
+Cause (read from the code, not yet profiled): `useShadewindStyle` built a full plan per mounted view (resolve per theme, compare
+as JSON) and `register` converted the same per-theme styles to native props per view, about 2,003 times for a few classNames.
+Change `b16ac9f`: the plan is cached on the object Uniwind's store returns for a repeated className (`WeakMap`), and the native
+conversion is cached per styles object. Not yet measured; the next suspect, if render stays above plain, is the native
+`scheduleFlush` after mount (a commit that is pointless at mount because React's style already carries the current theme).
+
+Method notes: the engine arm must be checked to contain the commit under test (compare packed `lib/` with the repo) and each launch
+must be validated on screen (header and the "x 10 runs" / "x 10 theme changes" label); scripted fixed sleeps captured mid-run and
+wrong-app screens. Plain and engine blocks should be interleaved (the machine drifted 3.2 -> 4.5 ms within hours).
