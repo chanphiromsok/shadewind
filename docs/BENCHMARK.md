@@ -107,3 +107,17 @@ Notes: Android commits synchronously on the JS thread (no background commit yet)
 AVD and no same-run plain-Uniwind run, so it is not comparable to the 303 ms of the earlier emulator; the final colours were
 not pixel-checked for every switch. The public-API example (Home/Settings, Rapid x7, frozen Home) is correct on this emulator
 (`treeOK 31/31`; `viewOK` has no Android probe and reads 0).
+
+## Baseline before the next task (2026-10-14, iOS simulator iPhone 17 Pro, iOS 26.5, Release, commit 5233774 + ClassMerge hash change)
+
+Theme switch, 2003 views x 10 changes, one cold launch discarded. Only 2 warm launches per strategy (not the 3 of the protocol).
+
+| Strategy | Warm launch 1 | Warm launch 2 | JS idle median | Mounted avg | treeOK / viewOK / layerOK |
+|---|---|---|---|---|---|
+| `hook` | 3.20 ms | 3.22 ms | **3.21 ms** | n/a (sync) | 2002 / 2002 / 2002 |
+| `hookAsync` | 0.04 ms | 0.04 ms | **0.04 ms** | 10.01 / 9.74 ms | 2002 / 2002 / 2002 |
+
+`cn` on Hermes (ns/call, one run, 5,603 cases): clsx+twMerge 17,791; cnfast 2,043; Nitro zero-copy 845; `__swCn` 634;
+public `cn()` 813; floors 474 (Nitro) / 302 (global fn). 0 mismatches, 0 fallbacks.
+
+Not run in this baseline: Android, tovtam real-app rAF/stall, Uniwind comparison on this build.
