@@ -397,3 +397,38 @@ Reading:
 - Not covered: tokens outside the corpus (arbitrary values `w-[10px]`, `[&>*]:...`, postfix `text-lg/7`) fall back by design; the
   table must be generated from the full candidate set of the app at build time (13k candidates in tovtam), which is also what
   makes it usable; device numbers will be slower than the simulator's; one machine, best of 3 passes.
+
+### 13b. Exposed in the package, and what made it faster (Hermes, Release, iOS simulator, byte-equality checked)
+
+Public API: `configureCn({ table, fallback })` and `cn(...inputs)` in `shadewind`; table generator `npx shadewind-cn-table <srcDir>`
+(tailwind-merge is a peer dependency of the tool only). `cn` has clsx semantics (strings, numbers, arrays, objects), uses the native
+merge for every token in the table and `fallback` (normally `(...a) => twMerge(clsx(a))`) otherwise.
+
+| Variant | ns/call | vs previous step | Mismatches |
+|---|---|---|---|
+| `clsx + twMerge` | ~18,000 | - | reference |
+| `cnfast` | ~2,030 | 9x faster | 0 |
+| native via Nitro raw method, `utf8()` copies | 998 | - | 0 |
+| native via Nitro raw method, zero-copy `getStringData` (+ same JS string returned when unchanged) | 920-934 | -6 % | 0 |
+| native via plain global host function `__swCn` (no Nitro wrapper) | 699-721 | -23 % | 0 |
+| native + native result cache | 841 | **slower**: hashing/joining costs more than merging; removed | 0 |
+| public `cn(...)` (first version: rest array + flatten) | 961 | - | 0 |
+| public `cn(...)` (allocation-free path for <= 4 string/falsy args) | **867** | -10 % | 0 |
+| floor: global host function, one short string | 328-339 | - | - |
+| floor: Nitro method, one short string | 507-523 | - | - |
+
+So: about 21x faster than the reference and about 2.3x faster than `cnfast` on Hermes. Of the 867 ns, about 335 ns is the JSI
+crossing and about 365 ns is the merge itself (token parse plus lookups plus output string); the rest is the JS wrapper.
+
+CLI-generated table from the whole tovtam `src/` (6,178 candidate tokens: 377 Tailwind tokens in 73 groups, 5,736 non-Tailwind
+tokens): same 5,603-case equivalence test, 0 mismatches, 0 fallbacks.
+
+What would make it faster still, in order of expected value (none measured yet):
+
+1. **Do not call.** AOT (section 10): static `className` sites become ids at build time (92.4 % of tovtam's sites); the standalone
+   id merge is 57 ns, with no crossing.
+2. **Batch.** One JSI call for all merges of a render pass removes the 335 ns crossing per merge.
+3. **Cheaper merge core**: precomputed per-string token lists (a table keyed by the interned class string) instead of parsing on
+   every call; SIMD or a perfect hash for the token lookup.
+4. **JS-side memo for repeated inputs** (React re-renders pass identical strings): a `Map` hit in Hermes is likely cheaper than a
+   crossing; to be measured against the crossing floor, not assumed.

@@ -76,6 +76,7 @@ engine off and leaves plain Uniwind.
 | `useThemed(styles)` | `{ ref, style, engine }` for one host view |
 | `ThemedView`, `ThemedText`, `mergeRefs` | thin components and ref helper |
 | `capabilities` | `maxThemes` (6), `supportedKeys`, `asyncCommit`, `platform` |
+| `configureCn({ table, fallback })`, `cn(...)` | native `twMerge(clsx(...))`, byte-identical for every token in the table (generate it with `npx shadewind-cn-table <srcDir>`); about 21x faster than clsx+twMerge on Hermes (see `docs/ARCHITECTURE.md` section 13) |
 | `shadewind/uniwind` | `installUniwind()`, adapter `View` / `Text` |
 | `shadewind/metro` | `withShadewind(config)` |
 | `shadewind/internal` | diagnostics and benchmark strategies, no semver guarantee |

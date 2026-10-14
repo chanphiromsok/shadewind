@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { cn as cnfast } from 'cnfast';
 import { ShadewindEngine } from 'shadewind/internal';
+import { cn as shadewindCn, configureCn } from 'shadewind';
 import { CASES, EXPECTED, TABLE } from './cnData';
 
 // Differential test + timing of class merging on Hermes (release): clsx+twMerge (reference), cnfast, native C++ (JSI).
@@ -61,13 +62,47 @@ export default function CnBench() {
       out.push(time('clsx+twMerge (JS)', reference));
       out.push(time('cnfast (JS)', (p) => cnfast(...p)));
       out.push(
-        time('native C++ via JSI', (p) => ShadewindEngine.mergeClasses(...p))
+        time('Nitro raw method, zero-copy', (p) =>
+          ShadewindEngine.mergeClasses(...p)
+        )
       );
       out.push(
-        time('JSI call, 1 short string (floor)', (p) =>
+        time('floor: Nitro method, 1 short string', (p) =>
           ShadewindEngine.mergeClasses(p[0]!)
         )
       );
+
+      const g = globalThis as unknown as {
+        __swCn: (...p: string[]) => string | undefined;
+      };
+
+      let globalMismatch = 0;
+
+      for (let i = 0; i < CASES.length; i++) {
+        const parts = CASES[i]!;
+
+        if (g.__swCn(...parts) !== EXPECTED[i]) {
+          globalMismatch++;
+        }
+      }
+
+      out.push(`global host fns mismatches ${globalMismatch}`);
+      out.push(time('global host fn __swCn', (p) => g.__swCn(...p)));
+      out.push(
+        time('floor: global fn, 1 short string', (p) => g.__swCn(p[0]!))
+      );
+      configureCn({ table: TABLE, fallback: (...a) => twMerge(clsx(a)) });
+
+      let publicMismatch = 0;
+
+      for (let i = 0; i < CASES.length; i++) {
+        if (shadewindCn(...CASES[i]!) !== EXPECTED[i]) {
+          publicMismatch++;
+        }
+      }
+
+      out.push(`public cn() mismatches ${publicMismatch}`);
+      out.push(time('public cn(...)', (p) => shadewindCn(...p)));
       setLines(out);
     }, 1500);
 

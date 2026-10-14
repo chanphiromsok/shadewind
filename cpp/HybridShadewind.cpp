@@ -17,6 +17,8 @@
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/primitives.h>
 #include <atomic>
+#include <cstring>
+#include <string>
 #include <type_traits>
 #include <unordered_set>
 #include "ShadewindNative.hpp"
@@ -713,41 +715,126 @@ jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, co
 // strategy: 'hookAsync' (default) | 'hook' | 'stock' | 'fast' | 'fastAsync' | 'direct' | 'both'
 static css::ClassMerge gClassMerge;
 
+// ---- class merge: zero-copy argument reads ------------------------------------------------------------------------------
+//
+// jsi::String::utf8() allocates a std::string per argument. getStringData() hands out Hermes' own ASCII bytes (or UTF-16),
+// which are copied into one stack buffer here. Non-ASCII input is not handled natively: the caller gets `undefined` and uses
+// the JS reference, so output can never differ from it.
+namespace {
+
+constexpr size_t kMergeMaxArgs = 16;
+constexpr size_t kMergeBuffer = 4096;
+
+struct MergeInput {
+  char buffer[kMergeBuffer];
+  size_t length = 0;
+  std::string_view views[kMergeMaxArgs];
+  size_t count = 0;
+};
+
+bool readAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count, MergeInput& in) {
+  if (count > kMergeMaxArgs) {
+    return false;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    if (!args[i].isString()) {
+      return false;
+    }
+
+    const size_t begin = in.length;
+    bool ok = true;
+    auto cb = [&](bool ascii, const void* data, size_t num) {
+      if (num > kMergeBuffer - in.length) {
+        ok = false;
+        return;
+      }
+
+      if (ascii) {
+        std::memcpy(in.buffer + in.length, data, num);
+      } else {
+        const auto* p = static_cast<const char16_t*>(data);
+
+        for (size_t k = 0; k < num; k++) {
+          if (p[k] > 127) {
+            ok = false;
+            return;
+          }
+
+          in.buffer[in.length + k] = static_cast<char>(p[k]);
+        }
+      }
+
+      in.length += num;
+    };
+
+    args[i].getString(rt).getStringData(rt, cb);
+
+    if (!ok) {
+      return false;
+    }
+
+    in.views[i] = std::string_view(in.buffer + begin, in.length - begin);
+  }
+
+  in.count = count;
+
+  return true;
+}
+
+jsi::Value mergeAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
+  if (!gClassMerge.loaded()) {
+    return jsi::Value::undefined();
+  }
+
+  MergeInput in;
+
+  if (!readAscii(rt, args, count, in)) {
+    return jsi::Value::undefined();
+  }
+
+  std::string out;
+
+  if (!gClassMerge.merge(in.views, in.count, out)) {
+    return jsi::Value::undefined();
+  }
+
+  // single argument that came back unchanged: hand the very same JS string back, no allocation
+  if (in.count == 1 && out.size() == in.views[0].size()) {
+    return jsi::Value(rt, args[0]);
+  }
+
+  return jsi::String::createFromAscii(rt, out.data(), out.size());
+}
+
+} // namespace
+
 // loadClassTable(text): installs the generated tailwind-merge conflict table (tools/cn-table). Returns true when usable.
+// It also installs a plain global host function (`__swCn`) that skips Nitro's method wrapper (measured ~23% faster).
 jsi::Value HybridShadewind::loadClassTable(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isString()) {
     throw jsi::JSError(rt, "Shadewind.loadClassTable(text) expects a string");
   }
 
-  return jsi::Value(gClassMerge.load(args[0].asString(rt).utf8(rt)));
+  const bool ok = gClassMerge.load(args[0].asString(rt).utf8(rt));
+
+  if (ok) {
+    rt.global().setProperty(
+        rt, "__swCn",
+        jsi::Function::createFromHostFunction(
+            rt, jsi::PropNameID::forAscii(rt, "__swCn"), 0,
+            [](jsi::Runtime& runtime, const jsi::Value&, const jsi::Value* a, size_t n) -> jsi::Value {
+              return mergeAscii(runtime, a, n);
+            }));
+  }
+
+  return jsi::Value(ok);
 }
 
 // mergeClasses(a, b, ...): twMerge(clsx(a, b, ...)) for string arguments, or undefined when a token is not in the table
-// (the caller then uses the JS reference).
+// (the caller then uses the JS reference). This is the Nitro raw-method variant with zero-copy reads.
 jsi::Value HybridShadewind::mergeClasses(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
-  if (!gClassMerge.loaded() || count > 16) {
-    return jsi::Value::undefined();
-  }
-
-  std::string storage[16];
-  std::string_view views[16];
-
-  for (size_t i = 0; i < count; i++) {
-    if (!args[i].isString()) {
-      return jsi::Value::undefined();
-    }
-
-    storage[i] = args[i].asString(rt).utf8(rt);
-    views[i] = storage[i];
-  }
-
-  std::string out;
-
-  if (!gClassMerge.merge(views, count, out)) {
-    return jsi::Value::undefined();
-  }
-
-  return jsi::String::createFromUtf8(rt, out);
+  return mergeAscii(rt, args, count);
 }
 
 // configure(names): declares the themes in order. Returns { maxThemes, ok } (ok false: more names than slots).

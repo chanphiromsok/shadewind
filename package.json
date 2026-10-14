@@ -39,6 +39,7 @@
     "nitrogen",
     "metro.cjs",
     "metro.d.ts",
+    "bin",
     "nitro.json",
     "*.podspec",
     "react-native.config.js",
@@ -148,5 +149,8 @@
       "eslint"
     ],
     "version": "0.63.1"
+  },
+  "bin": {
+    "shadewind-cn-table": "./bin/cn-table.mjs"
   }
 }
