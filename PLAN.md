@@ -39,7 +39,7 @@ recorded in `docs/BENCHMARK.md`.
 
 ## Phase 2: Uniwind integration (adapter on top)
 
-Long-term design: `docs/UNIWIND_INTEGRATION.md` (thin versioned seam, engine Uniwind-agnostic, fallbacks, CI matrix, upstream asks).
+Long-term design (reviewed by Opus; spike A then B before building): `docs/UNIWIND_INTEGRATION.md` (thin versioned seam, engine Uniwind-agnostic, fallbacks, CI matrix, upstream asks).
 The note below is the original sketch.
 
 

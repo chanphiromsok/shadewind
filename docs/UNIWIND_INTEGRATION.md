@@ -102,3 +102,54 @@ Each one removes a private import. Until accepted, the version-pinned bridge abo
 4. Remaining components (`Pressable`, `ScrollView`, `TextInput`, `Image`...) by template.
 5. Jest tests, saved flows, CI matrix, perf gate.
 6. Upstream proposals; docs.
+
+## Review findings (Opus review of this design, 2026-10-14) and changes to the design
+
+Verified against the Uniwind 1.12.0 source: `lightDark()` in `core/native/native-utils.ts` reads the global
+`currentThemeName`, and the native `uniwind/components` barrel `require`s `./native/View` relative to itself.
+
+The design above is **not ready to build as written**. Corrections, in priority order:
+
+1. **Scoped resolution is not a safe "style of theme B".** `lightDark()` ignores `scopedTheme`, so a `light-dark()` colour resolved for
+   theme B while A is current returns A's value, and it is cached under B with no Theme invalidation. Also `store.ts` drops the
+   `Theme` dependency for scoped calls, so `dependsOnTheme` must come from the unscoped call.
+   Required: the spike below must diff scoped vs real-switch results for every className; mismatching classNames go on a
+   fallback list (or need an upstream fix).
+2. **The commit hook overwrites colours React set on purpose.** It re-applies the registered delta on any commit where the props
+   object is not ours (pressed/disabled state variants, inline `style` overrides, animated opacity). Rule: register only when
+   the component has no state variants, the inline `style` touches none of the delta keys, and `ctx.scopedTheme === null`.
+   Drop `opacity` from the supported set (TouchableOpacity, Animated, Reanimated).
+3. **One-theme-only properties are never reset.** `dark:bg-black` with nothing for light keeps black after switching back.
+   Rule: every theme must define every registered key, or the adapter emits an explicit reset, or falls back.
+4. **More than 6 themes fails silently** (`kMaxThemes = 6`, extra themes fall to `kNoTheme`). Rule: fall back when
+   `themes.length > 6`; raise the engine limit later.
+5. **Re-render ordering:** a className / state / data-attribute change goes through the hook before the ref callback re-registers,
+   so expect a one-frame stale colour and extra churn (every `add()` resets the entry and triggers a commit). Per-theme resolution
+   has to run on every render and compare by value; data-attribute results are never cached by Uniwind.
+6. **Nested `Text` recolour heuristic** (fragments whose colour equals the paragraph's previous colour) turns an explicit
+   equal colour into the new colour. Needs a marker for inherited colour, or a fallback when a nested Text sets `color`.
+7. **ScopedTheme / ScopedVariables:** never register under a scoped theme; keep the Variables, Dimensions and Rtl subscriptions;
+   `Uniwind.updateCSSVariables(inactiveTheme, ...)` must re-resolve every theme; in dev `__reinit` uses `notifyAll`, so a
+   Theme-only subscription loses hot-reload refresh.
+8. **The Metro seam as written never intercepts the main path.** `import { View } from 'react-native'` resolves to the barrel
+   `uniwind/components`; it is the resolved *file path* (`.../uniwind/src/components/native/View.tsx`) that has to be matched,
+   with an origin exemption for the adapter. Uniwind captures the inner resolver in a closure, so an outer wrapper cannot see its
+   internal re-resolves. Duplicate-store hazard: if the internals alias resolves to a different copy than app code, two
+   `UniwindStore` instances exist and the adapter views lose all styling; alias to the exact `src` files and probe
+   "same instance and populated" at startup. Web/Vite and Uniwind Pro: adapter is `.native` only and disabled elsewhere.
+9. **"Wrap, do not copy" is not possible** for engine-handled components: the Theme subscription lives inside `useStyle`.
+   View and Text must be reimplemented (Text's `isPressed`, line-clamp mapping, `selectionColorClassName`/`useAccentColor`). That
+   contradicts "one private import file" and must be stated as upkeep, or removed by upstream ask 2.
+10. **Rapid toggles on `hookAsync` are still unverified** (commits run on a concurrent queue); blocks shipping, not the spike.
+
+Also: the perf gate must include mount and scroll cost (the adapter adds N scoped resolves and a JSI `register` per view).
+
+### Revised build order
+
+1. **Spike A (pure JS, no native):** for every className in the compiled stylesheet, resolve theme B via `scopedTheme` while A
+   is current, really switch to B, resolve unscoped, diff. Produces the fallback list or kills the approach.
+2. **Spike B:** adapter `View` only, intercepted by file path in `uniwind-benchmarks/apps/uniwind`, with the store-instance probe
+   and the fallback rules from 2-4 and 7. Test screens with known colours checked with `inspect()`: `active:` Text, inline
+   `style` override, `dark:`-only class, TouchableOpacity, ScopedTheme subtree, 7 themes, nested Text with equal explicit
+   colour, className changing after a switch (flash), `updateCSSVariables` on the inactive theme, mount time of 2003 views.
+3. Only then: `Text`, remaining components, Metro wrapper hardening, tests, CI matrix, upstream asks.
