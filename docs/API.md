@@ -155,3 +155,11 @@ fast path, components beyond `View`/`Text`.
 - `capabilities` has no `version`/`textRecolor` yet.
 - iOS Release check with the public API (Settings: Dark, Light, Rapid x7, back to frozen Home, Inspect): screen and cards dark,
   `treeOK 31/31 viewOK 31/31`. The saved rapid-toggle flow and Android are still open.
+
+## Fresh-app install check (2026-10-14)
+
+`npx @react-native-community/cli init FreshApp --version 0.86.3`, then `npm i shadewind-0.1.0.tgz react-native-nitro-modules`,
+`pod install` (autolinked Shadewind and NitroModules), Release build for the iOS simulator: builds, `configure` + `useThemed` +
+`ThemedView` + `ThemedText` + `useTheme` work, 5 taps 90 ms apart (dark, light, dark, light, dark) end fully dark with every
+card `engine=true`. Notes: the generated `ios/.tool-versions` (ruby 3.2.0) must be removed or satisfied before `pod install`
+with an asdf shim. Not covered: Android fresh app, Fast Refresh (needs a dev build), saved flows.
