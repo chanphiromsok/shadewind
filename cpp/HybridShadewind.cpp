@@ -1,4 +1,5 @@
 #include "HybridShadewind.hpp"
+#include "css/ClassMerge.hpp"
 #include "css/ColorParser.hpp"
 
 #include <chrono>
@@ -317,6 +318,8 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
     prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
     prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
+    prototype.registerRawHybridMethod("loadClassTable", 1, &HybridShadewind::loadClassTable);
+    prototype.registerRawHybridMethod("mergeClasses", 0, &HybridShadewind::mergeClasses);
     prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
   });
 }
@@ -708,6 +711,45 @@ jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, co
 
 // setTheme(name, strategy?) pushes the registered props of `name` to every live view without touching React.
 // strategy: 'hookAsync' (default) | 'hook' | 'stock' | 'fast' | 'fastAsync' | 'direct' | 'both'
+static css::ClassMerge gClassMerge;
+
+// loadClassTable(text): installs the generated tailwind-merge conflict table (tools/cn-table). Returns true when usable.
+jsi::Value HybridShadewind::loadClassTable(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (count < 1 || !args[0].isString()) {
+    throw jsi::JSError(rt, "Shadewind.loadClassTable(text) expects a string");
+  }
+
+  return jsi::Value(gClassMerge.load(args[0].asString(rt).utf8(rt)));
+}
+
+// mergeClasses(a, b, ...): twMerge(clsx(a, b, ...)) for string arguments, or undefined when a token is not in the table
+// (the caller then uses the JS reference).
+jsi::Value HybridShadewind::mergeClasses(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (!gClassMerge.loaded() || count > 16) {
+    return jsi::Value::undefined();
+  }
+
+  std::string storage[16];
+  std::string_view views[16];
+
+  for (size_t i = 0; i < count; i++) {
+    if (!args[i].isString()) {
+      return jsi::Value::undefined();
+    }
+
+    storage[i] = args[i].asString(rt).utf8(rt);
+    views[i] = storage[i];
+  }
+
+  std::string out;
+
+  if (!gClassMerge.merge(views, count, out)) {
+    return jsi::Value::undefined();
+  }
+
+  return jsi::String::createFromUtf8(rt, out);
+}
+
 // configure(names): declares the themes in order. Returns { maxThemes, ok } (ok false: more names than slots).
 jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isObject() || !args[0].asObject(rt).isArray(rt)) {

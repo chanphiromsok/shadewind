@@ -8,6 +8,8 @@ type RawMethods = {
   register(shadowNode: unknown, propsByTheme: Record<string, object>): void;
   unregister(shadowNode: unknown): void;
   configure(names: string[]): { maxThemes: number; ok: boolean };
+  loadClassTable(text: string): boolean;
+  mergeClasses(...parts: string[]): string | undefined;
   setTheme(name: string, strategy?: ThemeStrategy): ThemeTimings;
   flushPending(): void;
   prepare(): void;
@@ -236,6 +238,13 @@ const scheduleFlush = () => {
 };
 
 export const ShadewindEngine = {
+  /** Experimental: native tailwind-merge compatible class merge (see docs/ARCHITECTURE.md section 13). */
+  loadClassTable(text: string): boolean {
+    return getNative().loadClassTable(text);
+  },
+  mergeClasses(...parts: string[]): string | undefined {
+    return getNative().mergeClasses(...parts);
+  },
   /** Declares the theme names in order (native slot ids). Returns the slot count and whether all names fit. */
   configure(names: string[]): { maxThemes: number; ok: boolean } {
     return getNative().configure(names);

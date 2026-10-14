@@ -27,6 +27,8 @@ public:
   jsi::Value mainBusyMs(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value prepare(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value configure(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
+  jsi::Value loadClassTable(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
+  jsi::Value mergeClasses(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value setTheme(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
 
   void loadHybridMethods() override;

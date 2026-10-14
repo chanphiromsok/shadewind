@@ -368,3 +368,32 @@ treeOK / viewOK / layerOK 2002 / 2002 / 2002.
 
 Stays out of C++ (decided): Tailwind compile and the Lightning CSS walk (JS/Rust at build time). Candidates next: binary token
 table loader, `var()` / `light-dark()` resolver for runtime variable updates, `color-mix` folding.
+
+## 13. `cn` measured: tailwind-merge vs cnfast vs C++ (2026-10-14)
+
+Corpus: 5,603 cases built from tovtam's real class strings (840 distinct literals, 103 real `cn(` calls with literals, plus
+random pairs and triples). Reference = `twMerge(clsx(parts))` (clsx 2.1.1, tailwind-merge 3.7.0). Output checked for byte
+equality on every case.
+
+| Implementation | Node/V8 (macOS arm64) | Hermes, Release, iOS simulator | Output vs reference |
+|---|---|---|---|
+| `clsx + twMerge` | ~2,900 ns | **18,286 ns** | reference |
+| `cnfast` 0.2.0 (pure JS rewrite) | ~650-800 ns | **2,038 ns** | 0 mismatches / 5,603 |
+| native C++ via JSI (`mergeClasses`) | - | **998 ns** | **0 mismatches, 0 fallbacks** |
+| JSI call floor (1 short string, trivial merge) | - | 586 ns | - |
+| standalone C++, strings in/out | 371 ns | - | 0 mismatches |
+| standalone C++, pre-parsed ids | 57 ns | - | 0 mismatches |
+
+Reading:
+
+- On Hermes the reference is 18 us per call; `cnfast` is about 9x faster; native C++ is about 18x faster than the reference and
+  about 2x faster than `cnfast`. cnfast's "25x" claim did not reproduce on this corpus (3.6-4.3x on V8, 9x on Hermes).
+- The JSI crossing is 586 ns of the 998 ns: the merge itself is about 400 ns. Anything per-call over JSI is bounded below by
+  about 0.6 us; the way past that is to not call at all (AOT: ids resolved at build time, section 10) or to batch many merges
+  into one call.
+- The C++ merge is equivalent to the reference *by construction*: the conflict table (`tools/cn-table`) is generated with
+  tailwind-merge as the oracle (354 known tokens, 65 groups on this corpus) and an unknown token returns `undefined`, so the
+  caller falls back to the JS reference.
+- Not covered: tokens outside the corpus (arbitrary values `w-[10px]`, `[&>*]:...`, postfix `text-lg/7`) fall back by design; the
+  table must be generated from the full candidate set of the app at build time (13k candidates in tovtam), which is also what
+  makes it usable; device numbers will be slower than the simulator's; one machine, best of 3 passes.

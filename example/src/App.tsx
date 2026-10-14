@@ -18,6 +18,7 @@ import {
 } from 'shadewind';
 import BenchScreen from './BenchScreen';
 import TheirBench from './TheirBench';
+import CnBench from './CnBench';
 import { Linking, Platform, Settings as RNSettings } from 'react-native';
 
 type Routes = { Home: undefined; Settings: undefined; Bench: undefined };
@@ -211,6 +212,10 @@ function useLaunchFlags(): LaunchFlags | null {
 
 export default function App() {
   const flags = useLaunchFlags();
+
+  if (RNSettings.get('cnBench')) {
+    return <CnBench />;
+  }
 
   if (flags === null) {
     return null; // Android: waiting for the initial URL

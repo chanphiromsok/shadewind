@@ -1,0 +1,321 @@
+#pragma once
+
+// tailwind-merge compatible class merge, table driven.
+//
+// The conflict table is *generated* with tailwind-merge itself as the oracle (see tools/cn-table), so for every token it knows
+// the result is byte-identical to `twMerge(clsx(...))`. A token that is not in the table makes `merge` return false: the caller
+// then uses the JS reference. Nothing here guesses.
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace margelo::nitro::shadewind::css {
+
+class ClassMerge {
+public:
+  /** Loads the generated table (lines: `G\t<count>`, `K\t<group>\t<g,g,...>`, `T\t<base>\t<group>`, `U\t<base>`). */
+  bool load(std::string_view text) {
+    std::vector<std::pair<std::string, int>> items;
+    kills_.clear();
+    size_t pos = 0;
+
+    while (pos < text.size()) {
+      size_t eol = text.find('\n', pos);
+
+      if (eol == std::string_view::npos) {
+        eol = text.size();
+      }
+
+      const std::string_view line = text.substr(pos, eol - pos);
+      pos = eol + 1;
+
+      if (line.size() < 2) {
+        continue;
+      }
+
+      std::string_view f[3];
+      size_t nf = 0, s = 0;
+
+      for (size_t i = 0; i <= line.size() && nf < 3; i++) {
+        if (i == line.size() || line[i] == '\t') {
+          f[nf++] = line.substr(s, i - s);
+          s = i + 1;
+        }
+      }
+
+      if (line[0] == 'G' && nf >= 2) {
+        kills_.assign(toInt(f[1]), {});
+      } else if (line[0] == 'K' && nf >= 2) {
+        const size_t g = toInt(f[1]);
+        std::vector<int> ks;
+        const std::string_view list = nf > 2 ? f[2] : std::string_view();
+        size_t p = 0;
+
+        while (p < list.size()) {
+          size_t c = list.find(',', p);
+
+          if (c == std::string_view::npos) {
+            c = list.size();
+          }
+
+          ks.push_back(static_cast<int>(toInt(list.substr(p, c - p))));
+          p = c + 1;
+        }
+
+        if (g < kills_.size()) {
+          kills_[g] = std::move(ks);
+        }
+      } else if (line[0] == 'T' && nf >= 3) {
+        items.emplace_back(std::string(f[1]), static_cast<int>(toInt(f[2])));
+      } else if (line[0] == 'U' && nf >= 2) {
+        items.emplace_back(std::string(f[1]), -1);
+      }
+    }
+
+    size_t cap = 1;
+
+    while (cap < items.size() * 2 + 2) {
+      cap <<= 1;
+    }
+
+    slots_.assign(cap, Slot{});
+    mask_ = cap - 1;
+
+    for (auto& item : items) {
+      const uint64_t h = fnv(item.first.data(), item.first.size());
+      size_t i = h & mask_;
+
+      while (slots_[i].used) {
+        i = (i + 1) & mask_;
+      }
+
+      slots_[i] = Slot{h, std::move(item.first), item.second, true};
+    }
+
+    return !kills_.empty();
+  }
+
+  bool loaded() const { return !kills_.empty(); }
+
+  /**
+   * Merges class strings. Returns false (and leaves `out` unspecified) when any token is not in the table or the input is
+   * larger than the fixed working set: the caller must then use the JS reference.
+   */
+  bool merge(const std::string_view* inputs, size_t count, std::string& out) const {
+    constexpr size_t kMax = 96;
+    Tok toks[kMax];
+    uint8_t keep[kMax];
+    size_t n = 0;
+
+    for (size_t a = 0; a < count; a++) {
+      const char* s = inputs[a].data();
+      const size_t len = inputs[a].size();
+      size_t i = 0;
+
+      while (i < len) {
+        while (i < len && isSpace(s[i])) {
+          i++;
+        }
+
+        size_t j = i;
+
+        while (j < len && !isSpace(s[j])) {
+          j++;
+        }
+
+        if (j > i) {
+          if (n >= kMax || !parse(s + i, j - i, toks[n])) {
+            return false;
+          }
+
+          n++;
+        }
+
+        i = j;
+      }
+    }
+
+    uint64_t seen[256];
+    size_t ns = 0;
+
+    for (size_t k = n; k-- > 0;) {
+      keep[k] = 1;
+      const Tok& tk = toks[k];
+
+      if (tk.group < 0) {
+        continue; // not a tailwind class: kept unconditionally, like tailwind-merge
+      }
+
+      const uint64_t id = key(tk.modKey, tk.group);
+      bool dup = false;
+
+      for (size_t s = 0; s < ns; s++) {
+        if (seen[s] == id) {
+          dup = true;
+          break;
+        }
+      }
+
+      if (dup) {
+        keep[k] = 0;
+        continue;
+      }
+
+      for (int g : kills_[static_cast<size_t>(tk.group)]) {
+        if (ns >= 256) {
+          return false;
+        }
+
+        seen[ns++] = key(tk.modKey, g);
+      }
+    }
+
+    out.clear();
+
+    for (size_t k = 0; k < n; k++) {
+      if (keep[k]) {
+        if (!out.empty()) {
+          out += ' ';
+        }
+
+        out.append(toks[k].p, toks[k].n);
+      }
+    }
+
+    return true;
+  }
+
+private:
+  struct Slot {
+    uint64_t hash = 0;
+    std::string key;
+    int group = -2;
+    bool used = false;
+  };
+
+  struct Tok {
+    uint64_t modKey;
+    int group;
+    const char* p;
+    uint32_t n;
+  };
+
+  static bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+  static size_t toInt(std::string_view s) {
+    size_t v = 0;
+
+    for (char c : s) {
+      if (c >= '0' && c <= '9') {
+        v = v * 10 + static_cast<size_t>(c - '0');
+      }
+    }
+
+    return v;
+  }
+
+  static uint64_t fnv(const char* p, size_t n, uint64_t h = 1469598103934665603ULL) {
+    for (size_t i = 0; i < n; i++) {
+      h ^= static_cast<unsigned char>(p[i]);
+      h *= 1099511628211ULL;
+    }
+
+    return h;
+  }
+
+  static uint64_t key(uint64_t mod, int group) { return mod * 1000003ULL + static_cast<uint64_t>(group); }
+
+  int find(const char* p, size_t n) const {
+    const uint64_t h = fnv(p, n);
+
+    for (size_t i = h & mask_;; i = (i + 1) & mask_) {
+      const Slot& e = slots_[i];
+
+      if (!e.used) {
+        return -2;
+      }
+
+      if (e.hash == h && e.key.size() == n && std::memcmp(e.key.data(), p, n) == 0) {
+        return e.group;
+      }
+    }
+  }
+
+  // modifiers sorted like tailwind-merge (arbitrary variants stay in place as barriers), important marker either side
+  bool parse(const char* p, size_t n, Tok& out) const {
+    std::string_view parts[16];
+    int np = 0, depth = 0;
+    size_t start = 0;
+
+    for (size_t i = 0; i < n; i++) {
+      const char c = p[i];
+
+      if (c == '[' || c == '(') {
+        depth++;
+      } else if (c == ']' || c == ')') {
+        depth--;
+      } else if (c == ':' && depth == 0) {
+        if (np >= 15) {
+          return false;
+        }
+
+        parts[np++] = std::string_view(p + start, i - start);
+        start = i + 1;
+      }
+    }
+
+    const char* b = p + start;
+    size_t bn = n - start;
+    bool important = false;
+
+    if (bn && b[0] == '!') {
+      important = true;
+      b++;
+      bn--;
+    }
+
+    if (bn && b[bn - 1] == '!') {
+      important = true;
+      bn--;
+    }
+
+    int run = 0;
+
+    for (int i = 0; i <= np; i++) {
+      if (i == np || (!parts[i].empty() && parts[i].front() == '[')) {
+        std::sort(parts + run, parts + i);
+        run = i + 1;
+      }
+    }
+
+    uint64_t h = 1469598103934665603ULL;
+
+    for (int i = 0; i < np; i++) {
+      h = fnv(parts[i].data(), parts[i].size(), h);
+      h = fnv(":", 1, h);
+    }
+
+    if (important) {
+      h = fnv("!", 1, h);
+    }
+
+    const int g = find(b, bn);
+
+    if (g == -2) {
+      return false;
+    }
+
+    out = Tok{h, g, p, static_cast<uint32_t>(n)};
+
+    return true;
+  }
+
+  std::vector<Slot> slots_;
+  size_t mask_ = 0;
+  std::vector<std::vector<int>> kills_;
+};
+
+} // namespace margelo::nitro::shadewind::css
