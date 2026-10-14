@@ -5,6 +5,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import { StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
@@ -182,6 +183,8 @@ export const useShadewindStyle = (
 
   const context = useContext();
   const [, rerender] = useReducer(() => ({}), {});
+  // the view could not be registered (the ref never reached a host view): keep Uniwind's Theme subscription
+  const [failed, setFailed] = useState(false);
   const current = UniwindStore!.getStyles(className, props, state, context);
   const flat = StyleSheet.flatten(props.style) as
     Record<string, unknown> | undefined;
@@ -189,12 +192,12 @@ export const useShadewindStyle = (
     flat !== undefined && SUPPORTED.some((key) => flat[key] !== undefined);
   const planned = useMemo(
     () =>
-      active
+      active && !failed
         ? plan(className, props, state, context, current, hasInlineOverlap)
         : { themed: null, reason: 'engine inactive' },
     // `current` is cached per theme/state by the store: a new object means a different resolution
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [active, current, hasInlineOverlap, context]
+    [active, failed, current, hasInlineOverlap, context]
   );
   // the Theme dependency is dropped only when the engine really handles this view
   const dependencies = planned.themed
@@ -212,13 +215,16 @@ export const useShadewindStyle = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dependencies.join(','), Boolean(planned.themed)]);
 
-  return { style: current.styles, themed: planned.themed };
+  const onRegisterFailed = useCallback(() => setFailed(true), []);
+
+  return { style: current.styles, themed: planned.themed, onRegisterFailed };
 };
 
 /** Callback ref: registers the view with the engine while `themed` is set, and forwards to the user's ref. */
 export const useEngineRef = (
   themed: ThemedStyles | null,
-  userRef: Ref<unknown> | undefined
+  userRef: Ref<unknown> | undefined,
+  onRegisterFailed?: () => void
 ) => {
   const registered = useRef<unknown>(null);
 
@@ -229,8 +235,12 @@ export const useEngineRef = (
         registered.current = null;
       }
 
-      if (node && themed && engine().register(node, themed)) {
-        registered.current = node;
+      if (node && themed) {
+        if (engine().register(node, themed)) {
+          registered.current = node;
+        } else {
+          onRegisterFailed?.();
+        }
       }
 
       if (typeof userRef === 'function') {
@@ -239,6 +249,6 @@ export const useEngineRef = (
         (userRef as { current: unknown }).current = node;
       }
     },
-    [themed, userRef]
+    [themed, userRef, onRegisterFailed]
   );
 };

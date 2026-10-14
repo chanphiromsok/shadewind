@@ -641,19 +641,17 @@ private:
 
   // Typed path: the props constructor copies every field from the source when the RawProps is empty (Props itself is
   // not copyable), then we set the few fields the theme owns. No colour parsing, no dynamic.
-  template <typename PropsT>
-  static const RawProps& emptyRawProps() {
-    static RawProps raw{folly::dynamic::object()};
-    static std::once_flag once;
-
-    std::call_once(once, [] { raw.parse(parserFor<PropsT>()); });
-
-    return raw;
-  }
-
+  //
+  // One RawProps per call, never shared: reading a RawProps moves a mutable cursor (keyIndexCursor_), so a shared instance
+  // is a data race between the prewarm thread and the commit thread (an out-of-range index and an abort in debug builds).
+  // The parser is read-only once prepared, so sharing that is fine.
   template <typename PropsT>
   static std::shared_ptr<PropsT> copyProps(const PropsParserContext& context, const Props& source) {
-    return std::make_shared<PropsT>(context, static_cast<const PropsT&>(source), emptyRawProps<PropsT>());
+    RawProps raw{folly::dynamic::object()};
+
+    raw.parse(parserFor<PropsT>());
+
+    return std::make_shared<PropsT>(context, static_cast<const PropsT&>(source), raw);
   }
 
   // Typed path only (View, Paragraph). Returns nullptr for any other component.

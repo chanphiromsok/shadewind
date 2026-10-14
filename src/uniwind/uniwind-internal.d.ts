@@ -45,3 +45,7 @@ declare module 'uniwind-internal/components/native/useAccentColor' {
     state?: any
   ) => string | undefined;
 }
+
+declare module 'uniwind-internal/hoc/withUniwind.native' {
+  export const withUniwind: (component: any, options?: any) => any;
+}

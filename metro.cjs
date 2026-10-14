@@ -15,7 +15,11 @@ const path = require('node:path');
 const PACKAGE_ROOT = fs.realpathSync(__dirname);
 const PREFIX = 'uniwind-internal/';
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'];
-const REPLACED = /[\\/]uniwind[\\/]src[\\/]components[\\/]native[\\/](View|Text)\.tsx$/;
+// files of Uniwind replaced by the engine-aware versions: resolved file path -> `shadewind/uniwind/<name>`
+const REPLACED = [
+  [/[\\/]uniwind[\\/]src[\\/]components[\\/]native[\\/](View|Text)\.tsx$/, (match) => match[1]],
+  [/[\\/]uniwind[\\/]src[\\/]hoc[\\/]withUniwind\.native\.tsx$/, () => 'withUniwind']
+];
 
 const isInside = (file, dir) => file === dir || file.startsWith(dir + path.sep);
 
@@ -85,15 +89,17 @@ function withShadewind(config) {
         const resolved = (previous ?? context.resolveRequest)(context, moduleName, platform);
 
         if (resolved.type === 'sourceFile') {
-          const match = REPLACED.exec(resolved.filePath);
+          for (const [pattern, name] of REPLACED) {
+            const match = pattern.exec(resolved.filePath);
 
-          if (match) {
-            // resolved like an app import, so the `shadewind-source` / default export condition picks src or lib
-            return context.resolveRequest(
-              { ...context, originModulePath: pinnedOrigin },
-              `shadewind/uniwind/${match[1]}`,
-              platform
-            );
+            if (match) {
+              // resolved like an app import, so the `shadewind-source` / default export condition picks src or lib
+              return context.resolveRequest(
+                { ...context, originModulePath: pinnedOrigin },
+                `shadewind/uniwind/${name(match)}`,
+                platform
+              );
+            }
           }
         }
 

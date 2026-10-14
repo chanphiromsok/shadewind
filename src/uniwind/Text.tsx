@@ -18,13 +18,21 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       isPressed,
       isDisabled: Boolean((props as { disabled?: boolean }).disabled),
     };
-    const { style, themed } = useShadewindStyle(props.className, props, state);
+    const { style, themed, onRegisterFailed } = useShadewindStyle(
+      props.className,
+      props,
+      state
+    );
     const selectionColor = useAccentColor(
       props.selectionColorClassName,
       props,
       state
     );
-    const ref = useEngineRef(themed, (props as { ref?: any }).ref);
+    const ref = useEngineRef(
+      themed,
+      (props as { ref?: any }).ref,
+      onRegisterFailed
+    );
 
     return (
       <RNText

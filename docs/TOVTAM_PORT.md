@@ -45,3 +45,28 @@ the wrapped components, so the end-to-end gain is about 10 % in dev, nothing lik
 - Cover `withUniwind(Component)` HOC output, `Pressable`/`TouchableOpacity`/`Animated(View)` and icon components: the same
   className -> engine registration for components that pass `style` through to a host `View`/`Text`.
 - Only then compare in a Release build.
+
+## Round 2: `withUniwind` HOC adapter + a native race fix (2026-10-14)
+
+Changes: `shadewind/metro` also replaces Uniwind's `hoc/withUniwind.native.tsx` with `shadewind/uniwind/withUniwind` (engine path
+for components that take only `className` and pass `style` and `ref` to a host view; several `*ClassName` props or a manual
+options map use Uniwind's own HOC). A view whose registration fails (the ref never reaches a host view) puts the Theme
+subscription back instead of freezing.
+
+Engine bug found by this port (and fixed): `ThemeHook::emptyRawProps` returned one shared, mutable `RawProps`; reading it moves
+`keyIndexCursor_`, so the prewarm thread and the commit thread raced and an out-of-range index aborted in a Debug build
+(`RawPropsParser::at`, `vector<unsigned short>::operator[]`). It was latent in Release builds. `copyProps` now builds one
+`RawProps` per call; the prepared parser stays shared (read-only).
+
+Same scenario, same screen, 6 `Uniwind.setTheme` calls in one tick (Debug build, single run each):
+
+| | Plain Uniwind | Engine, View/Text only | Engine, + HOC adapter |
+|---|---|---|---|
+| Registered views | 0 | 26 | 108 (all tree/native correct) |
+| React commits | 2 | 2 | 1 |
+| Commit time (dev) | 32.0 + 29.4 ms | 29.3 + 25.9 ms | 22.8 ms |
+| Fiber renders | 996 | 872 | 277 (-72 %) |
+
+Still re-rendering: `Text` x68 (state/pressed variants and parent renders), `TouchableOpacity` x18, `Animated(View)` x6,
+and `Engine` x39 where the view was not handed to the engine. Single runs in a Debug build: treat as indicative, not a
+benchmark. Release build and Android on tovtam are still open.
