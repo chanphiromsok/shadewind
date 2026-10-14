@@ -9,10 +9,27 @@ const TESTED = ['1.12'];
 
 export type InstallResult = { active: boolean; reason?: string };
 
+// Declared here, not as `typeof import('uniwind-internal/...')`: those specifiers exist only inside the app's Metro build, so
+// they must not appear in the .d.ts files this package ships.
 type Internals = {
-  UniwindStore: typeof import('uniwind-internal/core/native').UniwindStore;
-  UniwindListener: typeof import('uniwind-internal/core/listener').UniwindListener;
-  StyleDependency: typeof import('uniwind-internal/common/consts').StyleDependency;
+  UniwindStore: {
+    vars: Record<string, unknown>;
+    runtime: { currentThemeName: string };
+    getStyles: (
+      className: string | undefined,
+      props: Record<string, any>,
+      state: any,
+      context: any
+    ) => {
+      styles: Record<string, unknown>;
+      dependencies: number[];
+      hasDataAttributes?: boolean;
+    };
+  };
+  UniwindListener: {
+    subscribe: (listener: () => void, dependencies: number[]) => () => void;
+  };
+  StyleDependency: { Theme: number };
 };
 
 let result: InstallResult | null = null;

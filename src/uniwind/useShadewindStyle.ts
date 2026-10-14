@@ -59,7 +59,7 @@ const withTheme = <T>(theme: string, fn: () => T): T => {
 };
 
 type Resolved = ReturnType<
-  typeof import('uniwind-internal/core/native').UniwindStore.getStyles
+  NonNullable<ReturnType<typeof getInternals>>['UniwindStore']['getStyles']
 >;
 type Plan = { themed: ThemedStyles | null; reason: string };
 

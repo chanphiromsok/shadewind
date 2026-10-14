@@ -1,39 +1,99 @@
 # shadewind
 
-Zero-re-render theme styling for React Native (Fabric) via a Nitro module
+Theme switching for React Native (Fabric) that does not re-render your components. A theme change is applied to the
+already mounted views inside the shadow tree commit, so the JS thread stays free.
 
-## Installation
+> **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android works but
+> commits synchronously on the JS thread and has less testing. Uniwind support is verified against Uniwind 1.12.x.
 
+Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, Release; see `docs/BENCHMARK.md`):
+
+| | JS thread time per switch |
+|---|---|
+| Uniwind 1.12.0 | ~103 ms |
+| Uniwind Pro 1.5.1 demo | ~21 ms |
+| Shadewind `hook` (synchronous) | ~3.5 ms |
+| Shadewind `hookAsync` (default) | ~0.1 ms JS idle, about 11 ms until mounted |
+
+Theme colours only: `backgroundColor`, `borderColor`, `color`. Everything else keeps rendering through React.
+
+## Install
 
 ```sh
 npm install shadewind react-native-nitro-modules
-
-> `react-native-nitro-modules` is required as this library relies on [Nitro Modules](https://nitro.margelo.com/).
+cd ios && pod install
 ```
 
+## Plain React Native
 
-## Usage
+```tsx
+import { configure, setTheme, useThemed, ThemedView } from 'shadewind';
 
+configure({ themes: ['light', 'dark'], initialTheme: 'light' });
+
+const card = {
+  light: { backgroundColor: '#fff', borderColor: '#e5e5e5' },
+  dark: { backgroundColor: '#1c1c1e', borderColor: '#3a3a3c' },
+};
+
+function Card() {
+  const themed = useThemed(card);
+
+  return <View ref={themed.ref} style={[styles.card, themed.style]} />;
+}
+
+// or: <ThemedView themed={card} style={styles.card} />
+
+setTheme('dark'); // no component re-renders
+```
+
+A view that uses anything the engine cannot handle (a key a theme does not define, an inline `style` that sets a registered
+key, an undeclared theme) renders through React as usual and warns once in development. A binding always renders correctly.
+
+## With Uniwind
 
 ```js
-import { multiply } from 'shadewind';
+// metro.config.js
+const { withUniwindConfig } = require('uniwind/metro');
+const { withShadewind } = require('shadewind/metro');
 
-// ...
-
-const result = multiply(3, 7);
+module.exports = withShadewind(withUniwindConfig(config, { cssEntryFile: './global.css' }));
 ```
 
+`View` and `Text` from Uniwind become engine-aware. Nothing in `node_modules` is patched and your `className` code does not
+change. Views the engine cannot take (state variants such as `active:`, scoped themes, inline colour overrides, themes that
+differ in other properties) keep Uniwind's own behaviour. More than 6 themes, or an unsupported Uniwind version, turns the
+engine off and leaves plain Uniwind.
+
+## API
+
+| Export | |
+|---|---|
+| `configure({ themes, initialTheme, onUnsupported })` | declare themes once, before the first render |
+| `setTheme(name)` / `getTheme()` | switch / read |
+| `useTheme()` / `subscribe(fn)` | the current theme as React state, for UI the engine does not update |
+| `followSystem(map?)` | follow the OS appearance (an explicit `setTheme` stops it) |
+| `useThemed(styles)` | `{ ref, style, engine }` for one host view |
+| `ThemedView`, `ThemedText`, `mergeRefs` | thin components and ref helper |
+| `capabilities` | `maxThemes` (6), `supportedKeys`, `asyncCommit`, `platform` |
+| `shadewind/uniwind` | `installUniwind()`, adapter `View` / `Text` |
+| `shadewind/metro` | `withShadewind(config)` |
+| `shadewind/internal` | diagnostics and benchmark strategies, no semver guarantee |
+
+Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIWIND_INTEGRATION.md](docs/UNIWIND_INTEGRATION.md).
+
+## Known limits
+
+- Up to 6 themes; every theme must define every key a view registers.
+- No state variants, no `opacity`, no scoped themes on the fast path.
+- Rapid-toggle behaviour of the async default is verified manually, not yet by a saved test.
+- Relies on a private React Native API (`getNodeFromInternalInstanceHandle`) to find a view's shadow node.
 
 ## Contributing
 
 - [Development workflow](CONTRIBUTING.md#development-workflow)
-- [Sending a pull request](CONTRIBUTING.md#sending-a-pull-request)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## License
 
 MIT
-
----
-
-Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
