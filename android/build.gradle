@@ -38,7 +38,7 @@ if (project.extensions.findByName("kotlin") == null) {
 
 apply from: '../nitrogen/generated/android/uniwindshadow+autolinking.gradle'
 
-apply plugin: "com.facebook.react"
+// (no `com.facebook.react` plugin: this module has no codegen spec; applying it generated duplicate classes of other libraries)
 
 android {
   namespace "com.margelo.nitro.uniwindshadow"

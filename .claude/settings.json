@@ -1,0 +1,9 @@
+{
+  "model": "opusplan",
+  "advisorModel": "opus",
+  "effortLevel": "medium",
+  "modelSettings": {
+    "claude-opus-5-5": { "effortLevel": "high" },
+    "claude-sonnet-5-5": { "effortLevel": "medium" }
+  }
+}

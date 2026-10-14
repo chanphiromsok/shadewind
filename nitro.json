@@ -1,23 +1,25 @@
 {
-  "cxxNamespace": ["uniwindshadow"],
+  "cxxNamespace": [
+    "uniwindshadow"
+  ],
   "ios": {
     "iosModuleName": "UniwindShadow"
   },
   "android": {
-    "androidNamespace": ["uniwindshadow"],
+    "androidNamespace": [
+      "uniwindshadow"
+    ],
     "androidCxxLibName": "uniwindshadow"
   },
   "autolinking": {
     "UniwindShadow": {
-      "ios": {
-        "language": "swift",
-        "implementationClassName": "UniwindShadow"
-      },
-      "android": {
-        "language": "kotlin",
-        "implementationClassName": "UniwindShadow"
+      "all": {
+        "language": "cpp",
+        "implementationClassName": "HybridUniwindShadow"
       }
     }
   },
-  "ignorePaths": ["node_modules"]
+  "ignorePaths": [
+    "node_modules"
+  ]
 }
