@@ -20,7 +20,7 @@ import {
   type ViewProps,
   type ViewStyle,
 } from 'react-native';
-import { ShadewindEngine, toNativeProps } from './internal';
+import { ShadewindEngine, toNativeProps, toNativePropsWith } from './internal';
 
 // Public API, see docs/API.md. Everything diagnostic or benchmark-only lives in `shadewind/internal`.
 
@@ -435,3 +435,51 @@ export const ThemedText = makeThemed<TextProps & { ref?: Ref<unknown> }>(
   Text as ComponentType<TextProps & { ref?: Ref<unknown> }>,
   'ThemedText'
 ) as ComponentType<ThemedTextProps & { style?: StyleProp<TextStyle> }>;
+
+export type UseThemedPropsResult<T extends object> = {
+  ref: (instance: any) => void;
+  /** The props of the current theme, for the render that is happening now. Never subscribes: no React state is involved. */
+  props: T;
+};
+
+/**
+ * Themes props that are not `style` (a gradient's `colors`, a native view's `color`, ...) without any React state:
+ * the values per theme are handed to the engine, which rewrites the host node's props inside the commit on every switch.
+ *
+ * `colorKeys` names the props that hold colours (a colour or an array of colours); they are converted to native colours.
+ * The component re-renders for other reasons as usual and then simply reads the current theme again.
+ */
+export function useThemedProps<T extends Record<string, unknown>>(
+  valuesByTheme: Readonly<Partial<Record<ThemeName, T>>>,
+  options: { colorKeys?: readonly string[] } = {}
+): UseThemedPropsResult<T> {
+  assertConfigured();
+
+  const key = JSON.stringify([valuesByTheme, options.colorKeys]);
+  const stable = useMemo(() => valuesByTheme, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const colorKeys = options.colorKeys ?? [];
+  const native = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(stable).map(([name, values]) => [
+          name,
+          toNativePropsWith(values as Record<string, unknown>, colorKeys),
+        ])
+      ),
+    [stable] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const ref = useCallback<RefCallback<unknown>>(
+    (node) => {
+      if (!node) {
+        return undefined;
+      }
+
+      ShadewindEngine.registerRaw(node, native);
+
+      return () => ShadewindEngine.unregister(node);
+    },
+    [native]
+  );
+
+  return { ref, props: (stable[getTheme() as ThemeName] ?? {}) as T };
+}

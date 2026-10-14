@@ -97,6 +97,32 @@ const COLOR_KEYS = new Set<keyof ThemedStyle>([
 
 // UIManager::updateShadowTree takes props in the raw format React Native sends to native,
 // so colors must be processed (numbers) before they cross into C++.
+// Like toNativeProps for any component: `colorKeys` name the props that hold colours (a colour, or an array of colours).
+export function toNativePropsWith(
+  props: Record<string, unknown>,
+  colorKeys: readonly string[]
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+
+  for (const key of Object.keys(props)) {
+    const value = props[key];
+
+    if (value === undefined) {
+      continue;
+    }
+
+    if (colorKeys.includes(key)) {
+      out[key] = Array.isArray(value)
+        ? value.map((color) => processColor(color as ColorValue))
+        : processColor(value as ColorValue);
+    } else {
+      out[key] = value;
+    }
+  }
+
+  return out;
+}
+
 export function toNativeProps(style: ThemedStyle): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
