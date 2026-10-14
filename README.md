@@ -87,26 +87,17 @@ Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIW
 
 Shadewind has two parts: a **native engine** (shipped) and an **own style compiler** (design stage, not built yet).
 
-```mermaid
-flowchart LR
-  subgraph build["build time (Node, Rust libs)  [planned]"]
-    SRC[sources] --> SCAN[oxide scanner]
-    CSS[global.css + preset] --> TW["tailwind compile"]
-    SCAN --> TW --> LCSS[lightningcss visitor] --> EMIT[emit tables]
-    EMIT --> BIN[(binary native table)]
-    EMIT --> JST[(JS module: class ids)]
-    AOT["Babel: className -> ids (AOT)"] --> JST
-  end
-  subgraph js["JS thread"]
-    RENDER[React render] --> BIND["bind(ref) / ids"]
-    SET["setTheme(name)"]
-  end
-  subgraph native["native (C++, Nitro raw JSI)  [shipped]"]
-    BIND --> REG[registry: family -> per-theme props]
-    SET --> HOOK["UIManagerCommitHook"]
-    BIN -.-> REG
-    REG --> HOOK --> CLONE["clone nodes, paragraph recolour (no layout)"] --> MOUNT[mount]
-  end
+```
+BUILD (Node, Rust libs)  [planned]
+  sources -> oxide scanner -> tailwind compile -> lightningcss visitor -> emit
+                                                                     |-> binary native table
+  Babel: className -> ids (AOT) -----------------------------------'-> JS module of class ids
+
+JS THREAD                    NATIVE (C++, Nitro raw JSI)  [shipped]
+  React render -> bind(ref)/ids --> registry: family -> per-theme props
+  setTheme(name) -----------------> UIManagerCommitHook
+                                       -> clone nodes, paragraph recolour (no layout) -> mount
+  (binary table -.-> registry)
 ```
 
 | Layer | State | Where |

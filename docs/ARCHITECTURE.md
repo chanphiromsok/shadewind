@@ -435,28 +435,28 @@ What would make it faster still, in order of expected value (none measured yet):
 
 ## 14. Pipeline v3 (2026-10-14): what is shipped vs planned
 
-```mermaid
-flowchart LR
-  subgraph B["build (Node, Rust libs)  [planned]"]
-    SRC[sources] --> SCAN[oxide Scanner] --> TW[tailwind compile] --> LC[lightningcss visitor] --> EM[emit]
-    SRC -.-> CNT["shadewind-cn-table [shipped]"]
-    SRC -.-> AOT["className -> ids (AOT) [design]"]
-  end
-  EM --> BIN[(binary class table)]
-  CNT --> TBL[(cn table .tsv)]
-  subgraph J["JS thread"]
-    CN["cn(...) [shipped]"] -->|"__swCn, ~870 ns"| MERGE
-    BIND["useThemed / bind(ref)"]
-    SET["setTheme(name)"]
-  end
-  subgraph N["native (C++, Nitro raw JSI) [shipped]"]
-    TBL --> MERGE["ClassMerge (oracle-derived)"]
-    COL["ColorParser: CSS colour -> ARGB"] --> REG
-    BIND --> COL
-    BIN -.planned.-> REG["registry: family -> per-theme slots"]
-    SET --> HOOK["UIManagerCommitHook"]
-    REG --> HOOK --> CLONE["clone + paragraph recolour (no layout)"] --> MOUNT[mount]
-  end
+```
+BUILD (Node, Rust libs)                          [planned unless marked]
+  sources -> oxide Scanner -> tailwind compile -> lightningcss visitor -> emit
+     |                                                                     |
+     |-- shadewind-cn-table [shipped] --> cn table (.tsv)                  v
+     '-- className -> ids (AOT) [design]                     binary class table
+                                                                           .
+JS THREAD                                                                  .
+  cn(...) [shipped] --- __swCn, ~870 ns ---+                               .
+  useThemed / bind(ref) ---+               |                               .
+  setTheme(name) ----+     |               |                               .
+                     |     |               |                               .
+NATIVE (C++, Nitro raw JSI) [shipped]      v                               .
+  ClassMerge <----------------- cn table (oracle-derived)                  .
+  ColorParser (CSS colour -> ARGB) <--- bind                               .
+  registry: family -> per-theme slots <..... planned load ..................'
+        |                          
+        v                          
+  UIManagerCommitHook <---- setTheme
+        |
+        v
+  clone nodes + paragraph recolour (no layout) -> mount
 ```
 
 | Stage | State |
