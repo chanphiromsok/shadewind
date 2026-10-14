@@ -3,7 +3,8 @@
     "rootDir": ".",
     "paths": {
       "shadewind": ["./src/index"],
-      "shadewind/internal": ["./src/internal"]
+      "shadewind/internal": ["./src/internal"],
+      "shadewind/uniwind": ["./src/uniwind/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,

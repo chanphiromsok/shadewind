@@ -15,7 +15,20 @@
       "types": "./lib/typescript/src/internal.d.ts",
       "default": "./lib/module/internal.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./uniwind": {
+      "shadewind-source": "./src/uniwind/index.ts",
+      "types": "./lib/typescript/src/uniwind/index.d.ts",
+      "default": "./lib/module/uniwind/index.js"
+    },
+    "./uniwind/*": {
+      "shadewind-source": "./src/uniwind/*.tsx",
+      "default": "./lib/module/uniwind/*.js"
+    },
+    "./metro": {
+      "types": "./metro.d.ts",
+      "default": "./metro.cjs"
+    }
   },
   "files": [
     "src",
@@ -24,6 +37,8 @@
     "ios",
     "cpp",
     "nitrogen",
+    "metro.cjs",
+    "metro.d.ts",
     "nitro.json",
     "*.podspec",
     "react-native.config.js",

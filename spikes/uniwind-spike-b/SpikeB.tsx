@@ -1,9 +1,12 @@
 import './global.css'
+
+// the adapter collects its diagnostics only when asked (Release builds included)
+;(globalThis as { __SHADEWIND_DEBUG__?: boolean }).__SHADEWIND_DEBUG__ = true
 import { useState } from 'react'
 import { Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native'
 import { ScopedTheme, Uniwind } from 'uniwind'
 import { ShadewindEngine } from 'shadewind/internal'
-import { decisions, renders } from './node_modules/uniwind/src/shadewind/useShadewindStyle'
+import { decisions, renders } from 'shadewind/uniwind'
 
 // Spike B test screen: every row has a known expected colour per theme (see EXPECTED below).
 // Each row is a Uniwind View/Text going through the Shadewind adapter.

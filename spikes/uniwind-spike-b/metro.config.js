@@ -1,5 +1,6 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config')
 const { withUniwindConfig } = require('uniwind/metro')
+const { withShadewind } = require('shadewind/metro')
 const path = require('node:path')
 
 const workspaceRoot = path.resolve(__dirname, '../../')
@@ -22,7 +23,10 @@ const config = {
 }
 const mergedConfigs = mergeConfig(defaultConfig, config)
 
-module.exports = withUniwindConfig(mergedConfigs, {
-  cssEntryFile: './global.css',
-  extraThemes: ['ocean'],
-})
+// withShadewind goes last: it sees the files Uniwind's resolver picked and swaps View / Text for the engine-aware ones
+module.exports = withShadewind(
+  withUniwindConfig(mergedConfigs, {
+    cssEntryFile: './global.css',
+    extraThemes: ['ocean'],
+  }),
+)

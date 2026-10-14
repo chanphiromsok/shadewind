@@ -211,3 +211,20 @@ Notes and open items:
   the engine lazily.
 - Metro config: dropping the default `react-native` condition from `unstable_conditionNames` breaks React Native's own setup; keep
   `['shadewind-source', 'react-native']`.
+
+
+## Status: `shadewind/uniwind` + `shadewind/metro` (implemented)
+
+- `shadewind/metro` `withShadewind(config)`, outermost after `withUniwindConfig`: (1) `uniwind-internal/*` specifiers resolve to the
+  files Uniwind itself loads (`<uniwind>/src/...`); (2) imports from inside the shadewind package bypass Uniwind's resolver
+  (real `react-native`, no cycle); (3) a resolved `.../uniwind/src/components/native/{View,Text}.tsx` is replaced by
+  `shadewind/uniwind/{View,Text}`, resolved like an app import so the `shadewind-source`/default condition picks src or lib.
+- `shadewind/uniwind` `installUniwind()` probes version (1.12.x), store/Uniwind agreement, non-empty `vars`, theme count,
+  calls `configure`, subscribes once to Uniwind's Theme dependency. It never throws; when inactive the components keep the
+  Theme subscription and behave like Uniwind's own.
+- iOS Release, unpatched Uniwind 1.12.0, simulator: SpikeB decisions as in spike B (A/I/J engine; B/C/D/F inline overlap;
+  E state variants; H scoped; text-black not theme dependent), the engine row does not re-render on a switch, fallbacks do.
+  Their `-benchmarkScenario theme` with the unmodified app: JS-idle average 0.12 ms (min 0.08, max 0.29) for 2003 views,
+  default `hookAsync`.
+- Not done: Android run, spike C items (mount cost, className-change flash, list recycling), Uniwind > 1.12, forced
+  fallback regression test in CI, pixel check of every switch in their benchmark.
