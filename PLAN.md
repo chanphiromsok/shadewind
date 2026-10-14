@@ -90,3 +90,10 @@ a full fork of Uniwind is not planned.
 - Physical device run; Pixel_9a-class emulator to compare with their published Android numbers.
 - Pro comparison is not possible on Android (the Pro demo is iOS-simulator only); use published numbers with the same-machine free
   Uniwind ratio.
+
+## Status: Uniwind integration spikes
+
+- Spike A done (docs/UNIWIND_INTEGRATION.md): `scopedTheme` resolution is wrong for `light-dark()`; resolving with the runtime
+  theme temporarily swapped to B and an unscoped call matches a real switch (0 mismatches).
+- Next: spike B (adapter `View` in `uniwind-benchmarks/apps/uniwind`, test screens for state variants, inline style, ScopedTheme,
+  7 themes, className change, updateCSSVariables, mount time).

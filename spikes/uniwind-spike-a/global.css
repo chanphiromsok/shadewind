@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@import "uniwind";
+
+@layer theme {
+  :root {
+    @variant dark {
+      --color-primary: #273c75;
+      --color-gray: #353b48;
+      --color-typography: #fff;
+    }
+
+    @variant light {
+      --color-primary: #00a8ff;
+      --color-gray: #f0f0f0;
+      --color-typography: #000;
+    }
+
+    @variant ocean {
+      --color-primary: #0b3d91;
+      --color-gray: #cfe8ff;
+      --color-typography: #001a33;
+    }
+  }
+}
+
+@theme {
+  --color-ld: light-dark(#111111, #eeeeee);
+  --color-brand: #0a84ff;
+}

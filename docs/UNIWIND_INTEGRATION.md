@@ -153,3 +153,28 @@ Also: the perf gate must include mount and scroll cost (the adapter adds N scope
    `style` override, `dark:`-only class, TouchableOpacity, ScopedTheme subtree, 7 themes, nested Text with equal explicit
    colour, className changing after a switch (flash), `updateCSSVariables` on the inactive theme, mount time of 2003 views.
 3. Only then: `Text`, remaining components, Metro wrapper hardening, tests, CI matrix, upstream asks.
+
+## Spike A result (2026-10-14, Uniwind 1.12.0, iOS simulator, `spikes/uniwind-spike-a`)
+
+Setup: themes `light`, `dark`, `ocean` (custom), 81 classNames in the compiled stylesheet (22 differ between themes), all 6
+ordered theme pairs. For each pair: resolve B while A is current (A -> B), then really switch to B and resolve unscoped.
+
+| Method | Mismatching resolutions (of 6 pairs x 81 classes) |
+|---|---|
+| `getStyles(..., {scopedTheme: B})` while A is current | **12**, all `light-dark()` classNames (3 classNames x 4 pairs); 19 of 22 themed classNames were correct |
+| runtime theme temporarily set to B, then the normal unscoped call | **0** |
+| runtime theme set to B + `scopedTheme: B` | 12 (the wrong values from the first method were cached under the scoped key and survive) |
+
+Findings:
+- Risk 1 from the review is real: `lightDark()` reads the global runtime theme, so scoped resolution returns the current theme's
+  value for `light-dark()`, and it is cached.
+- **Fix that works:** do not use `scopedTheme` at all. Set `UniwindStore.runtime.currentThemeName = B` synchronously, call
+  `getStyles(className, props, state, ctx)` unscoped, restore it in a `finally`. Result equals a real switch (0 mismatches) and the
+  cache entry is the same one a real switch would create, with the normal Theme invalidation. JS is single-threaded, so the swap is
+  not observable by other code. This mutates one private field; the startup probe must verify the result against a real switch
+  on a known className.
+- The dependency list is reliable for detection: no className that differs between themes was missing the `Theme` dependency
+  (0 of 22).
+- `light-dark()` inside an `@theme` variable (`--color-ld: light-dark(...)`) fails to compile in Uniwind itself ("Failed to convert
+  color ... type light-dark"); only the arbitrary-value form `bg-[light-dark(...)]` works.
+- Not covered by this spike (spike B): state variants, inline `style` overlap, ScopedTheme, more than 6 themes, className changes.
