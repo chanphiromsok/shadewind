@@ -171,3 +171,28 @@ flowchart TD
 - The tovtam copy (`scratchpad/tovtam`) still has **ablation edits** in `useThemeConfig`, `useGradientColors` and `RichText`
   (originals in `/private/tmp/claude-501/*.orig.*`); it is **not a clean baseline**. Its numbers: plain 64.8 ms, engine 60.3 /
   59 ms, engine + ablation 36.1 ms median longest stall (single or two runs, indicative).
+
+## 8. Build toolchain (validated by Opus, 2026-10-14)
+
+Nothing in 2026 is meaningfully faster or better suited than Lightning CSS for "parse + typed values + Node visitor", and CSS
+parsing is not the bottleneck (small `global.css`; the cost is candidate scanning).
+
+Corrections to the first answer: Tailwind v4's `compile` does **not** use Lightning CSS (own JS parser and AST); only
+`@tailwindcss/node`'s `optimize()` does, with LightDark excluded. Vite 8 (not Rolldown) uses Lightning CSS as its default
+minifier. `oxc-css-parser` exists but has no Node binding or visitor API. Uniwind's own dependencies are
+`@tailwindcss/node`, `@tailwindcss/oxide`, `lightningcss`, `culori`: a proven stack.
+
+Pipeline:
+
+1. `@tailwindcss/oxide` `new Scanner({ sources })`, `.scan()` (incremental `.scanFiles(changed)` in the Metro transformer).
+2. `@tailwindcss/node` `compile(globalCss, { base, onDependency })`, then `.build(candidates)` for the raw CSS. Skip `optimize()`
+   (it applies targets and rewrites the input).
+3. `lightningcss.transform({ code, visitor, customAtRules: { variant: ... } })` with **no `targets`** (otherwise `light-dark()` is
+   lowered to `--lightningcss-light/dark` variables). Walk `layer-block`, `style`, `custom` and `light-dark` nodes into the
+   per-theme tables.
+4. `culori` to normalise oklch and other colours into RN-ready values.
+5. Cache by hash of `global.css` + Tailwind version + sorted candidates; invalidate through `onDependency`.
+
+API surface verified in the 4.3.3 / 1.33.0 typings: `tailwindcss` `compile`/`compileAst`/`__unstable__loadDesignSystem`
+(`candidatesToCss`, `candidatesToAst`); Lightning CSS `Declaration.custom`, `CssColor` `light-dark`, `Rule.custom`,
+`Rule.unknown`, `customAtRules`, `composeVisitors`.
