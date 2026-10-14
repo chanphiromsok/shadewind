@@ -206,8 +206,8 @@ API surface verified in the 4.3.3 / 1.33.0 typings: `tailwindcss` `compile`/`com
 | Oxide `Scanner` over `src/**` | 13,437 candidates in 48.8 ms |
 | `@tailwindcss/node` `compile(global.css)` + `build(candidates)` | 48.1 ms, 45 KB CSS, 246 custom properties, 557 rules |
 | Lightning CSS visitor over that CSS | 5.6 ms to walk it and extract tokens |
-| Per-theme tokens found | `light`: 27, `dark`: 27 `--color-*` tokens |
-| Colour path | Lightning CSS already lowers `oklch()` to rgb (4, 171, 82); `culori` agrees (`ff04ab52`) |
+| Per-theme tokens found | **superseded, see section 11**: the first extractor was wrong (light map held dark values) |
+| Colour path | **superseded, see section 11**: with no `targets` Lightning CSS keeps `oklch`; `culori` converts every token |
 
 Findings that change the design:
 
@@ -320,3 +320,37 @@ const _b = __sw.s(31);            // "bg-card"
 Pass when: the plugin rewrites at least 90 % of `className` sites to ids (target 92.4 %), the app renders pixel-identical on
 the screens already recorded, and the runtime resolver's per-render cost is under a measured threshold (single-digit
 microseconds per component in a Release build) versus plain Uniwind's `useStyle`.
+
+
+## 11. Parser pipeline review (Opus, 2026-10-14): corrections
+
+The review re-ran the chain against `out.css` (1,951 lines; Tailwind 4.3.3; lightningcss 1.30.2). Verdict: **go on the chain
+(oxide -> `@tailwindcss/node` -> lightningcss, no targets -> culori); no-go on the first `extract.mjs`; section 9's token and
+colour claims were wrong and are superseded.**
+
+| Sev | Defect | Fix |
+|---|---|---|
+| Critical | the "light" map held dark values: the regex took the first class name in the selector JSON, and the `@media (prefers-color-scheme: dark) :root:not(:where(.light...))` block names `light` first. 18 of 27 tokens were visibly wrong in light mode; "27 per theme" hid it | classify selectors on the AST; treat `:not(:where...)` blocks as *system twins* and assert they equal the explicit theme |
+| Critical | section 9 said Lightning CSS lowers oklch to rgb: with no targets it stays `oklch`; the rgb sample was the dark brand (written as `rgb()` in `global.css`) leaking in; "culori agrees" converted a hard-coded literal | culori converts every token |
+| High | ARGB packing had no clamp (out-of-gamut yellow packed to `ffffffb2`, correct `ffffd700`) and alpha was hard-coded | clamp each channel, pack real alpha |
+| High | colour parity undefined: lightningcss lowering vs Uniwind (culori clamp + `formatHex`) max channel delta 3 (yellow); Uniwind's `colorMix` ignores `in oklab` (alpha-only for transparent mixes, sRGB interpolation otherwise) | match Uniwind, write the policy down, pixel-test |
+| High | opacity variants carry broken fallbacks (`color-mix(in srgb, unset N%, transparent)`, `--tw-shadow-color: unset`); only the nested `@supports` branch is correct | walk `@supports` and nested rules, later declaration wins, fold per theme |
+| Medium | non-colour and base tokens dropped (`:root, :host` has 58 custom properties: 37 non-colour, 20 `unset` placeholders) | base map that each theme overlays |
+| Medium | partial themes (an `ocean` block with 1 token leaves 26 missing; CSS cascade falls through to the system twin) | require full themes or a declared base scheme; warn on missing tokens |
+| Medium | scanner ignores `@source`; `onDependency` is a no-op, so imported-CSS edits never invalidate | scan `[...compiler.sources, {base: dirname(css)}]` like Uniwind; cache key = all dependency hashes + versions |
+| Medium | scan scope: `src/**` 589 files / 13,437 candidates; project root 23,639 files / 259k candidates / 7.35 s because untracked `ddrel/` (Xcode DerivedData) is not ignored | scan root plus `@source`, ignore build dirs, warn on large counts |
+| Low | lightningcss versions disagree (1.30.2 top, 1.30.1 inside Uniwind) and the folded AST value of `color-mix(in oklab, ...)` differs from lowering and culori | pin one version; do not trust folded AST colour values |
+
+Facts to design against (verified in the review): all token blocks have equal specificity (0,1,0); the cascade key is
+(layer rank, source order), not visitor order alone; token blocks are emitted after utilities but live in `@layer theme`;
+with no `targets`, `light-dark()` stays `light-dark` in custom properties and declarations, and `@theme inline` puts it directly
+into utilities (so utilities need the same resolver); `env()`, `max()`, `hairlineWidth()`, `@media ios/android` and `@container`
+pass through raw and need runtime handling; Tailwind >= 4.3.3 flattens selectors to `[class, where(...)]`.
+
+Three riskiest unknowns remaining: (1) matching Uniwind's colours exactly (clamp vs gamut mapping, sRGB vs oklab mixing, alpha
+folding) without a pixel test; (2) themes beyond light/dark (partial themes, which scheme `light-dark` uses for `ocean`,
+system-follow done at runtime instead of through CSS twins); (3) values that cannot be precomputed and Tailwind-output drift
+across versions, plus cache invalidation.
+
+Reviewed extractor output on tovtam: light `primary` `ff1a1a1a`, dark `ffe0e0e0`, yellow `ffffd700`, 28 colour tokens per theme,
+37 non-colour base tokens, system twins equal to their themes, no issues.
