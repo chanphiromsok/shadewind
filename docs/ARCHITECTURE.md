@@ -263,3 +263,60 @@ flowchart LR
 
 - A Rust runtime core (no Nitro Rust target, FFI per node, <= 5 % of a ~3 ms commit).
 - Anything that parses JSON or colour strings on the JS thread at runtime.
+
+## 10. AOT resolver (design, 2026-10-14)
+
+Goal: the runtime resolver does table lookups on integers, never parses class strings, never runs tailwind-merge.
+
+### What tovtam actually contains (1,769 `className=` sites, counted by a script over `src/`)
+
+| Form | Sites | Share | AOT treatment |
+|---|---|---|---|
+| `className="a b c"` literal | 1,554 | 87.8 % | compile-time class id, hoisted constant |
+| `className={"a b"}` | 76 | 4.3 % | same |
+| `` className={`a b`} `` (no `${}`) | 1 | 0.1 % | same |
+| `cn("a", "b")` all literals | 4 | 0.2 % | same, merged at build |
+| `cn("a", cond && "b", className)` | 79 | 4.5 % | segment ids + variant table / id merge |
+| `cn("a", className)` (identifier) | 28 | 1.6 % | id + runtime id merge |
+| identifier / prop | 12 | 0.7 % | runtime id-or-string path |
+| ternary | 10 | 0.6 % | two precompiled ids, select at runtime |
+| template with `${}` | 5 | 0.3 % | runtime path |
+
+Fully static: **92.4 %**. Dynamic forms (about 7.6 %) are mostly literal segments plus one or two runtime inputs.
+
+### Transform (Babel plugin / Metro transformer, runs before React Compiler)
+
+```tsx
+// in
+<View className={cn("flex-row p-4", active && "bg-card", className)} />
+// out (class table values are build-time facts)
+const _a = __sw.s(12);            // "flex-row p-4"        -> hoisted frozen style + themed refs
+const _b = __sw.s(31);            // "bg-card"
+<View {...__sw.cn(_a, active ? _b : 0, className)} />   // className is a string or an id; ids are ints
+```
+
+1. **Literals** -> `__sw.s(id)`; the id indexes the generated table (base RN style, themed props as token refs, state variants).
+2. **Known conflicts resolved at build**: for segments that are all literals the `twMerge` result is computed at build time.
+   Between a literal and a runtime value, each class id carries a *property-group bitset* (which RN style props it sets), so
+   the runtime merge is "last wins per group" over a small int array, not string parsing.
+3. **Bounded variant tables**: for `cn("a", c1 && "b", c2 && "c")` with at most 3 independent boolean inputs, emit the
+   `2^n` merged ids as a switch: zero runtime merge.
+4. **Interning**: merged results are memoised by the id tuple and frozen, so React sees stable prop identity.
+5. **Boundary**: a literal passed down as a `className` prop travels as a branded id (number); `cn` and the host-component
+   adapter accept id or string. A string reaching the runtime is looked up in a prebuilt `Map<string, id>` (O(1)); only an
+   unknown string is parsed (dev warning, unthemed fallback).
+6. **Dev**: Fast Refresh keeps working because the table module is regenerated and the plugin only emits ids and a `__sw`
+   import; in dev the string path is allowed everywhere.
+
+### Why this is the right place to spend effort
+
+- It removes per-render string work and allocation on the JS thread (what Uniwind's `useStyle` does per component today).
+- It makes the binding payload a few ints, which is what the native table and the SIMD index want (section 9, stages 5-8).
+- Risk: React Compiler ordering, third-party components that stringify `className`, and `twMerge` edge cases (arbitrary values,
+  important modifiers). Spike 8 below proves it on tovtam's 1,769 sites.
+
+### Spike 8: AOT transform on tovtam
+
+Pass when: the plugin rewrites at least 90 % of `className` sites to ids (target 92.4 %), the app renders pixel-identical on
+the screens already recorded, and the runtime resolver's per-render cost is under a measured threshold (single-digit
+microseconds per component in a Release build) versus plain Uniwind's `useStyle`.
