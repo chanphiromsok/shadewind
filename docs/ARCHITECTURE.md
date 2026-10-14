@@ -196,3 +196,70 @@ Pipeline:
 API surface verified in the 4.3.3 / 1.33.0 typings: `tailwindcss` `compile`/`compileAst`/`__unstable__loadDesignSystem`
 (`candidatesToCss`, `candidatesToAst`); Lightning CSS `Declaration.custom`, `CssColor` `light-dark`, `Rule.custom`,
 `Rule.unknown`, `customAtRules`, `composeVisitors`.
+
+## 9. Pipeline v2 (updated 2026-10-14)
+
+### Spike 6 result (build chain on tovtam, run once, cold, `spikes/compiler-spike`)
+
+| Step | Result |
+|---|---|
+| Oxide `Scanner` over `src/**` | 13,437 candidates in 48.8 ms |
+| `@tailwindcss/node` `compile(global.css)` + `build(candidates)` | 48.1 ms, 45 KB CSS, 246 custom properties, 557 rules |
+| Lightning CSS visitor over that CSS | 5.6 ms to walk it and extract tokens |
+| Per-theme tokens found | `light`: 27, `dark`: 27 `--color-*` tokens |
+| Colour path | Lightning CSS already lowers `oklch()` to rgb (4, 171, 82); `culori` agrees (`ff04ab52`) |
+
+Findings that change the design:
+
+- The theme blocks come out as `:root:where(.light, .light *) { --color-...: ... }`. Extraction = match selectors of that shape
+  and read the custom properties; the theme name is the class.
+- `@variant light/dark` is **not** a Tailwind built-in: `global.css` gets it from `@import "uniwind"` (`uniwind.css` defines the
+  `@custom-variant`s and `@utility`s such as `m-safe`). Our compiler therefore ships its own small preset CSS (theme variants,
+  platform variants `ios`/`android`/`native`, safe-area utilities) so `global.css` keeps working with `@import "shadewind"`
+  instead of `@import "uniwind"` (the one-line config swap).
+- `--color-*: unset` placeholders appear from `@theme`; they are defaults, not values.
+- Whole build about 100 ms cold for a 13k-candidate app; not a bottleneck, caching by content hash is enough.
+
+### Updated stage list
+
+| # | Stage | Input -> output | Owner | Change from v1 |
+|---|---|---|---|---|
+| 1 | Scan | sources -> candidates | Rust (oxide) via Node | unchanged, measured |
+| 2 | Compile | `global.css` + preset + candidates -> CSS | `@tailwindcss/node` | new preset replaces `@import "uniwind"` |
+| 3 | Lower | CSS -> theme token maps + class declarations | Lightning CSS visitor (no `targets`) | measured 5.6 ms |
+| 4 | Colour | oklch/color-mix -> ARGB `uint32` | Lightning CSS first, `culori` for what it does not lower | unchanged |
+| 5 | Emit | -> **binary** native table (`classId x slot`, `uint32` ARGB, token dictionary) + small JS module (classIds, base styles) | Node | **new: no JSON/strings parsed at runtime** |
+| 6 | Load | binary table -> native memory | C++ at startup (mmap/memcpy) | **new** |
+| 7 | Bind | JS passes packed ids (ints / `Int32Array`), not objects | JSI | **new: no per-view `folly::dynamic` conversion** |
+| 8 | Index | `family -> binding` | C++ flat SIMD index (`cpp/experiments/FamilyIndex.hpp`) | **new**, 2-4x per lookup on big trees |
+| 9 | Walk | commit -> changed subtrees only (pointer diff vs previous root, skip non-React/non-self commit sources) | C++ hook | **new** (RENDER_CORE.md rank 2) |
+| 10 | Apply | slot -> cloned props; iOS option: custom-trait dynamic colours (no commit) | C++ / UIKit | iOS spike 3 |
+
+### Pipeline (v2)
+
+```mermaid
+flowchart LR
+  subgraph B["build (Node, Rust libs)"]
+    A1[sources] --> S1[oxide Scanner]
+    G[global.css + shadewind preset] --> C1["tailwindcss compile().build()"]
+    S1 --> C1 --> L1[lightningcss visitor, no targets]
+    L1 --> K1[culori for leftovers]
+    K1 --> E1[emit]
+  end
+  E1 --> BIN[(binary table: classId x slot -> ARGB)]
+  E1 --> JSM[(JS module: classIds, base styles)]
+  subgraph R["runtime"]
+    JSM --> RES[resolver cn/clsx/twMerge, pure + cached]
+    RES -->|packed ids| BIND[bind(ref)]
+    BIN -->|mmap| REG[C++ registry: SIMD family index]
+    BIND --> REG
+    SW[setTheme] --> HOOK[commit hook: pointer-diff walk]
+    REG --> HOOK --> CLONE[clone + paragraph recolour] --> MOUNT[mount]
+    SW -.iOS only.-> TRAIT[window.traitOverrides: dynamic UIColor]
+  end
+```
+
+### Not in this pipeline (decided)
+
+- A Rust runtime core (no Nitro Rust target, FFI per node, <= 5 % of a ~3 ms commit).
+- Anything that parses JSON or colour strings on the JS thread at runtime.
