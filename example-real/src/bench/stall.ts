@@ -62,11 +62,13 @@ export async function runIdle(switches = 12): Promise<IdleResult> {
 
   for (let i = 0; i < switches; i++) {
     await new Promise<void>((r) => setTimeout(() => r(), 300));
+    // same order as uniwind-benchmarks' useBenchmark: the idle callback is registered first, then the theme is changed
     const t0 = now();
+    const done = idle();
 
     Uniwind.setTheme(i % 2 === 0 ? 'dark' : 'light');
     syncs.push(now() - t0);
-    await idle();
+    await done;
     runs.push(now() - t0);
   }
 

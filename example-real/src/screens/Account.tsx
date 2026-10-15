@@ -3,7 +3,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Uniwind } from 'uniwind';
-import { decisions, status } from '../engineReport';
+import { decisions, renders, status } from '../engineReport';
 import type { RootStackParamList } from '../navigation/types';
 import { Row } from '../components/ui';
 import { runStall, type StallResult } from '../bench/stall';
@@ -67,7 +67,9 @@ export default function Account() {
             const counts = new Map<string, number>();
 
             decisions.forEach((reason) => counts.set(reason, (counts.get(reason) ?? 0) + 1));
-            setReport([`install: ${status()}`, ...[...counts].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${n} x ${r}`)]);
+            const total = [...renders.values()].reduce((a, b) => a + b, 0);
+
+            setReport([`install: ${status()}`, `styled renders so far: ${total}`, ...[...counts].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${n} x ${r}`)]);
           }}
           className="mt-3 items-center rounded-xl bg-card-pressed py-3 active:opacity-80"
         >

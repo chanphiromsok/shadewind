@@ -149,6 +149,16 @@ const plan = (
     return decide(null, `unsupported: ${unsupported.join(',')}`);
   }
 
+  // `light:bg-x` defines the background in one theme only; in the others it is simply not painted. An unset background is
+  // transparent, so that is a value the engine can apply. (An unset colour or border colour has platform defaults: not folded.)
+  for (const theme of themes) {
+    for (const key of differing) {
+      if (key === 'backgroundColor' && perTheme[theme]![key] === undefined) {
+        perTheme[theme]![key] = 'transparent';
+      }
+    }
+  }
+
   if (
     themes.some((theme) =>
       differing.some((key) => perTheme[theme]![key] === undefined)
