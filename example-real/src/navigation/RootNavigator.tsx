@@ -21,7 +21,7 @@ const Notification = () => <Simple title="Notification" kind="notification" />;
 
 function Tabs() {
   return (
-    <Tab.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false, lazy: false }}>
+    <Tab.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false, lazy: false, freezeOnBlur: true }}>
       <Tab.Screen name="Explore" component={Explore} />
       <Tab.Screen name="Moment" component={Moment} />
       <Tab.Screen name="Range" component={Range} />
@@ -41,7 +41,7 @@ const navTheme = {
 export default function RootNavigator() {
   return (
     <NavigationContainer theme={navTheme}>
-      <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
+      <Stack.Navigator screenOptions={{ headerShown: false, freezeOnBlur: true, contentStyle: { backgroundColor: 'transparent' } }}>
         <Stack.Screen name="Main" component={Tabs} />
         <Stack.Screen name="PostDetail" component={PostDetail} />
         <Stack.Screen name="Profile" component={Profile} />

@@ -8,6 +8,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { Row } from '../components/ui';
 import { runStall, type StallResult } from '../bench/stall';
 import { cn } from '../cn';
+import { ThemeSwitchMeter } from '../bench/ThemeSwitchMeter';
 
 export default function Account() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -75,6 +76,9 @@ export default function Account() {
         >
           <Text className="text-base font-semibold text-primary">Engine report</Text>
         </Pressable>
+        <View className="mt-3">
+          <ThemeSwitchMeter />
+        </View>
         {report ? (
           <Text testID="engine-report-text" className="mt-2 text-xs text-secondary">
             {report.join('\n')}
