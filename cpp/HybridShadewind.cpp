@@ -311,6 +311,7 @@ void HybridShadewind::loadHybridMethods() {
   HybridShadewindSpec::loadHybridMethods();
 
   registerHybrids(this, [](Prototype& prototype) {
+    prototype.registerRawHybridMethod("defineStyle", 2, &HybridShadewind::defineStyle);
     prototype.registerRawHybridMethod("register", 4, &HybridShadewind::registerNode);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
     prototype.registerRawHybridMethod("refreshReactNodes", 1, &HybridShadewind::refreshReactNodes);
@@ -451,6 +452,39 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
   }
 
   _registry.add(node->getFamilyShared(), style.props);
+
+  return jsi::Value::undefined();
+}
+
+// defineStyle(id, propsByTheme): one call per distinct style. Views then render nativeID="sw:<id>" and the commit hook finds
+// them (see ThemeHook::adoptCarrier): no ref, no per-view JS call.
+jsi::Value HybridShadewind::defineStyle(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (count < 2 || !args[0].isNumber() || !args[1].isObject()) {
+    throw jsi::JSError(rt, "Shadewind.defineStyle(id, propsByTheme) expects a number and an object");
+  }
+
+  auto themes = args[1].asObject(rt);
+  auto names = themes.getPropertyNames(rt);
+  std::unordered_map<std::string, folly::dynamic> byTheme;
+
+  for (size_t i = 0; i < names.size(rt); i++) {
+    auto name = names.getValueAtIndex(rt, i).asString(rt);
+    auto props = jsi::dynamicFromValue(rt, themes.getProperty(rt, name));
+
+    normalizeColorStrings(props);
+    byTheme.emplace(name.utf8(rt), std::move(props));
+  }
+
+  if (auto binding = UIManagerBinding::getBinding(rt)) {
+    auto& ui = binding->getUIManager();
+
+    if (!hookRegisteredWith(ui)) {
+      ui.registerCommitHook(*_hook);
+      _state.registeredContainer = ui.getContextContainer();
+    }
+  }
+
+  _hook->defineStyle(static_cast<int64_t>(args[0].asNumber()), byTheme);
 
   return jsi::Value::undefined();
 }

@@ -18,21 +18,24 @@ export const TouchableOpacity: ComponentType<Props> = copyComponentProperties(
       isPressed,
       isFocused,
     };
-    const { style, themed, onRegisterFailed } = useShadewindStyle(
+    const { style, themed, onRegisterFailed, nativeID } = useShadewindStyle(
       props.className,
       props,
-      state
+      state,
+      true
     );
     const ref = useEngineRef(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed
+      onRegisterFailed,
+      nativeID
     );
 
     return (
       <RNTouchableOpacity
         {...props}
         ref={ref}
+        nativeID={nativeID ?? props.nativeID}
         style={[style, props.style]}
         onPressIn={(event) => {
           setIsPressed(true);

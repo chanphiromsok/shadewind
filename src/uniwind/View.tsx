@@ -9,17 +9,27 @@ type Props = ViewProps & { className?: string };
 export const View: ComponentType<Props> = copyComponentProperties(
   RNView,
   (props: Props) => {
-    const { style, themed, onRegisterFailed } = useShadewindStyle(
+    const { style, themed, onRegisterFailed, nativeID } = useShadewindStyle(
       props.className,
-      props
+      props,
+      undefined,
+      true
     );
     const ref = useEngineRef(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed
+      onRegisterFailed,
+      nativeID
     );
 
-    return <RNView {...props} ref={ref} style={[style, props.style]} />;
+    return (
+      <RNView
+        {...props}
+        ref={ref}
+        nativeID={nativeID ?? props.nativeID}
+        style={[style, props.style]}
+      />
+    );
   }
 );
 

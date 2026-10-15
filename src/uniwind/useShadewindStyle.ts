@@ -225,7 +225,10 @@ const cachedPlan = (
 export const useShadewindStyle = (
   className: string | undefined,
   props: Record<string, any>,
-  state?: State
+  state?: State,
+  // true for components that render a host view directly (View, Text, Pressable, TouchableOpacity): the style id then travels
+  // as `nativeID` and the commit hook finds the view, with no ref and no per-view call. A user `nativeID` keeps the ref path.
+  allowCarrier = false
 ) => {
   'use no memo';
 
@@ -287,7 +290,17 @@ export const useShadewindStyle = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { style: current.styles, themed: planned.themed, onRegisterFailed };
+  const nativeID =
+    allowCarrier && planned.themed && !props.nativeID
+      ? engine().carrier(planned.themed)
+      : undefined;
+
+  return {
+    style: current.styles,
+    themed: planned.themed,
+    onRegisterFailed,
+    nativeID,
+  };
 };
 
 /**
@@ -303,7 +316,8 @@ const skipRegister = () =>
 export const useEngineRef = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
-  onRegisterFailed?: () => void
+  onRegisterFailed?: () => void,
+  carrier?: string
 ) => {
   const registered = useRef<unknown>(null);
   const attached = useRef<unknown>(null);
@@ -358,6 +372,11 @@ export const useEngineRef = (
       registered.current = node;
     }
   }, []);
+
+  // carrier mode: the view is found by its nativeID, so no ref is attached for the engine (the user's own ref passes through)
+  if (carrier) {
+    return userRef as any;
+  }
 
   return Object.assign(ref, { pause, resume });
 };
