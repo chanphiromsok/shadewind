@@ -65,7 +65,7 @@ backgrounds follow the theme in both directions.
   this engine would be about 1.6x faster, but it is a different machine, so treat it as indicative.
   the floating theme switcher removed; Expo SDK 56 / RN 0.85.3 versus RN 0.86 for the other two.
 - The engine's `hook` strategy commits synchronously, so the number includes the whole commit. The text redraw on the main thread
-  after the switch is not part of this metric for any library (the same holds for Uniwind and Pro).
+  after the switch is not part of this metric for any library (the same holds for plain Uniwind).
 - Three warm launches per library, one sweep (their method uses two sweeps, order A and reversed B). Simulator only, iOS only.
 
 ### Android: run-to-run machine variance (2026-10-14)

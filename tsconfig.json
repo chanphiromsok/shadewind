@@ -29,5 +29,6 @@
     "strict": true,
     "target": "ESNext",
     "verbatimModuleSyntax": true
-  }
+  },
+  "exclude": ["example-real", "lib", "node_modules"]
 }
