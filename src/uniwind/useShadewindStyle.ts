@@ -1,11 +1,4 @@
-import {
-  type Ref,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-} from 'react';
+import { type Ref, useLayoutEffect, useReducer, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
 import { getInternals, installUniwind } from './install';
@@ -26,10 +19,6 @@ const ALL_STATE: State = {
 const engine = () =>
   (require('shadewind/internal') as typeof import('../internal'))
     .ShadewindEngine;
-const useContext = () =>
-  (
-    require('uniwind-internal/core/context') as typeof import('uniwind-internal/core/context')
-  ).useUniwindContext();
 
 /** Dev diagnostics: className -> 'engine' or why it fell back. Collected only when `__SHADEWIND_DEBUG__` or __DEV__. */
 export const decisions = new Map<string, string>();
@@ -222,6 +211,39 @@ const cachedPlan = (
   return made;
 };
 
+const bump = (n: number) => n + 1;
+const NO_PLAN: Plan = { themed: null, reason: 'engine inactive' };
+
+// the dependencies of a resolved style without the theme, computed once per resolution (the store reuses `current`)
+const depsCache = new WeakMap<object, number[]>();
+const nonThemeDeps = (current: Resolved, theme: number): number[] => {
+  let deps = depsCache.get(current);
+
+  if (!deps) {
+    deps = current.dependencies.filter((dependency) => dependency !== theme);
+    depsCache.set(current, deps);
+  }
+
+  return deps;
+};
+
+const warnUnbound = () => {
+  if (debugOn()) {
+    console.warn(
+      '[shadewind] could not bind a view: stale after a theme switch'
+    );
+  }
+};
+
+let contextHook: (() => { scopedTheme: string | null }) | undefined;
+const useContext = () =>
+  (contextHook ??= (
+    require('uniwind-internal/core/context') as typeof import('uniwind-internal/core/context')
+  ).useUniwindContext)();
+
+// Per styled view: 3 hooks, like Uniwind's useStyle (context, reducer, layout effect). A theme change never re-renders a view
+// (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and stale after a
+// later switch.
 export const useShadewindStyle = (
   className: string | undefined,
   props: Record<string, any>,
@@ -241,118 +263,117 @@ export const useShadewindStyle = (
 
   const context = useContext();
   // re-render for what is not the theme (orientation, viewport, RTL, font scale), like Uniwind does
-  const [, rerender] = useReducer(() => ({}), {});
+  const [, rerender] = useReducer(bump, 0);
   const current = UniwindStore!.getStyles(className, props, state, context);
-  const flat = StyleSheet.flatten(props.style) as
-    Record<string, unknown> | undefined;
-  const hasInlineOverlap =
-    flat !== undefined && SUPPORTED.some((key) => flat[key] !== undefined);
-  const planned = useMemo(
+  let hasInlineOverlap = false;
+
+  if (props.style) {
+    const flat = StyleSheet.flatten(props.style) as
+      Record<string, unknown> | undefined;
+
+    hasInlineOverlap =
+      flat !== undefined && SUPPORTED.some((key) => flat[key] !== undefined);
+  }
+
+  const planned = active
+    ? cachedPlan(className, props, state, context, current, hasInlineOverlap)
+    : NO_PLAN;
+  const deps = nonThemeDeps(current, StyleDependency!.Theme);
+
+  useLayoutEffect(
     () =>
-      active
-        ? cachedPlan(
-            className,
-            props,
-            state,
-            context,
-            current,
-            hasInlineOverlap
-          )
-        : { themed: null, reason: 'engine inactive' },
-    // `current` is cached per theme/state by the store: a new object means a different resolution
+      deps.length > 0 ? UniwindListener!.subscribe(rerender, deps) : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [active, current, hasInlineOverlap, context]
-  );
-  const dependencies = current.dependencies.filter(
-    (dependency) => dependency !== StyleDependency!.Theme
+    [deps]
   );
 
-  useLayoutEffect(() => {
-    if (dependencies.length > 0) {
-      return UniwindListener!.subscribe(rerender, dependencies);
+  return {
+    style: current.styles,
+    themed: planned.themed,
+    onRegisterFailed: warnUnbound,
+  };
+};
+
+type RefHolder = {
+  themed: ThemedStyles;
+  user: Ref<unknown> | undefined;
+  ref: ((node: unknown) => void) & { pause(): void; resume(): void };
+};
+
+const makeHolder = (
+  themed: ThemedStyles,
+  user: Ref<unknown> | undefined,
+  onRegisterFailed: (() => void) | undefined
+): RefHolder => {
+  let registered: unknown = null;
+  let attached: unknown = null;
+
+  const ref = (node: unknown) => {
+    attached = node;
+
+    if (registered) {
+      engine().unregister(registered);
+      registered = null;
     }
 
-    return undefined;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dependencies.join(',')]);
-
-  // Rule 1: a theme change never re-renders a styled view. An engine view is kept right by the commit hook; a view the engine
-  // cannot take is correct at mount and stale after a later switch (dev warning from `plan`).
-  const onRegisterFailed = useCallback(() => {
-    if (debugOn()) {
-      console.warn(
-        `[shadewind] could not bind ${String(props.testID ?? className)}: stale after a theme switch`
-      );
+    if (node) {
+      if (engine().register(node, themed, renderThemeOf.get(themed))) {
+        registered = node;
+      } else {
+        onRegisterFailed?.();
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  return { style: current.styles, themed: planned.themed, onRegisterFailed };
+    if (typeof user === 'function') {
+      user(node);
+    } else if (user && typeof user === 'object') {
+      (user as { current: unknown }).current = node;
+    }
+  };
+
+  return {
+    themed,
+    user,
+    ref: Object.assign(ref, {
+      // a Pressable unbinds the view while it is pressed (React draws the pressed style) and binds it again on release
+      pause() {
+        if (registered) {
+          engine().unregister(registered);
+          registered = null;
+        }
+      },
+      resume() {
+        // no render theme: the props React has now may still be the pressed ones, so let the next commit apply the theme
+        if (attached && !registered && engine().register(attached, themed)) {
+          registered = attached;
+        }
+      },
+    }),
+  };
 };
 
 /**
- * Callback ref: registers the view with the engine while `themed` is set, and forwards to the user's ref. The returned function
- * also carries `pause()` / `resume()`: a Pressable unbinds the view while it is pressed (React draws the pressed style) and
- * binds it again on release, with native calls only (no React state).
+ * The ref for an engine view: registers on attach and forwards to the user's ref. A view that is not bound gets the user's own
+ * ref back unchanged, so React attaches nothing for it. The ref also carries `pause()` / `resume()` (Pressable).
  */
 export const useEngineRef = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
   onRegisterFailed?: () => void
-) => {
-  const registered = useRef<unknown>(null);
-  const attached = useRef<unknown>(null);
-  const themedRef = useRef(themed);
+): any => {
+  const holder = useRef<RefHolder | null>(null);
 
-  themedRef.current = themed;
+  if (!themed) {
+    holder.current = null;
 
-  const ref = useCallback(
-    (node: unknown) => {
-      attached.current = node;
+    return userRef;
+  }
 
-      if (registered.current) {
-        engine().unregister(registered.current);
-        registered.current = null;
-      }
+  let h = holder.current;
 
-      if (node && themed) {
-        if (engine().register(node, themed, renderThemeOf.get(themed))) {
-          registered.current = node;
-        } else {
-          onRegisterFailed?.();
-        }
-      }
+  if (!h || h.themed !== themed || h.user !== userRef) {
+    h = holder.current = makeHolder(themed, userRef, onRegisterFailed);
+  }
 
-      if (typeof userRef === 'function') {
-        userRef(node);
-      } else if (userRef && typeof userRef === 'object') {
-        (userRef as { current: unknown }).current = node;
-      }
-    },
-    [themed, userRef, onRegisterFailed]
-  );
-
-  const pause = useCallback(() => {
-    if (registered.current) {
-      engine().unregister(registered.current);
-      registered.current = null;
-    }
-  }, []);
-
-  const resume = useCallback(() => {
-    const node = attached.current;
-    const styles = themedRef.current;
-
-    // no render theme: the props React has right now may still be the pressed ones, so let the next commit apply the theme
-    if (
-      node &&
-      styles &&
-      !registered.current &&
-      engine().register(node, styles)
-    ) {
-      registered.current = node;
-    }
-  }, []);
-
-  return Object.assign(ref, { pause, resume });
+  return h.ref;
 };

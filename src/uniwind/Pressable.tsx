@@ -29,11 +29,11 @@ export const Pressable: ComponentType<Props> = copyComponentProperties(
         {...props}
         ref={ref}
         onPressIn={(event) => {
-          ref.pause();
+          (ref as { pause?: () => void } | undefined)?.pause?.();
           props.onPressIn?.(event);
         }}
         onPressOut={(event) => {
-          ref.resume();
+          (ref as { resume?: () => void } | undefined)?.resume?.();
           props.onPressOut?.(event);
         }}
         style={(state) => {

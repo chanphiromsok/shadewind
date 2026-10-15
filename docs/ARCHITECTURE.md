@@ -513,3 +513,32 @@ What the first runs taught (kept because they were wrong in instructive ways):
   stale after a switch. Now the resting state is bound and a `Pressable` unbinds on `onPressIn` and rebinds on `onPressOut`
   (native calls only).
 - Remaining 36.7 ms is React work the engine does not remove (the navigation theme, `useUniwind` consumers), not the colour pass.
+
+## 17. Initial render on `example-real`: what moved and what did not (2026-10-15)
+
+Metric: mount 30 feed cards (about 30 styled views each), 10 times in one launch, mean of the last 9 (`-realBench 1`, Release,
+iPhone 17 Pro simulator, 3 interleaved launches per arm). Plain Uniwind is the reference.
+
+| Engine arm | Mount mean (ms) | vs plain (60.2-60.7) |
+|---|---|---|
+| ref machinery + register per view (11 hooks) | 64.3 | +3.6 |
+| 4 hooks per view, unbound views get no ref | 62.3 | **+2.1** |
+
+What the experiments ruled out (all measured, same app):
+
+- Registration is not the cost: an arm that attached the refs but never called the engine was as slow as the full engine.
+- Refs are not the cost either: the `nativeID` carrier (no ref, no per-view call, the commit hook finds the view) came out slower
+  (148-173 ms first feed layout vs plain 140-146) and is reverted. Cause found by reading RN: any non-empty `nativeId` makes a
+  view form a stacking context (`ViewShadowNode.cpp:53`), which changes flattening; do not use `nativeID`/`testID` as a carrier.
+- The remaining cost is per-view adapter JS (Uniwind's `useStyle` is 3 hooks; ours were 11, now 4).
+
+Switch on the same app (engine vs plain): `setTheme` sync 0.3 ms vs 9.6-10.4 ms; microtask free at 0.4 ms vs 9.4-10.5 ms;
+call to JS idle about 25-27 ms vs 112-116 ms (the engine's wait is the native commit and mount, not JS).
+
+Opus research on the RN render pipeline (RN 0.86.2 sources): per styled View/Text the JS thread pays three fibers, style
+flatten/attribute payload, colour `process`, `createNode` raw-props preparse (about 150 ViewProps fields read per view), then
+Yoga; the main thread pays create/recycle/mount per native view. A library cannot remove the native view count or the C++ props
+parse. What can make mount faster than plain is removing the adapter fiber and per-render work: an AOT transform that turns a
+literal `className` into a frozen style object and renders the host component directly with no hooks (estimated 3-5 ms of the
+60 ms for 30 cards), plus colours as RRGGBBAA numbers. Not yet built. Caveat from the same review: the mount metric re-mounts the
+same cards, so recycled views and the text-measure cache flatter the main thread; a cold first launch costs more on both arms.
