@@ -1,7 +1,8 @@
-import { useState, type ComponentType } from 'react';
-import { Text as RNText, type TextProps } from 'react-native';
+import { use, useState, type ComponentType } from 'react';
+import { Platform, Text as RNText, type TextProps } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import { useAccentColor } from 'uniwind-internal/components/native/useAccentColor';
+import { NativeText, TextAncestorContext, textIsPlain } from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 
 type Props = TextProps & {
@@ -33,6 +34,28 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       (props as { ref?: any }).ref,
       onRegisterFailed
     );
+
+    // plain text (primitive children, no press handlers or accessibility props, no clamp): the host component directly, with the
+    // defaults Text.js would have set. Everything else keeps the full path below.
+    if (
+      !use(TextAncestorContext) &&
+      !props.selectionColorClassName &&
+      !props.onPressIn &&
+      !props.onPressOut &&
+      !(props as { onPress?: unknown }).onPress &&
+      textIsPlain(props, style)
+    ) {
+      return (
+        <NativeText
+          {...props}
+          ref={ref}
+          style={[style, props.style]}
+          accessible={Platform.OS === 'ios'}
+          allowFontScaling
+          ellipsizeMode={props.ellipsizeMode ?? 'tail'}
+        />
+      );
+    }
 
     return (
       <RNText

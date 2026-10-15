@@ -542,3 +542,29 @@ parse. What can make mount faster than plain is removing the adapter fiber and p
 literal `className` into a frozen style object and renders the host component directly with no hooks (estimated 3-5 ms of the
 60 ms for 30 cards), plus colours as RRGGBBAA numbers. Not yet built. Caveat from the same review: the mount metric re-mounts the
 same cards, so recycled views and the text-measure cache flatter the main thread; a cold first launch costs more on both arms.
+
+### 17b. Host-direct View/Text for plain cases (2026-10-15)
+
+`View` and `Text` render React Native's native components (`ViewNativeComponent`, `TextNativeComponent`) directly when React
+Native's own wrapper would do nothing: no accessibility/aria/id/tabIndex rewrites for `View`; a primitive-children, plain-props
+`Text` with no nested-text ancestor. Anything else still goes through `RNView`/`RNText`. Guarded in `src/uniwind/native.ts`.
+
+Measured with three arms interleaved, 5 launches each (iPhone 17 Pro simulator, release build). The statistic is
+`className - static host` inside one launch, because whole launches drift by a few ms (one earlier launch ran 57.8 ms with a
+37 ms control) and the control cancels that.
+
+| arm | MOUNT 30 cards, ms (5 launches) | mean | className - static host | first feed layout (mean) |
+| --- | --- | --- | --- | --- |
+| engine before (87af955) | 63.7, 66.4, 67.4, 65.8, 66.9 | 66.0 | 22.7 | 146.8 |
+| engine + host-direct | 62.7, 64.9, 65.2, 63.7, 65.7 | 64.4 | 21.2 | 145.6 |
+| plain Uniwind | 64.4, 64.7, 65.9, 65.1, 66.6 | 65.3 | 21.4 | 144.8 |
+
+- The change is worth about 1.5 ms, and it was lower than the old engine in 5 of 5 launches.
+- Against plain the engine is now level: -0.9 ms raw mean, -0.2 ms normalized, lower in 4 of 5 launches. That is a tie, not a win.
+- Theme switch is unchanged: 0.25-0.47 ms sync, stall median 26-28 ms vs 117-148 ms for plain.
+- The static-host control (41.6-45.3 ms) bounds what is left: about 21 ms per 30 cards is per-view adapter JS. Only an AOT
+  transform (literal `className` to frozen style object, host component, no hooks) can remove it.
+
+Opus review of the C++ side (RN 0.86.2): a library has no lever to make `createNode` props parsing cheaper (it runs before any
+commit hook and payload objects are fresh per node); the app-level flag `enableCppPropsIteratorSetter` would, for both arms. A
+pass-through `MountingOverrideDelegate` probe is the way to split the ~43 ms into createNode / commit+layout / diff / mount.
