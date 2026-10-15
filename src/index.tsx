@@ -314,6 +314,8 @@ const checkStyles = (styles: ThemedStyles, themes: readonly string[]) => {
   return keys.size === 0 ? 'no style keys' : null;
 };
 
+const attachedNodes = new WeakSet<object>();
+
 export type UseThemedResult<T extends object> = {
   // any: a host component's ref type differs per component (View, Text, ScrollView, ...)
 
@@ -366,7 +368,16 @@ export function useThemed<T extends object = ViewStyle>(
         return undefined;
       }
 
-      ShadewindEngine.registerRaw(node, native, theme);
+      // `theme` names the theme this render used, which only describes the props of a node's first attach. A re-attach (screen
+      // revealed after a freeze) finds props the commit hook may have re-themed meanwhile, so it passes none and the next commit
+      // applies the current theme.
+      const first = typeof node === 'object' && !attachedNodes.has(node);
+
+      if (typeof node === 'object') {
+        attachedNodes.add(node);
+      }
+
+      ShadewindEngine.registerRaw(node, native, first ? theme : undefined);
 
       return () => ShadewindEngine.unregister(node);
     },

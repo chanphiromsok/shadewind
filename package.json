@@ -52,6 +52,8 @@
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
+    "!cpp/experiments",
+    "!cpp/tests",
     "!**/.*"
   ],
   "scripts": {
@@ -64,6 +66,14 @@
   },
   "keywords": [
     "react-native",
+    "fabric",
+    "new-architecture",
+    "theme",
+    "dark-mode",
+    "shadow-tree",
+    "nitro",
+    "uniwind",
+    "tailwind",
     "ios",
     "android"
   ],
@@ -103,8 +113,9 @@
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": "*",
-    "react-native-nitro-modules": "^0.37.1"
+    "react-native": "^0.86.0",
+    "react-native-nitro-modules": "^0.37.1",
+    "uniwind": "^1.12.0"
   },
   "workspaces": [
     "example"
@@ -151,6 +162,12 @@
     "version": "0.63.1"
   },
   "bin": {
-    "shadewind-cn-table": "./bin/cn-table.mjs"
-  }
+    "shadewind-cn-table": "bin/cn-table.mjs"
+  },
+  "peerDependenciesMeta": {
+    "uniwind": {
+      "optional": true
+    }
+  },
+  "engines": {}
 }

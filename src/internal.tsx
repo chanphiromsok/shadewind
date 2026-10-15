@@ -45,6 +45,8 @@ export type InspectReport = {
   /** iOS: registered views whose layer was painted with the expected theme colour. */
   layerMatchesExpected?: number;
   samples?: string;
+  /** Debug: hook state of registered views whose tree colour is not the expected one. */
+  stale?: string;
 };
 
 /** Native-side breakdown of one setTheme call, in milliseconds. */

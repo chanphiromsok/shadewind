@@ -85,7 +85,7 @@ const childrenArePrimitive = (children: unknown): boolean => {
   return false;
 };
 
-const styleIsPlain = (style: unknown): boolean => {
+export const styleIsPlain = (style: unknown): boolean => {
   if (style == null) {
     return true;
   }

@@ -363,6 +363,22 @@ public:
     _fullPending = true;
   }
 
+  // Debug (inspect): what the hook believes about one view, next to the props the committed tree holds for it.
+  std::string describe(const ShadowNodeFamily* family, const Props* current) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    const auto it = _entries.find(family);
+
+    if (it == _entries.end()) {
+      return "noentry";
+    }
+
+    const auto& e = it->second;
+
+    return "ep=" + std::to_string(e.appliedEpoch) + "/" + std::to_string(_epoch) + " app==cur:" + std::to_string(current == e.appliedProps) +
+        " base==cur:" + std::to_string(current == e.base.get()) + " delta:" + std::to_string(_theme != kNoTheme && e.slots[_theme].delta != nullptr) +
+        " prod:" + std::to_string(_theme != kNoTheme && e.slots[_theme].produced.get() == current) + " " + (e.componentName ? e.componentName : "?");
+  }
+
   bool hasUnapplied() {
     std::lock_guard<std::mutex> lock(_mutex);
 
@@ -436,7 +452,6 @@ public:
     auto cloned = walkTree(*newRoot, walk);
 
     const auto t1 = Clock::now();
-
     if (!cloned) {
       _stats.scanMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
       _stats.scanned = walk.scanned;

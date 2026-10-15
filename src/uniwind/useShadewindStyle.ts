@@ -6,10 +6,10 @@ import { getInternals, installUniwind } from './install';
 // Uniwind's `useStyle`, plus: register the per-theme colours with the engine and stop re-rendering on a theme switch, for the
 // components that are safe to hand over. Everything else (and everything when the engine is inactive) keeps Uniwind's behaviour.
 
-type State = Record<string, boolean>;
+export type State = Record<string, boolean>;
 
 const SUPPORTED = ['backgroundColor', 'borderColor', 'color'] as const;
-const ALL_STATE: State = {
+export const ALL_STATE: State = {
   isDisabled: true,
   isFocused: true,
   isPressed: true,
@@ -30,7 +30,7 @@ const debugOn = () =>
   (globalThis as { __SHADEWIND_DEBUG__?: boolean }).__SHADEWIND_DEBUG__ ===
     true;
 
-const same = (a: unknown, b: unknown) =>
+export const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 
 // UniwindStore.getStyles(..., { scopedTheme }) is wrong for light-dark() (spike A): make `theme` the runtime theme for the call.
@@ -48,7 +48,26 @@ const withTheme = <T>(theme: string, fn: () => T): T => {
 };
 
 // the theme a plan was resolved for: passed at register so C++ knows React's props are already current
-const renderThemeOf = new WeakMap<object, string>();
+export const renderThemeOf = new WeakMap<object, string>();
+
+// Only a view's first attach is a fresh render of the current props. A re-attach (screen revealed after a freeze, Activity shown
+// again) finds whatever the tree holds now, which the commit hook may have re-themed while the view was unbound: claiming "rendered
+// with the current theme" there makes the engine skip it and the view stays on the old theme (measured: 77 of 174 views of a revealed
+// tab). So the render theme is passed once per node; a re-attach lets the next commit apply the current theme.
+const attachedNodes = new WeakSet<object>();
+
+export const renderThemeFor = (
+  node: unknown,
+  themed: object
+): string | undefined => {
+  if (typeof node !== 'object' || node === null || attachedNodes.has(node)) {
+    return undefined;
+  }
+
+  attachedNodes.add(node);
+
+  return renderThemeOf.get(themed);
+};
 
 type Resolved = ReturnType<
   NonNullable<ReturnType<typeof getInternals>>['UniwindStore']['getStyles']
@@ -174,7 +193,7 @@ const plan = (
 // re-resolves the style once per theme and compares them as JSON: thousands of identical plans for a handful of classNames.
 const planCache = new WeakMap<object, [Plan | undefined, Plan | undefined]>();
 
-const cachedPlan = (
+export const cachedPlan = (
   className: string | undefined,
   props: Record<string, any>,
   state: State | undefined,
@@ -216,7 +235,7 @@ const NO_PLAN: Plan = { themed: null, reason: 'engine inactive' };
 
 // the dependencies of a resolved style without the theme, computed once per resolution (the store reuses `current`)
 const depsCache = new WeakMap<object, number[]>();
-const nonThemeDeps = (current: Resolved, theme: number): number[] => {
+export const nonThemeDeps = (current: Resolved, theme: number): number[] => {
   let deps = depsCache.get(current);
 
   if (!deps) {
@@ -317,7 +336,7 @@ const makeHolder = (
     }
 
     if (node) {
-      if (engine().register(node, themed, renderThemeOf.get(themed))) {
+      if (engine().register(node, themed, renderThemeFor(node, themed))) {
         registered = node;
       } else {
         onRegisterFailed?.();

@@ -571,6 +571,7 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 
   int inTree = 0, notInTree = 0, treeMatches = 0, nativeMatches = 0, layerMatches = 0;
   std::string samples;
+  std::string stale;
 
   std::vector<Tag> tags;
 
@@ -591,6 +592,7 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
     const int64_t expected = asColor(update.props.get_ptr("backgroundColor"));
     int64_t treeBg = -1;
     bool found = false;
+    const Props* treeProps = nullptr;
 
     ui.getShadowTreeRegistry().visit(update.family->getSurfaceId(), [&](const ShadowTree& tree) {
       auto root = tree.getCurrentRevision().rootShadowNode;
@@ -607,6 +609,7 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
       }
 
       found = true;
+      treeProps = node->getProps().get();
 
       if (node->getTraits().check(ShadowNodeTraits::Trait::ViewKind)) {
         // every ConcreteViewShadowNode carries ViewProps (static_assert in ConcreteViewShadowNode); no RTTI across RN's libraries
@@ -633,6 +636,8 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 
     if (found && treeBg == expected) {
       ++treeMatches;
+    } else if (found && stale.size() < 700) {
+      stale += "tag " + std::to_string(update.tag) + " " + _hook->describe(update.family.get(), treeProps) + "; ";
     }
 
     // what UIKit holds (the UIView ivar and the painted layer); `overlay` is RN's nativeProps_DEPRECATED, which only the older
@@ -663,6 +668,7 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
   report.setProperty(rt, "nativePropsMatchExpected", nativeMatches); // now: UIView.backgroundColor == expected
   report.setProperty(rt, "layerMatchesExpected", layerMatches);
   report.setProperty(rt, "samples", jsi::String::createFromUtf8(rt, samples));
+  report.setProperty(rt, "stale", jsi::String::createFromUtf8(rt, stale));
 
   return report;
 }

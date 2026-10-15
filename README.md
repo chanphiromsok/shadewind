@@ -14,12 +14,13 @@ Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, R
 | Shadewind `hook` (synchronous) | ~3.5 ms |
 | Shadewind `hookAsync` (default) | ~0.1 ms JS idle, about 11 ms until mounted |
 
-Theme colours only: `backgroundColor`, `borderColor`, `color`. Everything else keeps rendering through React.
+Theme values only: `backgroundColor`, `borderColor`, `color` and `opacity`. Everything else keeps rendering through React.
 
 ## Install
 
 ```sh
 npm install shadewind react-native-nitro-modules
+# only for the Uniwind adapter: npm install uniwind
 cd ios && pod install
 ```
 
@@ -76,7 +77,7 @@ engine off and leaves plain Uniwind.
 | `ThemedView`, `ThemedText`, `mergeRefs` | thin components and ref helper |
 | `capabilities` | `maxThemes` (6), `supportedKeys`, `asyncCommit`, `platform` |
 | `configureCn({ table, fallback })`, `cn(...)` | native `twMerge(clsx(...))`, byte-identical for every token in the table (generate it with `npx shadewind-cn-table <srcDir>`); about 21x faster than clsx+twMerge on Hermes (see `docs/ARCHITECTURE.md` section 13) |
-| `shadewind/uniwind` | `installUniwind()`, adapter `View` / `Text` |
+| `shadewind/uniwind` | `installUniwind()`, adapter `View` / `Text` / `Pressable` / `TouchableOpacity`, `withUniwind` |
 | `shadewind/metro` | `withShadewind(config)` |
 | `shadewind/internal` | diagnostics and benchmark strategies, no semver guarantee |
 
@@ -125,14 +126,17 @@ Docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [RENDER_CORE](docs/RENDER_CORE.md), 
 
 ## Known limits
 
-- **Mount cost.** The switch is fast; mounting is not free. On Uniwind's own benchmark app (2003 views, Release, iOS
-  simulator) the Uniwind bridge rendered in about 72 ms against about 61-63 ms for plain Uniwind (about +11 ms), because every
-  view registers with the engine at mount. A change that builds each distinct style once is in progress and not yet measured; see
-  `docs/ARCHITECTURE.md` section 15.
+- **Mount cost.** The switch is fast; mounting is not free, because every view registers with the engine. After the host-direct
+  `View` / `Text` change, mounting 30 feed cards on a real-app benchmark (Release, iOS simulator) is level with plain Uniwind
+  (64.4 ms against 65.3 ms, a tie, not a win); see `docs/ARCHITECTURE.md` section 17b.
+- **Cost on every commit.** The commit hook walks the whole shadow tree of the surface on every commit, including frozen tabs
+  (measured on a tree of about 1,500 nodes: 0.41 ms average, 2.7 ms worst, iOS simulator). It grows linearly with the node
+  count and is not measured on a physical device.
 
 - Up to 6 themes; every theme must define every key a view registers.
-- No state variants, no `opacity`, no scoped themes on the fast path.
-- Rapid-toggle behaviour of the async default is verified manually, not yet by a saved test.
+- No state variants and no scoped themes on the fast path.
+- Rapid-toggle and `freezeOnBlur` behaviour (react-native-screens on bottom tabs and on a native stack) were verified manually on
+  the iOS simulator (`docs/DESIGN.md`), not by a saved test. Android is not verified for freeze.
 - Relies on a private React Native API (`getNodeFromInternalInstanceHandle`) to find a view's shadow node.
 
 ## Contributing

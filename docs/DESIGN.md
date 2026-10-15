@@ -569,3 +569,27 @@ Open: `hookAsync` has no background executor on Android; `viewOK`/`layerOK` prob
   1000 paragraphs through layout (visual 12 ms).
 - Open: hook lifetime across Fast Refresh (own the hook in the UIManager's ContextContainer), Android background executor on a
   serial JNI-attached thread plus a `UIManagerMountHook` for "mounted", whole-tree walk pruning (see PLAN.md).
+
+## Stale Home after a freeze: found and fixed (2026-10-15, iPhone 17 Pro simulator, Release)
+
+Setup: `freezeOnBlur: true` on the bottom tabs of `example-real`, an always-mounted probe in `App.tsx` that prints `inspect()` (plain styles, so the
+engine never registers it). Sequence: Account -> Dark -> Home (reveal) -> Account -> Light, Dark, Light (150 ms apart) -> Home, run twice.
+
+Before: Home stayed dark while the theme was light, `reg=174 inTree=174 treeOK=97 viewOK=97` (reproduced 4 times with the same numbers).
+`inspect()` now also lists `stale`: the hook's own state for each wrong view: `ep=9/9 app==cur:1 base==cur:1 delta:1 prod:0`. The hook believed
+the view was already applied for the current epoch and that the props in the tree were its own, but the tree held the old theme's props.
+
+Cause: after a freeze the ref re-attaches and registers again with `renderTheme` = the theme of the cached plan. That equals the current
+theme, so `ThemeHook::add(... renderedWithCurrentTheme = true)` marks the view applied with `base = the props the tree holds now`. Those props
+were re-themed by the hook before the freeze, so the claim is false and no later commit touches the view.
+
+Fix (src/uniwind/useShadewindStyle.ts `renderThemeFor`, used by the holder ref and by aot.ts): pass the render theme only on a node's first attach.
+A re-attach registers without it, so the next commit applies the current theme.
+
+After: the same sequence, run twice, `treeOK=174 viewOK=174`, correct colours on screen.
+
+Not measured: the cost of the extra re-theme commit on each reveal, Android, a dynamic className change on an attached view (it also counts as a
+re-attach now and gets one extra clone), and `useThemed` in `src/index.tsx`, which has its own stale `theme` closure.
+
+Method warning: `example-real` installs `shadewind` from `vendor/shadewind-0.1.0.tgz` and consumes the compiled `lib/module`, not `src/`. Edits to `cpp/` or
+`src/` only reach the app after copying `cpp/`, `src/` and a `bob build` output (`lib/`) into `example-real/node_modules/shadewind` and rebuilding.

@@ -568,3 +568,10 @@ Measured with three arms interleaved, 5 launches each (iPhone 17 Pro simulator, 
 Opus review of the C++ side (RN 0.86.2): a library has no lever to make `createNode` props parsing cheaper (it runs before any
 commit hook and payload objects are fresh per node); the app-level flag `enableCppPropsIteratorSetter` would, for both arms. A
 pass-through `MountingOverrideDelegate` probe is the way to split the ~43 ms into createNode / commit+layout / diff / mount.
+
+### 17c. AOT arm measured: no gain (2026-10-15)
+
+`-realBench 1`, one launch, Release, iPhone 17 Pro simulator, 40 mounts of 30 feed cards with the variants interleaved, mean of the last
+9 per variant: `className` 47.8 ms, `aot` 47.1 ms, no `Pressable` 47.4 ms, static host 34.4 ms. AOT is 0.7 ms (1.5 %) faster than
+`className`, inside the noise of a single launch; the 13 ms down to the static-host floor is not removed by it. Do not advertise `aot` or
+`LightPressable` as performance features. Not measured: several launches, a device, the JS-thread-only time.
