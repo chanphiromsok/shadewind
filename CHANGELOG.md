@@ -13,7 +13,5 @@ First public release. Experimental: New Architecture only, React Native 0.86.x, 
   frozen (views re-registered with a render-theme claim that the tree no longer matched). Verified on the iOS simulator through the
   Uniwind adapter, with bottom tabs and a native stack; see `docs/DESIGN.md`. The public `useThemed` / `ThemedView` path got the same
   change but has not been verified on a device.
-- `shadewind/uniwind` also exports `aot` and `LightPressable`. They are experimental: on the real-app mount benchmark `aot` was within
-  noise of plain `className` (47.1 ms against 47.8 ms, `docs/ARCHITECTURE.md` section 17c), so do not expect a speed-up from them.
 - Known limits: up to 6 themes, every theme must define every key a view registers, no state variants or scoped themes on the fast
   path, Android less tested (commits synchronously on the JS thread), relies on a private React Native API to find a view's shadow node.

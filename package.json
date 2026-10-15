@@ -23,6 +23,7 @@
     },
     "./uniwind/*": {
       "shadewind-source": "./src/uniwind/*.tsx",
+      "types": "./lib/typescript/src/uniwind/*.d.ts",
       "default": "./lib/module/uniwind/*.js"
     },
     "./metro": {
