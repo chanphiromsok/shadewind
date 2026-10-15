@@ -446,10 +446,6 @@ NATIVE (C++, Nitro raw JSI) [shipped]      v                               .
 Open: Android build of ColorParser, ClassMerge and `__swCn` has not been run; the Uniwind bridge is still shipped and its
 retirement is undecided.
 
-Observation from the Uniwind Pro demo (shipped binary, strings only, not profiled): it offers Circle / Blur / Fade / None
-transitions on theme change, which suggests the switch is covered by an overlay animation rather than made cheap. Our
-engine's goal is to make the switch itself cheap so no cover is needed; this is unmeasured on that app.
-
 ## 15. Render path vs theme-switch path, measured on Uniwind's own benchmark app (2026-10-15)
 
 Their app (`apps/uniwind`, `App.tsx` and `useBenchmark` untouched), Release, iPhone 17 Pro simulator, 2003 views, average of 10 per

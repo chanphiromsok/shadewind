@@ -91,7 +91,6 @@ Each one removes a private import. Until accepted, the version-pinned bridge abo
 |---|---|---|
 | Uniwind internals change | adapter disabled, app still correct | version range, probe, CI matrix, upstream asks |
 | React Native Fabric C++ changes (ParagraphState, Yoga, rawProps) | text fast path off, layout runs | compat header, probes, per-RN CI cell |
-| Uniwind Pro overlap | positioning | open source engine, Uniwind-agnostic core, free Uniwind adapter |
 | Third-party components using `withUniwind` / `useResolveClassNames` | still re-render | documented; adapter wraps `withUniwind` output when possible |
 
 ## Build order
@@ -136,7 +135,7 @@ The design above is **not ready to build as written**. Corrections, in priority 
    with an origin exemption for the adapter. Uniwind captures the inner resolver in a closure, so an outer wrapper cannot see its
    internal re-resolves. Duplicate-store hazard: if the internals alias resolves to a different copy than app code, two
    `UniwindStore` instances exist and the adapter views lose all styling; alias to the exact `src` files and probe
-   "same instance and populated" at startup. Web/Vite and Uniwind Pro: adapter is `.native` only and disabled elsewhere.
+   "same instance and populated" at startup. Web/Vite: adapter is `.native` only and disabled elsewhere.
 9. **"Wrap, do not copy" is not possible** for engine-handled components: the Theme subscription lives inside `useStyle`.
    View and Text must be reimplemented (Text's `isPressed`, line-clamp mapping, `selectionColorClassName`/`useAccentColor`). That
    contradicts "one private import file" and must be stated as upkeep, or removed by upstream ask 2.

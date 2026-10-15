@@ -11,7 +11,6 @@ Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, R
 | | JS thread time per switch |
 |---|---|
 | Uniwind 1.12.0 | ~103 ms |
-| Uniwind Pro 1.5.1 demo | ~21 ms |
 | Shadewind `hook` (synchronous) | ~3.5 ms |
 | Shadewind `hookAsync` (default) | ~0.1 ms JS idle, about 11 ms until mounted |
 

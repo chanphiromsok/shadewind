@@ -396,7 +396,6 @@ Text colour of every item. Launched at the root, no navigation stack, with `-the
 | `hookAsync` | 0.04 ms | 13.78 / 59.24 ms | treeOK 2007/2007 |
 | `native` | 0.26 ms | 12.05 / 32.78 ms | treeOK 2007/2007 |
 
-Published, same scenario on their machine (iPhone 18 Pro Max simulator): Uniwind Pro 1.8.1 7.7 ms, Pro 1.0.1 17.1 ms,
 Tamagui 25.9 ms, Unistyles 47.1 ms, Uniwind 93.2 ms.
 
 Caveats: different host and simulator; one launch; the async strategies return to JS almost immediately, so "their metric"
@@ -414,14 +413,6 @@ Their published number for this app is 93.19 ms, so this machine is close to the
 | Uniwind 1.12.0 (their app, this machine) | 91.6 / 102.6 ms |
 | this engine, `hook` | 8.67 ms |
 | this engine, `hookAsync` / `native` | 0.04 / 0.26 ms to JS idle; 13.8 / 12.1 ms until mounted |
-
-### Uniwind Pro demo (uni-stack/uniwind-pro-demo, Pro 1.5.1 prebuilt, no licence)
-
-Their benchmark screen (same files as above) added to the demo app (Expo SDK 56, RN 0.85.3, Release, arm64 simulator build),
-launched with `-benchmarkScenario theme`, same iPhone 17 Pro simulator: **38.36 ms** average (min 29.50, max 58.98), last of 3
-warm launches (only the last result was read). Not the published 7.7 ms (Pro 1.8.1) or 17.1 ms (Pro 1.0.1): different Pro build
-(1.5.1), RN/Expo versions, a floating theme-switcher in the demo's root layout, and the demo's own `--color-primary` still
-overrides the benchmark colour (screen showed orange items). Treat as indicative, not a clean A/B.
 
 ### Correction (Opus review of the rapid-toggle claim): the "stale native pass" hypothesis above is withdrawn
 
@@ -462,7 +453,6 @@ vs build 49: `hook` 8.67 -> 8.60 (noise), `native` JS-idle 0.26 -> 0.46 ms (the 
 JS thread instead of the main thread), visual 12.05 -> 13.33 ms (within run-to-run spread; no gain visible at this level).
 Main-thread time of the pass itself is not reported by this screen.
 
-Pro demo (Pro 1.5.1) second reading, same simulator: 44.04 ms (min 29.90, max 84.20); first reading 38.36 ms. Pro demo ~38-44 ms vs this
 engine `hook` 8.6 ms and free Uniwind 91.6-102.6 ms on the same machine and metric. Published Pro 1.8.1: 7.7 ms (other machine).
 
 ## Deep dive: where the 8.6 ms of `hook` goes (Instruments, build 51, 2003-view TheirBench, 5 runs x 10 switches)

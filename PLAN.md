@@ -5,17 +5,16 @@ Status as of 2026-10-14. Working name is still `shadewind`; a new name without "
 
 ## Goal
 
-A theme-switch engine that sits on top of Uniwind (the way Uniwind Pro does): a theme change updates the already mounted views
+A theme-switch engine that sits on top of Uniwind: a theme change updates the already mounted views
 through the Fabric shadow tree and does not re-render React components.
 
-Target: beat Uniwind Pro on the `uniwind-benchmarks` theme-change scenario (2003 views) on iOS and Android.
+Target: beat plain Uniwind on the `uniwind-benchmarks` render and theme-change scenarios (2003 views) on iOS and Android.
 
 ## Where we are
 
 | Area | State |
 |---|---|
 | iOS engine | works: commit hook, text colour without layout pass, `hook` / `hookAsync`, default `hookAsync` |
-| Benchmark (iOS sim, their screen, JS idle) | `hook` 4.88 ms, `hookAsync` 0.05 ms (about 2.8 ms until mounted); Pro demo 1.5.1 20.97 ms; Uniwind 1.12.0 103.6 ms. See `docs/BENCHMARK.md` |
 | Uniwind integration | not started (design below) |
 | Android | builds and runs (Release arm64 emulator); `hook` 7.35 ms median vs free Uniwind 302.9 ms on the same emulator; see `docs/BENCHMARK.md` |
 | Known gaps | rapid-toggle correctness re-check, commit-hook whole-tree walk, pre-built node buffer unused (`precloned 0`), `Text` state recolour is iOS-tested only |
@@ -30,8 +29,6 @@ Target: beat Uniwind Pro on the `uniwind-benchmarks` theme-change scenario (2003
 3. Text recolour (`recolorParagraph`): the Paragraph state type differs per platform (`android/ParagraphState.h` carries
    `AttributedString`, `ParagraphAttributes` and a measured layout). Verify it compiles and behaves; fall back to the normal
    clone path (layout runs) where the platform state cannot be rebuilt safely.
-4. Run the `uniwind-benchmarks` theme screen on the Pixel_9a-like emulator; compare against free Uniwind and the Pro demo is not
-   possible (the Pro demo is iOS-only), so compare against published Android numbers and free Uniwind on the same emulator.
 5. Correctness: tree check + pixel check (dark/light), frozen screen flow, rapid toggles.
 
 Exit criteria: builds and runs on an arm64 emulator, theme switch correct in both directions including text colour, numbers
@@ -69,7 +66,6 @@ a full fork of Uniwind is not planned.
 
 - Pick the name; rename package, Nitro module, C++ namespace, JS exports, example bundle id and docs.
 - Decide public API (`registerView` / hook / component) and what is documented as supported (style subset, platforms).
-- Decide licensing and positioning relative to Uniwind Pro.
 
 ## Open decisions
 
@@ -81,14 +77,12 @@ a full fork of Uniwind is not planned.
 
 - `docs/DESIGN.md`: measurements, profiles, retractions.
 - `docs/BENCHMARK.md`: the comparison table.
-- Benchmark source: `uni-stack/uniwind-benchmarks`; Pro demo: `uni-stack/uniwind-pro-demo` (iOS simulator only).
 
 ## Android follow-ups
 
 - Background commit for `hookAsync` (executor + main-thread mount completion) so the JS thread is free like on iOS.
 - UIKit-style probes for Android (view background via the mounted Java view) or rely on the tree check plus pixels.
 - Physical device run; Pixel_9a-class emulator to compare with their published Android numbers.
-- Pro comparison is not possible on Android (the Pro demo is iOS-simulator only); use published numbers with the same-machine free
   Uniwind ratio.
 
 ## Status: Uniwind integration spikes
