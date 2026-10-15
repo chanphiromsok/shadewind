@@ -311,7 +311,7 @@ void HybridShadewind::loadHybridMethods() {
   HybridShadewindSpec::loadHybridMethods();
 
   registerHybrids(this, [](Prototype& prototype) {
-    prototype.registerRawHybridMethod("register", 2, &HybridShadewind::registerNode);
+    prototype.registerRawHybridMethod("register", 3, &HybridShadewind::registerNode);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
     prototype.registerRawHybridMethod("refreshReactNodes", 1, &HybridShadewind::refreshReactNodes);
     prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
@@ -385,17 +385,36 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
     throw jsi::JSError(rt, "Shadewind.register: first argument is not a ShadowNode");
   }
 
-  auto themes = args[1].asObject(rt);
-  auto names = themes.getPropertyNames(rt);
-  std::unordered_map<std::string, folly::dynamic> propsByTheme;
+  const SurfaceId surface = node->getFamily().getSurfaceId();
+  const bool tagged = count >= 3 && args[2].isNumber();
+  const auto styleKey = std::make_pair(tagged ? static_cast<int64_t>(args[2].asNumber()) : int64_t{-1}, static_cast<int>(surface));
+  State::SharedStyle style;
+  bool cached = false;
 
-  for (size_t i = 0; i < names.size(rt); i++) {
-    auto name = names.getValueAtIndex(rt, i).asString(rt);
+  if (tagged) {
+    std::lock_guard<std::mutex> lock(_state.styleMutex);
+    const auto it = _state.styleCache.find(styleKey);
 
-    auto props = jsi::dynamicFromValue(rt, themes.getProperty(rt, name));
+    if (it != _state.styleCache.end()) {
+      style = it->second;
+      cached = true;
+    }
+  }
 
-    normalizeColorStrings(props);
-    propsByTheme.emplace(name.utf8(rt), std::move(props));
+  if (!cached) {
+    auto themes = args[1].asObject(rt);
+    auto names = themes.getPropertyNames(rt);
+    auto propsByTheme = std::make_shared<PropsByTheme>();
+
+    for (size_t i = 0; i < names.size(rt); i++) {
+      auto name = names.getValueAtIndex(rt, i).asString(rt);
+      auto props = jsi::dynamicFromValue(rt, themes.getProperty(rt, name));
+
+      normalizeColorStrings(props);
+      propsByTheme->emplace(name.utf8(rt), std::move(props));
+    }
+
+    style.props = std::move(propsByTheme);
   }
 
   if (auto binding = UIManagerBinding::getBinding(rt)) {
@@ -406,16 +425,22 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
       _state.registeredContainer = ui.getContextContainer();
     }
 
-    std::unordered_map<std::string, std::shared_ptr<const TypedDelta>> typed;
-
-    for (const auto& [name, props] : propsByTheme) {
-      typed.emplace(name, toTypedDelta(ui, node->getFamily().getSurfaceId(), props));
+    if (!cached) {
+      for (const auto& [name, props] : *style.props) {
+        style.typed.emplace(name, toTypedDelta(ui, surface, props));
+      }
     }
 
-    _hook->add(node->getFamilyShared(), std::move(typed), node->getProps(), node->getComponentName(), node->getFamily().getSurfaceId());
+    // cached only once the typed deltas exist (they need a UIManager), so a hit is always complete
+    if (tagged && !cached) {
+      std::lock_guard<std::mutex> lock(_state.styleMutex);
+      _state.styleCache.emplace(styleKey, style);
+    }
+
+    _hook->add(node->getFamilyShared(), style.typed, node->getProps(), node->getComponentName(), surface);
   }
 
-  _registry.add(node->getFamilyShared(), std::move(propsByTheme));
+  _registry.add(node->getFamilyShared(), style.props);
 
   return jsi::Value::undefined();
 }

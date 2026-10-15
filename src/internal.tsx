@@ -5,7 +5,11 @@ import type { Shadewind } from './Shadewind.nitro';
 
 // Raw JSI methods registered natively in HybridShadewind::loadHybridMethods.
 type RawMethods = {
-  register(shadowNode: unknown, propsByTheme: Record<string, object>): void;
+  register(
+    shadowNode: unknown,
+    propsByTheme: Record<string, object>,
+    styleId?: number
+  ): void;
   unregister(shadowNode: unknown): void;
   configure(names: string[]): { maxThemes: number; ok: boolean };
   loadClassTable(text: string): boolean;
@@ -241,6 +245,19 @@ const nativeByStyles = new WeakMap<
   object,
   Record<string, Record<string, unknown>>
 >();
+// One id per distinct native styles object: C++ builds its typed props once per id, not once per view.
+const styleIds = new WeakMap<object, number>();
+let nextStyleId = 1;
+const styleIdOf = (native: object): number => {
+  let id = styleIds.get(native);
+
+  if (id === undefined) {
+    id = nextStyleId++;
+    styleIds.set(native, id);
+  }
+
+  return id;
+};
 
 export const ShadewindEngine = {
   /** Experimental: native tailwind-merge compatible class merge (see docs/ARCHITECTURE.md section 13). */
@@ -274,7 +291,7 @@ export const ShadewindEngine = {
       nativeByStyles.set(styles, native);
     }
 
-    getNative().register(node, native);
+    getNative().register(node, native, styleIdOf(native));
 
     registered.add(ref);
     scheduleFlush();
@@ -289,7 +306,7 @@ export const ShadewindEngine = {
       return false;
     }
 
-    getNative().register(node, native);
+    getNative().register(node, native, styleIdOf(native));
     registered.add(ref);
     scheduleFlush();
 

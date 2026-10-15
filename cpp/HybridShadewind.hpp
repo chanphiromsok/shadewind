@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 
 #include "HybridShadewindSpec.hpp"
 #include "ThemeHook.hpp"
@@ -40,6 +41,14 @@ private:
   // Hermes collects it (Fast Refresh creates a new one), so the state lives for the process and every instance shares it.
   struct State {
     ThemeRegistry registry;
+    // Views of one className register the same per-theme style: the JS side tags it with an id, and the parsed props and the
+    // typed deltas are built once per (id, surface) instead of once per view.
+    struct SharedStyle {
+      std::shared_ptr<const PropsByTheme> props;
+      std::unordered_map<std::string, std::shared_ptr<const TypedDelta>> typed;
+    };
+    std::map<std::pair<int64_t, int>, SharedStyle> styleCache;
+    std::mutex styleMutex;
     std::shared_ptr<ThemeHook> hook = std::make_shared<ThemeHook>();
     std::weak_ptr<const ContextContainer> registeredContainer; // identifies the UIManager the hook is registered with
     bool hookMode = true; // false after a setTheme with an older strategy

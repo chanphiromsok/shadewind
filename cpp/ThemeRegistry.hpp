@@ -21,9 +21,12 @@ using namespace facebook::react;
 #endif
 
 // One styled view: its family (weak, so an unmounted view never leaks) and the props to apply per theme.
+using PropsByTheme = std::unordered_map<std::string, folly::dynamic>;
+
+// The map is shared between every view registered with the same style (one allocation per distinct style, not per view).
 struct Entry {
   std::weak_ptr<const ShadowNodeFamily> family;
-  std::unordered_map<std::string, folly::dynamic> propsByTheme;
+  std::shared_ptr<const PropsByTheme> propsByTheme;
 };
 
 struct Update {
@@ -34,7 +37,7 @@ struct Update {
 
 class ThemeRegistry {
 public:
-  void add(const std::shared_ptr<const ShadowNodeFamily>& family, std::unordered_map<std::string, folly::dynamic> propsByTheme) {
+  void add(const std::shared_ptr<const ShadowNodeFamily>& family, std::shared_ptr<const PropsByTheme> propsByTheme) {
     std::lock_guard<std::mutex> lock(_mutex);
     _entries[family.get()] = Entry{family, std::move(propsByTheme)};
     _pending.push_back(family);
@@ -60,9 +63,13 @@ public:
         continue;
       }
 
-      auto props = entry->second.propsByTheme.find(theme);
+      if (!entry->second.propsByTheme) {
+        continue;
+      }
 
-      if (props != entry->second.propsByTheme.end()) {
+      auto props = entry->second.propsByTheme->find(theme);
+
+      if (props != entry->second.propsByTheme->end()) {
         updates.push_back(Update{family, family->getTag(), props->second});
       }
     }
@@ -92,9 +99,9 @@ public:
         continue;
       }
 
-      auto props = it->second.propsByTheme.find(theme);
+      auto props = it->second.propsByTheme ? it->second.propsByTheme->find(theme) : PropsByTheme::const_iterator{};
 
-      if (props != it->second.propsByTheme.end()) {
+      if (it->second.propsByTheme && props != it->second.propsByTheme->end()) {
         updates.push_back(Update{family, family->getTag(), props->second});
       }
 
