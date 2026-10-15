@@ -11,7 +11,6 @@ type RawMethods = {
     styleId?: number,
     renderTheme?: string
   ): void;
-  defineStyle(id: number, propsByTheme: Record<string, object>): void;
   unregister(shadowNode: unknown): void;
   configure(names: string[]): { maxThemes: number; ok: boolean };
   loadClassTable(text: string): boolean;
@@ -249,7 +248,6 @@ const nativeByStyles = new WeakMap<
 >();
 // One id per distinct native styles object: C++ builds its typed props once per id, not once per view.
 const styleIds = new WeakMap<object, number>();
-const definedStyles = new Set<number>();
 let nextStyleId = 1;
 const styleIdOf = (native: object): number => {
   let id = styleIds.get(native);
@@ -273,32 +271,6 @@ export const ShadewindEngine = {
   /** Declares the theme names in order (native slot ids). Returns the slot count and whether all names fit. */
   configure(names: string[]): { maxThemes: number; ok: boolean } {
     return getNative().configure(names);
-  },
-  /**
-   * The nativeID that makes a view discoverable by the commit hook (no ref, no per-view call): defines the style natively once
-   * per distinct styles object and returns `sw:<id>`.
-   */
-  carrier(styles: ThemedStyles): string {
-    let native = nativeByStyles.get(styles);
-
-    if (!native) {
-      native = Object.fromEntries(
-        Object.entries(styles).map(([theme, style]) => [
-          theme,
-          toNativeProps(style),
-        ])
-      );
-      nativeByStyles.set(styles, native);
-    }
-
-    const id = styleIdOf(native);
-
-    if (!definedStyles.has(id)) {
-      definedStyles.add(id);
-      getNative().defineStyle(id, native);
-    }
-
-    return `sw:${id}`;
   },
   register(ref: unknown, styles: ThemedStyles, renderTheme?: string) {
     const node = getShadowNode(ref);

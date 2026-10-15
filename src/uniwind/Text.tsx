@@ -18,11 +18,10 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       isPressed,
       isDisabled: Boolean((props as { disabled?: boolean }).disabled),
     };
-    const { style, themed, onRegisterFailed, nativeID } = useShadewindStyle(
+    const { style, themed, onRegisterFailed } = useShadewindStyle(
       props.className,
       props,
-      state,
-      true
+      state
     );
     const selectionColor = useAccentColor(
       props.selectionColorClassName,
@@ -32,15 +31,13 @@ export const Text: ComponentType<Props> = copyComponentProperties(
     const ref = useEngineRef(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed,
-      nativeID
+      onRegisterFailed
     );
 
     return (
       <RNText
         {...props}
         ref={ref}
-        nativeID={nativeID ?? props.nativeID}
         style={[style, props.style]}
         selectionColor={props.selectionColor ?? selectionColor}
         numberOfLines={

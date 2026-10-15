@@ -14,9 +14,6 @@
 #include <react/renderer/components/view/ViewShadowNode.h>
 #include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/core/RawProps.h>
-#include <react/renderer/core/RawValue.h>
-#include <react/renderer/graphics/Color.h>
-#include <react/renderer/graphics/PlatformColorParser.h>
 #include <react/renderer/core/RawPropsParser.h>
 #include <react/renderer/mounting/ShadowTree.h>
 #include <react/renderer/uimanager/UIManager.h>
@@ -370,24 +367,6 @@ public:
     _fullPending = true;
   }
 
-  // Carrier styles: a view that renders `nativeID="sw:<id>"` is discovered here, in the commit, with no ref and no per-view JS call.
-  // `byTheme` is the per-theme prop object of one distinct style; JS defines each distinct style once.
-  void defineStyle(int64_t id, const std::unordered_map<std::string, folly::dynamic>& byTheme) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    auto& def = _carrier[id];
-
-    for (const auto& [name, props] : byTheme) {
-      const auto theme = internTheme(name);
-
-      if (theme != kNoTheme) {
-        def.raw[theme] = props;
-        def.defined[theme] = true;
-      }
-    }
-
-    def.typed.clear();
-  }
-
   bool hasUnapplied() {
     std::lock_guard<std::mutex> lock(_mutex);
 
@@ -441,7 +420,7 @@ public:
     // single pointer-keyed lookup per node.
     std::unique_lock<std::mutex> lock(_mutex);
 
-    if (_theme == kNoTheme || (_entries.empty() && _carrier.empty())) {
+    if (_theme == kNoTheme || _entries.empty()) {
       return newRoot;
     }
 
@@ -511,143 +490,7 @@ private:
     std::array<Slot, kMaxThemes> slots;
     const char* componentName = nullptr;
     SurfaceId surface = 0;
-    bool carrier = false; // found through its nativeID (no ref, no per-view registration)
   };
-
-  // ---- carrier styles --------------------------------------------------------------------------------------------------
-  struct CarrierStyle {
-    std::array<folly::dynamic, kMaxThemes> raw;
-    std::array<bool, kMaxThemes> defined{};
-    // typed deltas per surface, built lazily from `raw` when a node of that style is first seen
-    std::unordered_map<SurfaceId, std::array<std::shared_ptr<const TypedDelta>, kMaxThemes>> typed;
-  };
-
-  static int64_t carrierId(const std::string& nativeId) {
-    if (nativeId.size() < 4 || nativeId[0] != 's' || nativeId[1] != 'w' || nativeId[2] != ':') {
-      return -1;
-    }
-
-    int64_t value = 0;
-
-    for (size_t i = 3; i < nativeId.size(); i++) {
-      const char c = nativeId[i];
-
-      if (c < '0' || c > '9') {
-        return -1;
-      }
-
-      value = value * 10 + (c - '0');
-    }
-
-    return value;
-  }
-
-  std::shared_ptr<const TypedDelta> makeDelta(const folly::dynamic& props, SurfaceId surface) {
-    auto delta = std::make_shared<TypedDelta>();
-    delta->raw = props;
-
-    const auto color = [&](const char* key) -> std::optional<SharedColor> {
-      if (const auto* value = props.get_ptr(key)) {
-        SharedColor parsed;
-
-        fromRawValue(*_contextContainer, surface, RawValue(*value), parsed);
-
-        return parsed;
-      }
-
-      return std::nullopt;
-    };
-
-    delta->background = color("backgroundColor");
-    delta->border = color("borderColor");
-    delta->text = color("color");
-
-    if (const auto* opacity = props.get_ptr("opacity"); opacity && opacity->isNumber()) {
-      delta->opacity = static_cast<Float>(opacity->asDouble());
-    }
-
-    return delta;
-  }
-
-  // Caller holds _mutex and has checked _carrier is non-empty and the theme is set.
-  Entry* adoptCarrier(const ShadowNode& node, int64_t id, ThemeId theme, uint64_t epoch) {
-    const auto def = _carrier.find(id);
-
-    if (def == _carrier.end() || !_contextContainer) {
-      return nullptr;
-    }
-
-    const auto surface = node.getFamily().getSurfaceId();
-    auto& typed = def->second.typed[surface];
-
-    Entry entry;
-
-    entry.family = node.getFamilyShared();
-    entry.base = node.getProps();
-    entry.componentName = node.getComponentName();
-    entry.surface = surface;
-    entry.carrier = true;
-
-    for (ThemeId t = 0; t < kMaxThemes; t++) {
-      if (!def->second.defined[t]) {
-        continue;
-      }
-
-      if (!typed[t]) {
-        typed[t] = makeDelta(def->second.raw[t], surface);
-      }
-
-      entry.slots[t].delta = typed[t];
-    }
-
-    // React already rendered the view with the theme that is current: nothing to apply until the theme changes
-    if (entry.slots[theme].delta && matchesDelta(*entry.base, entry.componentName, *entry.slots[theme].delta)) {
-      entry.appliedEpoch = epoch;
-      entry.appliedProps = entry.base.get();
-    }
-
-    auto& stored = _entries[&node.getFamily()];
-
-    stored = std::move(entry);
-
-    return &stored;
-  }
-
-  // Do the props already hold the values the delta would set (for the fields it sets)?
-  static bool matchesDelta(const Props& props, const char* name, const TypedDelta& delta) {
-    const bool paragraph = std::strcmp(name, ParagraphComponentName) == 0;
-
-    if (!paragraph && std::strcmp(name, ViewComponentName) != 0) {
-      return false;
-    }
-
-    const auto& view = static_cast<const ViewProps&>(props);
-
-    if (delta.background && !(view.backgroundColor == *delta.background)) {
-      return false;
-    }
-
-    if (delta.border && !(view.borderColors.all && *view.borderColors.all == *delta.border)) {
-      return false;
-    }
-
-    if (delta.text && paragraph && !(static_cast<const ParagraphProps&>(props).textAttributes.foregroundColor == *delta.text)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  // Do the props show the resting colours of a theme other than `current`?
-  static bool showsOtherTheme(const Entry& entry, const Props& props, const char* name, ThemeId current) {
-    for (ThemeId t = 0; t < kMaxThemes; t++) {
-      if (t != current && entry.slots[t].delta && matchesDelta(props, name, *entry.slots[t].delta)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
 
   // Caller holds _mutex. Returns kNoTheme when more than kMaxThemes distinct themes exist.
   ThemeId internTheme(const std::string& name) {
@@ -723,14 +566,6 @@ private:
     if (entry && entry->family.expired()) {
       entry = nullptr;
     }
-
-    // a view that carries a style id in its nativeID is registered here, by the commit itself
-    if (!entry && !_carrier.empty() && walk.theme != kNoTheme) {
-      if (const auto id = carrierId(node.getProps()->nativeId); id >= 0) {
-        entry = adoptCarrier(node, id, walk.theme, walk.epoch);
-      }
-    }
-
     const Slot* target = entry ? &entry->slots[walk.theme] : nullptr;
 
     if (target && !target->delta) {
@@ -744,17 +579,7 @@ private:
     const Props* current = node.getProps().get();
 
     // a registered view needs work after a theme change, or when React replaced its props with something we did not make
-    bool needs = target && (walk.full || entry->appliedEpoch != walk.epoch || current != entry->appliedProps);
-
-    // React gave a carrier view new props (a re-render, a pressed state, an inline colour): re-theme only when it shows the
-    // colours of another theme. What matches neither theme is state or inline styling and is left alone.
-    if (needs && entry->carrier && !walk.full && entry->appliedEpoch == walk.epoch && current != entry->appliedProps) {
-      if (matchesDelta(*current, node.getComponentName(), *target->delta) || !showsOtherTheme(*entry, *current, node.getComponentName(), walk.theme)) {
-        entry->base = node.getProps();
-        entry->appliedProps = current;
-        needs = false;
-      }
-    }
+    const bool needs = target && (walk.full || entry->appliedEpoch != walk.epoch || current != entry->appliedProps);
 
     if (!needs) {
       if (!newChildren) {
@@ -916,7 +741,6 @@ private:
 
   std::mutex _mutex;
   std::unordered_map<const ShadowNodeFamily*, Entry> _entries;
-  std::unordered_map<int64_t, CarrierStyle> _carrier;
   ThemeId _theme = kNoTheme;
   std::vector<std::string> _themeNames;
   uint64_t _epoch = 0;

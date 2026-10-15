@@ -19,7 +19,6 @@ public:
   std::string getTheme() override;
 
   // raw JSI: they need the runtime to reach React Native's UIManager
-  jsi::Value defineStyle(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value registerNode(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value unregisterNode(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value refreshReactNodes(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);

@@ -12,31 +12,28 @@ type Props = PressableProps & { className?: string };
 export const Pressable: ComponentType<Props> = copyComponentProperties(
   RNPressable,
   (props: Props) => {
-    const { style, themed, onRegisterFailed, nativeID } = useShadewindStyle(
+    const { style, themed, onRegisterFailed } = useShadewindStyle(
       props.className,
       props,
-      { isDisabled: Boolean(props.disabled) },
-      true
+      { isDisabled: Boolean(props.disabled) }
     );
     const context = useUniwindContext();
     const ref = useEngineRef(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed,
-      nativeID
+      onRegisterFailed
     );
 
     return (
       <RNPressable
         {...props}
         ref={ref}
-        nativeID={nativeID ?? props.nativeID}
         onPressIn={(event) => {
-          (ref as { pause?: () => void } | undefined)?.pause?.();
+          ref.pause();
           props.onPressIn?.(event);
         }}
         onPressOut={(event) => {
-          (ref as { resume?: () => void } | undefined)?.resume?.();
+          ref.resume();
           props.onPressOut?.(event);
         }}
         style={(state) => {
