@@ -3,14 +3,14 @@ import { Uniwind } from 'uniwind';
 
 export type StallResult = { medianMs: number; worstMs: number; stalls: number[] };
 
-const now = () => globalThis.performance.now();
-const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+const now = () => (globalThis as unknown as { performance: { now(): number } }).performance.now();
+const tick = () => new Promise<void>((r) => setTimeout(() => r(), 0));
 
 export async function runStall(switches = 12): Promise<StallResult> {
   const stalls: number[] = [];
 
   for (let i = 0; i < switches; i++) {
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise<void>((r) => setTimeout(() => r(), 300));
     let last = now();
     const t0 = last;
 

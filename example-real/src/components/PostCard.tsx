@@ -1,5 +1,8 @@
 import { memo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
 import type { Post } from '../data/posts';
 import { cn } from '../cn';
 import { Avatar, Badge, Divider } from './ui';
@@ -9,9 +12,13 @@ const tone = { Visit: 'brand', Eat: 'orange', Stay: 'blue', Play: 'brand' } as c
 // One feed card: header row, title, body, photo grid, reaction bar. Roughly 30 styled views, like tovtam's story card.
 export const PostCard = memo(({ post }: { post: Post }) => {
   const [liked, setLiked] = useState(false);
+  const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   return (
-    <View className="mx-3 mb-3 overflow-hidden rounded-2xl bg-card">
+    <Pressable
+      onPress={() => nav.navigate('PostDetail', { id: post.id })}
+      className="mx-3 mb-3 overflow-hidden rounded-2xl bg-card"
+    >
       <View className="flex-row items-center p-3">
         <Avatar label={post.author} hue={post.hue} />
         <View className="ml-3 flex-1">
@@ -63,6 +70,6 @@ export const PostCard = memo(({ post }: { post: Post }) => {
           <Text className="text-sm font-medium text-blue">Share</Text>
         </Pressable>
       </View>
-    </View>
+    </Pressable>
   );
 });

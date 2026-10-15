@@ -1,16 +1,9 @@
 import './global.css';
 import { useEffect, useState } from 'react';
 import { Settings, Text, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import Explore from './src/screens/Explore';
-import Simple from './src/screens/Simple';
-import Account from './src/screens/Account';
+import RootNavigator from './src/navigation/RootNavigator';
 import { runStall, type StallResult } from './src/bench/stall';
-
-const Tab = createBottomTabNavigator();
-const icon = (glyph: string) => ({ color }: { color: string }) => <Text style={{ color, fontSize: 20 }}>{glyph}</Text>;
 
 // `-realBench 1` runs the switch benchmark by itself 15 s after launch and shows the result on top of the app.
 function AutoBench() {
@@ -38,21 +31,7 @@ function AutoBench() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Tab.Navigator screenOptions={{ headerShown: false, lazy: false }}>
-          <Tab.Screen name="Explore" component={Explore} options={{ tabBarIcon: icon('◎') }} />
-          <Tab.Screen name="Moment" options={{ tabBarIcon: icon('▶') }}>
-            {() => <Simple title="Moment" kind="moment" />}
-          </Tab.Screen>
-          <Tab.Screen name="Range" options={{ tabBarIcon: icon('⌖') }}>
-            {() => <Simple title="Range" kind="range" />}
-          </Tab.Screen>
-          <Tab.Screen name="Notification" options={{ tabBarIcon: icon('◔') }}>
-            {() => <Simple title="Notification" kind="notification" />}
-          </Tab.Screen>
-          <Tab.Screen name="Account" component={Account} options={{ tabBarIcon: icon('●') }} />
-        </Tab.Navigator>
-      </NavigationContainer>
+      <RootNavigator />
       <AutoBench />
     </SafeAreaProvider>
   );

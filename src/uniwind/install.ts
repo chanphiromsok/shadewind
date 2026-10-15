@@ -37,6 +37,8 @@ let internals: Internals | null = null;
 
 export const getInternals = () => internals;
 
+const EMPTY_STORE = 'Uniwind has no themes (store is empty)';
+
 const probe = (): InstallResult => {
   const shadewind = require('shadewind') as typeof import('../index');
   const { UniwindStore } = require('uniwind-internal/core/native');
@@ -63,7 +65,7 @@ const probe = (): InstallResult => {
   const themes = Object.keys(UniwindStore.vars);
 
   if (themes.length === 0) {
-    return { active: false, reason: 'Uniwind has no themes (store is empty)' };
+    return { active: false, reason: EMPTY_STORE };
   }
 
   // a second copy of the store (dist vs src) would have empty vars or another theme: refuse instead of guessing
@@ -107,14 +109,24 @@ export function installUniwind(): InstallResult {
     return result;
   }
 
+  let next: InstallResult;
+
   try {
-    result = probe();
+    next = probe();
   } catch (error) {
-    result = {
+    next = {
       active: false,
       reason: `Shadewind could not load Uniwind internals (is withShadewind() in metro.config.js?): ${String(error)}`,
     };
   }
+
+  // The store fills when `global.css` is evaluated. Called before that (a boot file imported ahead of the app), the answer
+  // is "not yet", not "never": keep asking, the components call this on every render.
+  if (!next.active && next.reason === EMPTY_STORE) {
+    return next;
+  }
+
+  result = next;
 
   if (!result.active && __DEV__) {
     console.warn(`[shadewind] inactive: ${result.reason}`);
