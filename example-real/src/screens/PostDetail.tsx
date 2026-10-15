@@ -2,7 +2,7 @@ import { ScrollView, Text, View, Pressable } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { makePosts } from '../data/posts';
-import { Avatar, Badge, Divider } from '../components/ui';
+import { Avatar, Badge, Divider, Header } from '../components/ui';
 import type { RootStackParamList } from '../navigation/types';
 
 const posts = makePosts(120);
@@ -13,7 +13,9 @@ export default function PostDetail() {
   const post = posts.find((p) => p.id === params.id) ?? posts[0]!;
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerClassName="pb-10">
+    <View className="flex-1 bg-background">
+      <Header title="Post" onBack={() => nav.goBack()} />
+    <ScrollView className="flex-1" contentContainerClassName="pb-10">
       <View className="bg-card p-4">
         <Pressable
           onPress={() => nav.navigate('Profile', { author: post.author, hue: post.hue })}
@@ -43,5 +45,6 @@ export default function PostDetail() {
         </View>
       ))}
     </ScrollView>
+    </View>
   );
 }

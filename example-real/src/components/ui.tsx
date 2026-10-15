@@ -58,3 +58,15 @@ export const Row = ({ title, value, onPress }: { title: string; value?: string; 
     </View>
   </Pressable>
 );
+
+// Navigation chrome drawn with className views: the engine paints them natively, so a theme switch needs no navigator render.
+export const Header = ({ title, onBack }: { title: string; onBack?: () => void }) => (
+  <View className="flex-row items-center border-b border-divider bg-card px-4 pb-3 pt-14">
+    {onBack ? (
+      <Pressable onPress={onBack} className="mr-3 active:opacity-60">
+        <Text className="text-2xl text-brand">‹</Text>
+      </Pressable>
+    ) : null}
+    <Text className="flex-1 text-lg font-bold text-primary">{title}</Text>
+  </View>
+);

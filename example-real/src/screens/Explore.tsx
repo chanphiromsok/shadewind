@@ -3,6 +3,7 @@ import { FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 import { PostCard } from '../components/PostCard';
 import { Chip } from '../components/ui';
 import { makePosts } from '../data/posts';
+import { markFirstLayout } from '../bench/startup';
 
 const CATEGORIES = ['All', 'Visit', 'Eat', 'Stay', 'Play'] as const;
 
@@ -23,6 +24,7 @@ export default function Explore({ count = 120 }: { count?: number }) {
 
       <FlatList
         testID="feed"
+        onContentSizeChange={markFirstLayout}
         data={data}
         keyExtractor={(p) => p.id}
         renderItem={({ item }) => <PostCard post={item} />}

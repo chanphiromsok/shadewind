@@ -40,3 +40,44 @@ export async function runStall(switches = 12): Promise<StallResult> {
     stalls: rounded,
   };
 }
+
+// Their metric, for the real app: from the Uniwind.setTheme call until the JS thread is idle again. The stall chain above is
+// bounded below by the timer cadence (about one frame); this one shows how much JS work a switch really causes.
+export type IdleResult = { medianMs: number; syncMs: number; worstMs: number; runs: number[] };
+
+const idle = () =>
+  new Promise<void>((resolve) => {
+    const g = globalThis as unknown as { requestIdleCallback?: (cb: () => void) => void };
+
+    if (g.requestIdleCallback) {
+      g.requestIdleCallback(() => resolve());
+    } else {
+      setTimeout(() => resolve(), 0);
+    }
+  });
+
+export async function runIdle(switches = 12): Promise<IdleResult> {
+  const runs: number[] = [];
+  const syncs: number[] = [];
+
+  for (let i = 0; i < switches; i++) {
+    await new Promise<void>((r) => setTimeout(() => r(), 300));
+    const t0 = now();
+
+    Uniwind.setTheme(i % 2 === 0 ? 'dark' : 'light');
+    syncs.push(now() - t0);
+    await idle();
+    runs.push(now() - t0);
+  }
+
+  Uniwind.setTheme('light');
+
+  const med = (a: number[]) => [...a.slice(1)].sort((x, y) => x - y)[Math.floor((a.length - 1) / 2)]!;
+
+  return {
+    medianMs: +med(runs).toFixed(2),
+    syncMs: +med(syncs).toFixed(2),
+    worstMs: +Math.max(...runs.slice(1)).toFixed(2),
+    runs: runs.map((r) => +r.toFixed(1)),
+  };
+}

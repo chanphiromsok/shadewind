@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Uniwind, useUniwind } from 'uniwind';
+import { Uniwind } from 'uniwind';
 import { decisions, status } from '../engineReport';
 import type { RootStackParamList } from '../navigation/types';
 import { Row } from '../components/ui';
@@ -10,7 +10,6 @@ import { runStall, type StallResult } from '../bench/stall';
 import { cn } from '../cn';
 
 export default function Account() {
-  const { theme } = useUniwind();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [result, setResult] = useState<StallResult | 'running' | null>(null);
   const [report, setReport] = useState<string[] | null>(null);
@@ -28,9 +27,9 @@ export default function Account() {
             key={name}
             testID={`theme-${name}`}
             onPress={() => Uniwind.setTheme(name)}
-            className={cn('flex-1 items-center py-4 active:opacity-70', theme === name && 'bg-brand-300')}
+            className={cn('flex-1 items-center py-4 active:opacity-70', name === 'light' ? 'light:bg-brand-300' : 'dark:bg-brand-300')}
           >
-            <Text className={cn('text-base font-semibold', theme === name ? 'text-brand' : 'text-primary')}>
+            <Text className={cn('text-base font-semibold', name === 'light' ? 'light:text-brand dark:text-primary' : 'dark:text-brand light:text-primary')}>
               {name === 'light' ? '☀️  Light' : '🌙  Dark'}
             </Text>
           </Pressable>
