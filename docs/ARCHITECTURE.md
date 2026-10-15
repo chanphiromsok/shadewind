@@ -486,3 +486,30 @@ caught the main thread only: 91 ms of `-[RCTViewComponentView unmountChildCompon
 `mountChildComponentView` over the 10 re-mounts (common to both arms), and only 21 ms of JS-thread samples with no Hermes symbols,
 so it does not yet say where the remaining ~7.6 ms of JS-thread work is. A profile needs the app to start the scenario after
 the profiler is attached (gate the mount), or in-app counters around `register`.
+
+## 16. `example-real`: a tovtam-like app, plain Uniwind vs the engine (2026-10-15)
+
+`example-real/` is a bare RN 0.86.3 app on Uniwind 1.12 with `className` everywhere: root native stack (tabs, pushed detail and
+profile screens, a full-screen modal, a form sheet), five lazily-not-lazy tabs, a 120-card feed (about 30 styled views per card,
+`Pressable` with `active:` states), a `NavigationContainer` theme derived from `useUniwind` / `useCSSVariable` (a React consumer of the
+theme, as in tovtam). Mock data only. Same code for both arms: `scripts/build.sh engine|plain`.
+
+Stall benchmark (Account > Run switch benchmark, or `-realBench 1`; 12 switches 300 ms apart, longest JS-thread gap in the 350 ms
+after each; median of the 11 warm switches; Release, iPhone 17 Pro simulator, 3 launches per arm, interleaved):
+
+| Arm | Launch medians (ms) | Median | Worst single stall |
+|---|---|---|---|
+| Plain Uniwind | 154.6, 127.1, 119.7 | **127.1** | 166.7 |
+| Engine (bound views, state variants resting-bound) | 35.4, 37.8, 36.7 | **36.7** | 46.4 |
+
+Correctness checked on screen: after Dark, the hidden Explore tab, its cards, chips and FAB are dark when revealed.
+
+What the first runs taught (kept because they were wrong in instructive ways):
+
+- The first engine reading (16.8 ms) was invalid: `installUniwind()` ran before `global.css` filled Uniwind's store, got "store is
+  empty", and cached the failure, so the engine was off and unbound screens (no subscription, rule 1) stayed light. Fixed in the
+  library: an empty store is "not yet" and is retried.
+- With the engine on, 10 of 63 distinct classNames fell back as "state variants" (every `Pressable` with `active:`), which would be
+  stale after a switch. Now the resting state is bound and a `Pressable` unbinds on `onPressIn` and rebinds on `onPressOut`
+  (native calls only).
+- Remaining 36.7 ms is React work the engine does not remove (the navigation theme, `useUniwind` consumers), not the colour pass.

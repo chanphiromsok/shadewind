@@ -25,11 +25,12 @@ const titles = [
   'Street food after dark',
 ];
 
-let seed = 7;
-const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+export const makePosts = (count: number): Post[] => {
+  // seeded per call: every caller gets the same feed, whatever imported first
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
 
-export const makePosts = (count: number): Post[] =>
-  Array.from({ length: count }, (_, i) => ({
+  return Array.from({ length: count }, (_, i) => ({
     id: `p${i}`,
     author: i % 5 === 0 ? 'TovTam' : `Traveler ${i}`,
     verified: i % 5 === 0,
@@ -45,3 +46,4 @@ export const makePosts = (count: number): Post[] =>
     hue: Math.floor(rand() * 360),
     photos: 1 + (i % 3),
   }));
+};
