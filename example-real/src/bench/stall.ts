@@ -43,7 +43,7 @@ export async function runStall(switches = 12): Promise<StallResult> {
 
 // Their metric, for the real app: from the Uniwind.setTheme call until the JS thread is idle again. The stall chain above is
 // bounded below by the timer cadence (about one frame); this one shows how much JS work a switch really causes.
-export type IdleResult = { medianMs: number; syncMs: number; worstMs: number; runs: number[] };
+export type IdleResult = { medianMs: number; syncMs: number; microMs: number; worstMs: number; runs: number[] };
 
 const idle = () =>
   new Promise<void>((resolve) => {
@@ -59,6 +59,7 @@ const idle = () =>
 export async function runIdle(switches = 12): Promise<IdleResult> {
   const runs: number[] = [];
   const syncs: number[] = [];
+  const micros: number[] = [];
 
   for (let i = 0; i < switches; i++) {
     await new Promise<void>((r) => setTimeout(() => r(), 300));
@@ -68,6 +69,10 @@ export async function runIdle(switches = 12): Promise<IdleResult> {
 
     Uniwind.setTheme(i % 2 === 0 ? 'dark' : 'light');
     syncs.push(now() - t0);
+    // a microtask runs as soon as the JS thread is free of the synchronous work and of any flush queued by the switch:
+    // if this is small but the idle callback is late, the wait is not JS work
+    await Promise.resolve();
+    micros.push(now() - t0);
     await done;
     runs.push(now() - t0);
   }
@@ -79,6 +84,7 @@ export async function runIdle(switches = 12): Promise<IdleResult> {
   return {
     medianMs: +med(runs).toFixed(2),
     syncMs: +med(syncs).toFixed(2),
+    microMs: +med(micros).toFixed(2),
     worstMs: +Math.max(...runs.slice(1)).toFixed(2),
     runs: runs.map((r) => +r.toFixed(1)),
   };

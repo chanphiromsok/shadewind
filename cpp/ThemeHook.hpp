@@ -235,12 +235,16 @@ public:
 
   void add(
       const std::shared_ptr<const ShadowNodeFamily>& family,
-      std::unordered_map<std::string, std::shared_ptr<const TypedDelta>> byTheme,
+      const std::unordered_map<std::string, std::shared_ptr<const TypedDelta>>& byTheme,
       Props::Shared base,
       const char* componentName,
       SurfaceId surface,
       bool renderedWithCurrentTheme = false) {
     std::lock_guard<std::mutex> lock(_mutex);
+
+    if (_entries.bucket_count() < 4096) {
+      _entries.reserve(4096); // a screen registers thousands of views: avoid rehashing during mount
+    }
 
     Entry entry;
 
@@ -249,11 +253,11 @@ public:
     entry.componentName = componentName;
     entry.surface = surface;
 
-    for (auto& [name, delta] : byTheme) {
+    for (const auto& [name, delta] : byTheme) {
       const auto id = internTheme(name);
 
       if (id != kNoTheme) {
-        entry.slots[id].delta = std::move(delta);
+        entry.slots[id].delta = delta;
       }
     }
 

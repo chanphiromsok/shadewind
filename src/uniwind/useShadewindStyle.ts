@@ -295,6 +295,11 @@ export const useShadewindStyle = (
  * also carries `pause()` / `resume()`: a Pressable unbinds the view while it is pressed (React draws the pressed style) and
  * binds it again on release, with native calls only (no React state).
  */
+// Debug only (measurement arm): keep the ref machinery, skip the engine call. `-armB 1` in example-real sets it.
+const skipRegister = () =>
+  (globalThis as { __SHADEWIND_SKIP_REGISTER?: boolean })
+    .__SHADEWIND_SKIP_REGISTER === true;
+
 export const useEngineRef = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
@@ -315,7 +320,7 @@ export const useEngineRef = (
         registered.current = null;
       }
 
-      if (node && themed) {
+      if (node && themed && !skipRegister()) {
         if (engine().register(node, themed, renderThemeOf.get(themed))) {
           registered.current = node;
         } else {
