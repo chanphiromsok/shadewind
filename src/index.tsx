@@ -366,7 +366,7 @@ export function useThemed<T extends object = ViewStyle>(
         return undefined;
       }
 
-      ShadewindEngine.registerRaw(node, native);
+      ShadewindEngine.registerRaw(node, native, theme);
 
       return () => ShadewindEngine.unregister(node);
     },

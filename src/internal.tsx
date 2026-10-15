@@ -8,7 +8,8 @@ type RawMethods = {
   register(
     shadowNode: unknown,
     propsByTheme: Record<string, object>,
-    styleId?: number
+    styleId?: number,
+    renderTheme?: string
   ): void;
   unregister(shadowNode: unknown): void;
   configure(names: string[]): { maxThemes: number; ok: boolean };
@@ -271,7 +272,7 @@ export const ShadewindEngine = {
   configure(names: string[]): { maxThemes: number; ok: boolean } {
     return getNative().configure(names);
   },
-  register(ref: unknown, styles: ThemedStyles) {
+  register(ref: unknown, styles: ThemedStyles, renderTheme?: string) {
     const node = getShadowNode(ref);
 
     if (!node) {
@@ -291,7 +292,7 @@ export const ShadewindEngine = {
       nativeByStyles.set(styles, native);
     }
 
-    getNative().register(node, native, styleIdOf(native));
+    getNative().register(node, native, styleIdOf(native), renderTheme);
 
     registered.add(ref);
     scheduleFlush();
@@ -299,14 +300,18 @@ export const ShadewindEngine = {
     return true;
   },
   /** Registers with props already converted by toNativeProps (used by the public useThemed). */
-  registerRaw(ref: unknown, native: Record<string, Record<string, unknown>>) {
+  registerRaw(
+    ref: unknown,
+    native: Record<string, Record<string, unknown>>,
+    renderTheme?: string
+  ) {
     const node = getShadowNode(ref);
 
     if (!node) {
       return false;
     }
 
-    getNative().register(node, native, styleIdOf(native));
+    getNative().register(node, native, styleIdOf(native), renderTheme);
     registered.add(ref);
     scheduleFlush();
 

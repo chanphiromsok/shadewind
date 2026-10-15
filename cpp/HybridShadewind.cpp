@@ -311,7 +311,7 @@ void HybridShadewind::loadHybridMethods() {
   HybridShadewindSpec::loadHybridMethods();
 
   registerHybrids(this, [](Prototype& prototype) {
-    prototype.registerRawHybridMethod("register", 3, &HybridShadewind::registerNode);
+    prototype.registerRawHybridMethod("register", 4, &HybridShadewind::registerNode);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
     prototype.registerRawHybridMethod("refreshReactNodes", 1, &HybridShadewind::refreshReactNodes);
     prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
@@ -437,7 +437,17 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
       _state.styleCache.emplace(styleKey, style);
     }
 
-    _hook->add(node->getFamilyShared(), style.typed, node->getProps(), node->getComponentName(), surface);
+    // JS names the theme it rendered the view with: equal to the current theme means the props React gave us are current
+    bool renderedWithCurrent = false;
+
+    if (count >= 4 && args[3].isString()) {
+      const auto renderTheme = args[3].asString(rt).utf8(rt);
+      std::lock_guard<std::mutex> lock(_themeMutex);
+
+      renderedWithCurrent = !_theme.empty() && renderTheme == _theme;
+    }
+
+    _hook->add(node->getFamilyShared(), style.typed, node->getProps(), node->getComponentName(), surface, renderedWithCurrent);
   }
 
   _registry.add(node->getFamilyShared(), style.props);

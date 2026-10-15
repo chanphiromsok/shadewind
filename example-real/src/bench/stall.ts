@@ -1,0 +1,42 @@
+// Theme-switch stall: the longest JS-thread gap in the 350 ms after each Uniwind.setTheme (same method as the tovtam runs).
+import { Uniwind } from 'uniwind';
+
+export type StallResult = { medianMs: number; worstMs: number; stalls: number[] };
+
+const now = () => globalThis.performance.now();
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+
+export async function runStall(switches = 12): Promise<StallResult> {
+  const stalls: number[] = [];
+
+  for (let i = 0; i < switches; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    let last = now();
+    const t0 = last;
+
+    Uniwind.setTheme(i % 2 === 0 ? 'dark' : 'light');
+
+    let max = now() - t0;
+
+    while (now() - t0 < 350) {
+      await tick();
+      const t = now();
+
+      max = Math.max(max, t - last);
+      last = t;
+    }
+
+    stalls.push(max);
+  }
+
+  Uniwind.setTheme('light');
+
+  const sorted = stalls.slice(1).sort((a, b) => a - b); // first switch is cold
+  const rounded = stalls.map((s) => Math.round(s));
+
+  return {
+    medianMs: +sorted[Math.floor(sorted.length / 2)]!.toFixed(1),
+    worstMs: +Math.max(...stalls.slice(1)).toFixed(1),
+    stalls: rounded,
+  };
+}

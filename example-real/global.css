@@ -1,0 +1,45 @@
+@import "tailwindcss";
+@import "uniwind";
+
+/* Tokens modelled on tovtam's global.css: brand, accents, text, surfaces, status. */
+@layer theme {
+  :root {
+    @variant light {
+      --color-brand: oklch(0.6486 0.1749 150.71);
+      --color-brand-300: oklch(0.9741 0.0402 153.16);
+      --color-blue: oklch(0.6462 0.1337 233.52);
+      --color-blue-300: oklch(0.9495 0.0337 222.62);
+      --color-orange: oklch(0.7009 0.1944 37.59);
+      --color-orange-300: oklch(0.9259 0.0355 37.35);
+      --color-yellow: oklch(0.8862 0.2131 97.14);
+      --color-primary: oklch(0.2178 0 0);
+      --color-secondary: oklch(0.5897 0 0);
+      --color-inverse: oklch(1 0 0);
+      --color-background: oklch(0.9761 0 0);
+      --color-card: oklch(1 0 0);
+      --color-card-pressed: oklch(0.9521 0 0);
+      --color-divider: oklch(0.9401 0 0);
+      --color-inactive: oklch(0.7984 0 0);
+      --color-error: oklch(0.5771 0.2152 27.33);
+    }
+
+    @variant dark {
+      --color-brand: rgb(4, 171, 82);
+      --color-brand-300: oklch(0.2764 0.0813 147.36);
+      --color-blue: oklch(0.6462 0.1337 233.52);
+      --color-blue-300: oklch(0.2514 0.0498 229.55);
+      --color-orange: oklch(0.7009 0.1944 37.59);
+      --color-orange-300: oklch(0.2894 0.0953 37.74);
+      --color-yellow: oklch(0.8862 0.2131 97.14);
+      --color-primary: oklch(0.9461 0 0);
+      --color-secondary: oklch(0.7 0 0);
+      --color-inverse: oklch(0.1776 0 0);
+      --color-background: oklch(0.1776 0 0);
+      --color-card: oklch(0.2264 0 0);
+      --color-card-pressed: oklch(0.2768 0 0);
+      --color-divider: oklch(0.3 0 0);
+      --color-inactive: oklch(0.45 0 0);
+      --color-error: oklch(0.6368 0.2078 25.33);
+    }
+  }
+}

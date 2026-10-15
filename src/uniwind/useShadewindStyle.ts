@@ -58,6 +58,9 @@ const withTheme = <T>(theme: string, fn: () => T): T => {
   }
 };
 
+// the theme a plan was resolved for: passed at register so C++ knows React's props are already current
+const renderThemeOf = new WeakMap<object, string>();
+
 type Resolved = ReturnType<
   NonNullable<ReturnType<typeof getInternals>>['UniwindStore']['getStyles']
 >;
@@ -160,6 +163,8 @@ const plan = (
     );
   }
 
+  renderThemeOf.set(themed, UniwindStore.runtime.currentThemeName);
+
   return decide(themed as unknown as ThemedStyles, 'engine');
 };
 
@@ -193,7 +198,7 @@ const cachedPlan = (
     planCache.set(current, entry);
   }
 
-  return (entry[slot] ??= plan(
+  const made = (entry[slot] ??= plan(
     className,
     props,
     state,
@@ -201,6 +206,8 @@ const cachedPlan = (
     current,
     hasInlineOverlap
   ));
+
+  return made;
 };
 
 export const useShadewindStyle = (
@@ -287,7 +294,7 @@ export const useEngineRef = (
       }
 
       if (node && themed) {
-        if (engine().register(node, themed)) {
+        if (engine().register(node, themed, renderThemeOf.get(themed))) {
           registered.current = node;
         } else {
           onRegisterFailed?.();

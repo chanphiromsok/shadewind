@@ -238,7 +238,8 @@ public:
       std::unordered_map<std::string, std::shared_ptr<const TypedDelta>> byTheme,
       Props::Shared base,
       const char* componentName,
-      SurfaceId surface) {
+      SurfaceId surface,
+      bool renderedWithCurrentTheme = false) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     Entry entry;
@@ -254,6 +255,14 @@ public:
       if (id != kNoTheme) {
         entry.slots[id].delta = std::move(delta);
       }
+    }
+
+    // React already rendered this view with the current theme's values (its props are `base`): nothing to apply until the
+    // theme changes or React replaces the props. Without this every mounted view is cloned once right after mount, and the
+    // flush that follows commits the whole tree again.
+    if (renderedWithCurrentTheme && _theme != kNoTheme) {
+      entry.appliedEpoch = _epoch;
+      entry.appliedProps = entry.base.get();
     }
 
     _entries[family.get()] = std::move(entry);
