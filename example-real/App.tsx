@@ -28,7 +28,7 @@ function AutoBench() {
   return result ? (
     <View pointerEvents="none" className="absolute left-3 right-3 top-12 rounded-xl bg-primary p-3">
       <Text testID="auto-stall" className="text-xs text-inverse">
-        IDLE median {result.idle.medianMs} ms (sync {result.idle.syncMs}, micro {result.idle.microMs}), worst {result.idle.worstMs} | STALL median{' '}
+        IDLE median {result.idle.medianMs} ms (sync {result.idle.syncMs}), worst {result.idle.worstMs} | STALL median{' '}
         {result.stall.medianMs} ms, worst {result.stall.worstMs} | first feed layout {String(startup.firstLayoutMs)} ms
       </Text>
     </View>
