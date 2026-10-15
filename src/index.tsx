@@ -370,6 +370,8 @@ export function useThemed<T extends object = ViewStyle>(
 
       return () => ShadewindEngine.unregister(node);
     },
+    // `theme` is read at attach time only: it names the theme this render used; a later switch is applied by the hook
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [native]
   );
 
