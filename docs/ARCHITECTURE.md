@@ -575,3 +575,27 @@ pass-through `MountingOverrideDelegate` probe is the way to split the ~43 ms int
 9 per variant: `className` 47.8 ms, `aot` 47.1 ms, no `Pressable` 47.4 ms, static host 34.4 ms. AOT is 0.7 ms (1.5 %) faster than
 `className`, inside the noise of a single launch; the 13 ms down to the static-host floor is not removed by it. Do not advertise `aot` or
 `LightPressable` as performance features. Not measured: several launches, a device, the JS-thread-only time.
+
+### 17d. Where the remaining mount time is, and the lighter Pressable (2026-10-15)
+
+Timers inside the adapter (a measurement build, not shipped), 30 cards, `className` path, app state before `freezeOnBlur`: React
+render+commit 41.9 ms against 17.9 ms for the static host, from two launches; the mount that follows (main thread to `onLayout`) read
+the same for both, about 23 ms. So the gap is JS. The adapter bodies sum to 9.7-10.4 ms over 632 calls (View 5.3, Text 5.1) and ref
+callbacks to 1.0 ms over 361. Inside `useShadewindStyle`: install 0.4, hooks 1.2, `getStyles` 1.0, flatten 0.2, plan 0.4, layout effect
+0.5 ms. These figures include the timers' own cost (about 14 `performance.now()` calls per adapter), which was not isolated.
+The remaining roughly 13 ms is React work for the extra fibers and larger host props, not attributed.
+
+Measured, not a lever: an ahead-of-time arm resolved once per literal (`aot`), about 1 ms under a control with the same restructured
+feed (see 17c). A lighter `Pressable` on `Pressability` (`LightPressable`): 4.3 ms under `className`, while the control arm with the
+plain Pressable in that slot read 2.8 ms under `className` as well, so the effect is about 1.5 ms over 3 launches whose spread was 3 ms.
+Not advertised, not exported.
+
+Confounded: the variants run in the same order every cycle, so the no-`Pressable` arm (third) and the static arm (fourth) carry a slot
+effect of unknown size. The gap between `className` and no-`Pressable` read 9.5 ms in one run and 3.2 ms in another, so "the 60
+Pressables are worth 7-9 ms" is not established. Settling it needs the variant order rotated per cycle (each variant in each slot equally
+often, first cycle dropped), 5 or more launches. Not done.
+
+The theme-switch figures depend on the app state: before `freezeOnBlur` plain reached JS idle in 112-116 ms; with the freeze it reads
+about 49 ms, and the engine 0.39 ms (sync 0.33), which relies on frozen hidden tabs still theming correctly.
+Run-to-run noise is the limit of this method: whole launches differ by up to 5 ms, so a result under about 3 ms needs 5 or more
+launches and the in-launch `className - static host` statistic.
