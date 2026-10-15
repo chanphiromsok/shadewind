@@ -268,7 +268,7 @@ const unsupported = (reason: string, key: string) => {
     return;
   }
 
-  const message = `[shadewind] view uses the React path: ${reason}`;
+  const message = `[shadewind] view is not bound to the engine and will be stale after a theme switch: ${reason}`;
 
   if (mode === 'throw') {
     throw new Error(message);
@@ -314,8 +314,6 @@ const checkStyles = (styles: ThemedStyles, themes: readonly string[]) => {
   return keys.size === 0 ? 'no style keys' : null;
 };
 
-const noopSubscribe = () => () => {};
-
 export type UseThemedResult<T extends object> = {
   // any: a host component's ref type differs per component (View, Text, ScrollView, ...)
 
@@ -345,11 +343,9 @@ export function useThemed<T extends object = ViewStyle>(
     unsupported(reason, key);
   }
 
-  // only the fallback subscribes; engine views do not re-render on a switch
-  const theme = useSyncExternalStore(
-    engine ? noopSubscribe : subscribe,
-    getTheme
-  );
+  // No subscription (rule 1): the style is the current theme's at this render. An engine view is then kept right by the
+  // commit hook; a fallback view is stale after a later switch until its next render (dev warning above).
+  const theme = getTheme();
   const native = useMemo(
     () =>
       engine

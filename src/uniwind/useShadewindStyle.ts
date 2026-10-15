@@ -5,7 +5,6 @@ import {
   useMemo,
   useReducer,
   useRef,
-  useState,
 } from 'react';
 import { StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
@@ -222,9 +221,8 @@ export const useShadewindStyle = (
   }
 
   const context = useContext();
+  // re-render for what is not the theme (orientation, viewport, RTL, font scale), like Uniwind does
   const [, rerender] = useReducer(() => ({}), {});
-  // the view could not be registered (the ref never reached a host view): keep Uniwind's Theme subscription
-  const [failed, setFailed] = useState(false);
   const current = UniwindStore!.getStyles(className, props, state, context);
   const flat = StyleSheet.flatten(props.style) as
     Record<string, unknown> | undefined;
@@ -232,7 +230,7 @@ export const useShadewindStyle = (
     flat !== undefined && SUPPORTED.some((key) => flat[key] !== undefined);
   const planned = useMemo(
     () =>
-      active && !failed
+      active
         ? cachedPlan(
             className,
             props,
@@ -244,25 +242,31 @@ export const useShadewindStyle = (
         : { themed: null, reason: 'engine inactive' },
     // `current` is cached per theme/state by the store: a new object means a different resolution
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [active, failed, current, hasInlineOverlap, context]
+    [active, current, hasInlineOverlap, context]
   );
-  // the Theme dependency is dropped only when the engine really handles this view
-  const dependencies = planned.themed
-    ? current.dependencies.filter(
-        (dependency) => dependency !== StyleDependency!.Theme
-      )
-    : current.dependencies;
+  const dependencies = current.dependencies.filter(
+    (dependency) => dependency !== StyleDependency!.Theme
+  );
 
   useLayoutEffect(() => {
-    if (__DEV__ || dependencies.length > 0) {
+    if (dependencies.length > 0) {
       return UniwindListener!.subscribe(rerender, dependencies);
     }
 
     return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dependencies.join(','), Boolean(planned.themed)]);
+  }, [dependencies.join(',')]);
 
-  const onRegisterFailed = useCallback(() => setFailed(true), []);
+  // Rule 1: a theme change never re-renders a styled view. An engine view is kept right by the commit hook; a view the engine
+  // cannot take is correct at mount and stale after a later switch (dev warning from `plan`).
+  const onRegisterFailed = useCallback(() => {
+    if (debugOn()) {
+      console.warn(
+        `[shadewind] could not bind ${String(props.testID ?? className)}: stale after a theme switch`
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { style: current.styles, themed: planned.themed, onRegisterFailed };
 };
