@@ -113,14 +113,16 @@ const plan = (
     );
   }
 
-  // state variants (pressed, disabled, focused) change styles without a theme change: not handled by the engine
-  if (
-    !same(
-      UniwindStore.getStyles(className, props, ALL_STATE, context).styles,
-      current.styles
-    )
-  ) {
-    return decide(null, 'state variants');
+  // State variants (pressed, focused) change styles without a theme change. The resting state is bound to the engine; while the
+  // view is pressed or focused it is unbound (React draws the state style, the engine must not paint over it). A Pressable
+  // pauses and resumes the binding from onPressIn / onPressOut (see Pressable.tsx), a view with React state passes it in `state`.
+  const stateful = !same(
+    UniwindStore.getStyles(className, props, ALL_STATE, context).styles,
+    current.styles
+  );
+
+  if (stateful && (state?.isPressed || state?.isFocused)) {
+    return decide(null, 'interacting');
   }
 
   const keys = new Set<string>();
@@ -278,16 +280,26 @@ export const useShadewindStyle = (
   return { style: current.styles, themed: planned.themed, onRegisterFailed };
 };
 
-/** Callback ref: registers the view with the engine while `themed` is set, and forwards to the user's ref. */
+/**
+ * Callback ref: registers the view with the engine while `themed` is set, and forwards to the user's ref. The returned function
+ * also carries `pause()` / `resume()`: a Pressable unbinds the view while it is pressed (React draws the pressed style) and
+ * binds it again on release, with native calls only (no React state).
+ */
 export const useEngineRef = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
   onRegisterFailed?: () => void
 ) => {
   const registered = useRef<unknown>(null);
+  const attached = useRef<unknown>(null);
+  const themedRef = useRef(themed);
 
-  return useCallback(
+  themedRef.current = themed;
+
+  const ref = useCallback(
     (node: unknown) => {
+      attached.current = node;
+
       if (registered.current) {
         engine().unregister(registered.current);
         registered.current = null;
@@ -309,4 +321,28 @@ export const useEngineRef = (
     },
     [themed, userRef, onRegisterFailed]
   );
+
+  const pause = useCallback(() => {
+    if (registered.current) {
+      engine().unregister(registered.current);
+      registered.current = null;
+    }
+  }, []);
+
+  const resume = useCallback(() => {
+    const node = attached.current;
+    const styles = themedRef.current;
+
+    // no render theme: the props React has right now may still be the pressed ones, so let the next commit apply the theme
+    if (
+      node &&
+      styles &&
+      !registered.current &&
+      engine().register(node, styles)
+    ) {
+      registered.current = node;
+    }
+  }, []);
+
+  return Object.assign(ref, { pause, resume });
 };

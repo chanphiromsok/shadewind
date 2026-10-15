@@ -8,7 +8,7 @@ import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 type Props = PressableProps & { className?: string };
 
 // Uniwind's Pressable plus the engine registration. The style function keeps Uniwind's pressed/focused resolution: a className
-// with `active:` or `focus:` variants is never handed to the engine (state variants), so it still re-renders as before.
+// with `active:` or `focus:` variants is bound in its resting state and unbound while pressed (onPressIn / onPressOut).
 export const Pressable: ComponentType<Props> = copyComponentProperties(
   RNPressable,
   (props: Props) => {
@@ -28,6 +28,14 @@ export const Pressable: ComponentType<Props> = copyComponentProperties(
       <RNPressable
         {...props}
         ref={ref}
+        onPressIn={(event) => {
+          ref.pause();
+          props.onPressIn?.(event);
+        }}
+        onPressOut={(event) => {
+          ref.resume();
+          props.onPressOut?.(event);
+        }}
         style={(state) => {
           const user =
             typeof props.style === 'function'
