@@ -599,3 +599,27 @@ The theme-switch figures depend on the app state: before `freezeOnBlur` plain re
 about 49 ms, and the engine 0.39 ms (sync 0.33), which relies on frozen hidden tabs still theming correctly.
 Run-to-run noise is the limit of this method: whole launches differ by up to 5 ms, so a result under about 3 ms needs 5 or more
 launches and the in-launch `className - static host` statistic.
+
+### 17e. Rotated-order run: Pressable is a lever, and the engine is slightly behind plain (2026-10-15)
+
+The bench harness now rotates the variant order every cycle (48 mounts, each variant in each slot equally often, first mount of each
+dropped). 5 launches per arm, engine and plain interleaved, Release, iPhone 17 Pro simulator, app with `freezeOnBlur`. Per launch,
+in ms (className / no Pressable / static host), then the in-launch differences:
+
+| launch | engine | cls - static | nopress - static | plain | cls - static | nopress - static |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 63.5 / 57.0 / 45.2 | 18.3 | 11.8 | 61.6 / 53.1 / 43.9 | 17.7 | 9.2 |
+| 2 | 63.1 / 54.7 / 47.1 | 16.0 | 7.6 | 64.9 / 57.4 / 45.1 | 19.8 | 12.3 |
+| 3 | 65.2 / 58.0 / 43.9 | 21.3 | 14.1 | 56.7 / 53.1 / 43.9 | 12.8 | 9.2 |
+| 4 | 62.5 / 56.7 / 45.0 | 17.5 | 11.7 | 44.2 / 42.2 / 33.4 | 10.8 | 8.8 |
+| 5 | 47.8 / 43.5 / 31.9 | 15.9 | 11.6 | 47.3 / 44.3 / 31.9 | 15.4 | 12.4 |
+| mean | | 17.8 | 11.4 | | 15.3 | 10.4 |
+
+- Pressable, with the slot effect removed: `className - no Pressable` is 6.4 ms on the engine arm and 4.9 ms on plain, for the 60
+  Pressables of 30 cards (80-105 us each). It is a real lever of about 5-6 ms, and our Pressable wrapper costs about 1.5 ms more than
+  Uniwind's. The earlier "LightPressable: about 1.5 ms" prototype took roughly that wrapper overhead and no more.
+- Initial load against plain: `className - static host` is 17.8 ms for the engine and 15.3 ms for plain, so the engine is about
+  2.5 ms behind in this run (17.8 against 21.2-21.4 for both in the earlier 5-launch run). The spread is wide (plain 10.8-19.8), whole
+  launches ranged from 44 to 65 ms, so the honest reading is: level with plain to about 2 ms behind, not faster.
+- Both arms moved a lot between launches (launch 4 and 5 ran 15-20 ms faster for the whole process), which is why only in-launch
+  differences are used.

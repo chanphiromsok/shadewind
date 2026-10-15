@@ -33,8 +33,9 @@ function AutoBench() {
       const times: Record<Kind, number[]> = { class: [], static: [], aot: [], nopress: [] };
 
       // the variants alternate inside one launch, so launch-to-launch noise cancels
-      for (let i = 0; i < 40; i++) {
-        const kind = KINDS[i % KINDS.length]!;
+      // each cycle rotates the order, so every variant takes every slot equally often (the first mount of each is dropped)
+      for (let i = 0; i < 48; i++) {
+        const kind = KINDS[((i % KINDS.length) + Math.floor(i / KINDS.length)) % KINDS.length]!;
 
         await new Promise<void>((r) => setTimeout(() => r(), 150));
         setVariant(kind);
