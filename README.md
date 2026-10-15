@@ -126,6 +126,11 @@ Docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [RENDER_CORE](docs/RENDER_CORE.md), 
 
 ## Known limits
 
+- **Mount cost.** The switch is fast; mounting is not free. On Uniwind's own benchmark app (2003 views, Release, iOS
+  simulator) the Uniwind bridge rendered in about 72 ms against about 61-63 ms for plain Uniwind (about +11 ms), because every
+  view registers with the engine at mount. A change that builds each distinct style once is in progress and not yet measured; see
+  `docs/ARCHITECTURE.md` section 15.
+
 - Up to 6 themes; every theme must define every key a view registers.
 - No state variants, no `opacity`, no scoped themes on the fast path.
 - Rapid-toggle behaviour of the async default is verified manually, not yet by a saved test.
