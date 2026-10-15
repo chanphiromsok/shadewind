@@ -469,3 +469,20 @@ conversion is cached per styles object. Not yet measured; the next suspect, if r
 Method notes: the engine arm must be checked to contain the commit under test (compare packed `lib/` with the repo) and each launch
 must be validated on screen (header and the "x 10 runs" / "x 10 theme changes" label); scripted fixed sleeps captured mid-run and
 wrong-app screens. Plain and engine blocks should be interleaved (the machine drifted 3.2 -> 4.5 ms within hours).
+
+### 15b. Render path, engine arm, step by step (Uniwind's own app, Release, iPhone 17 Pro simulator, average of 10 re-mounts of 2003 views)
+
+Single valid launch per row, validated on screen; plain Uniwind was 60.6 ms (and 62.6-63.2 ms earlier the same day).
+
+| Engine arm change | Render avg | vs plain (60.6) |
+|---|---|---|
+| bridge as it was | 74.4 / 72.05 ms | +11.5 to +13.8 |
+| JS plan cache (`b16ac9f`) | 72.05 ms | +11.5 |
+| + native style-id cache (`9cd1160`) | 70.31 ms | +9.7 |
+| + mark as applied when rendered with the current theme (`42b95cb`) | 68.22 ms | +7.6 |
+
+Each step helped a little; the engine is still above plain Uniwind on mount. Argent native profiler (xctrace attached after launch)
+caught the main thread only: 91 ms of `-[RCTViewComponentView unmountChildComponentView:index:]` and 19 ms of
+`mountChildComponentView` over the 10 re-mounts (common to both arms), and only 21 ms of JS-thread samples with no Hermes symbols,
+so it does not yet say where the remaining ~7.6 ms of JS-thread work is. A profile needs the app to start the scenario after
+the profiler is attached (gate the mount), or in-app counters around `register`.
