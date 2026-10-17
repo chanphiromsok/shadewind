@@ -154,3 +154,12 @@ React Native with no engine. Not comparable with the simulator tables above; com
 | stale views in a reveal commit | - | 800 | 0 |
 
 The 44eb043 mount numbers grow with the number of re-mounts (see `docs/ARCHITECTURE.md` section 18).
+
+### Same harness on React Native 0.88.0 (2026-10-17, one run each, back to back)
+
+The engine builds against 0.88.0 unchanged and passes all 15 tests (`docker build --build-arg RN_VERSION=0.88.0 ...`). React
+Native's own commits are cheaper (unrelated React commit on the 2003-view screen with no engine: 0.30 -> 0.09 ms), the engine's
+costs are about the same (sync switch 5.5 -> 4.8 ms, next React commit 3.8 -> 3.4 ms, reveal of a frozen tab 13.1 -> 12.3 ms), and
+the two Yoga costs described in `docs/ARCHITECTURE.md` section 18 are unchanged in 0.88.0 and in the 0.89 nightly of 2026-10-17
+(`zeroOutLayoutRecursively` still clones hidden subtrees on a layout pass; a clone with new props still loses its Yoga
+configuration). With 4 frozen tabs an unrelated React commit costs about 9 ms with no engine on both versions.

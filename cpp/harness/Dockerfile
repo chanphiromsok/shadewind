@@ -3,6 +3,7 @@
 #   docker build -f cpp/harness/Dockerfile -t shadewind-harness .     (from the repository root)
 #   docker run --rm shadewind-harness                                  (tests, then the benchmark)
 #   docker run --rm shadewind-harness build/harness_bench --runs 30    (benchmark only)
+#   docker build --build-arg RN_VERSION=0.88.0 ...                     (another React Native release)
 #
 # Numbers are for comparing the arms (none / baseline / current) on one machine, not for comparing machines.
 
@@ -24,7 +25,8 @@ COPY cpp/harness cpp/harness
 
 WORKDIR /shadewind/cpp/harness
 
-RUN rm -rf .deps build && ./fetch-deps.sh
+ARG RN_VERSION=0.86.2
+RUN rm -rf .deps build && RN_VERSION=${RN_VERSION} ./fetch-deps.sh
 
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
     && cmake --build build
