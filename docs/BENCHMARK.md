@@ -163,3 +163,21 @@ costs are about the same (sync switch 5.5 -> 4.8 ms, next React commit 3.8 -> 3.
 the two Yoga costs described in `docs/ARCHITECTURE.md` section 18 are unchanged in 0.88.0 and in the 0.89 nightly of 2026-10-17
 (`zeroOutLayoutRecursively` still clones hidden subtrees on a layout pass; a clone with new props still loses its Yoga
 configuration). With 4 frozen tabs an unrelated React commit costs about 9 ms with no engine on both versions.
+
+## Uniwind class resolution in C++ (2026-10-17, no device yet)
+
+Correctness and size only; the speed against Uniwind's JS is measured on a device with `-resolveBench 1` (`docs/LOCAL_TESTING.md`
+step 6), not done yet.
+
+| | |
+|---|---|
+| results equal to Uniwind 1.12's own `resolveStyles` (`cpp/harness/fixtures/resolver`, generated with Uniwind's bundler and Metro transformer) | 137,790 / 137,790 cases, with the device-built and the Metro-built table |
+| class table of example-real, built by Metro | 26 KB, 123 classes, 2 left to Uniwind (`transform`, `shadow`) |
+| example-real iOS Release bundle, prebuilt table vs `prebuildStyleTable: false` | 1,546,984 vs 1,517,337 bytes JS (+1.9 %); Hermes bytecode 2,226,718 vs 2,200,500 bytes (+1.2 %) |
+| table build in Node (fixture app, 259 classes, 3 themes) | about 5 ms (Hermes on a device: not measured) |
+
+## Native harness built as on Android (2026-10-17)
+
+`docker run --rm shadewind-harness` also runs the tests with React Native's renderer built as on Android and checks what each
+Java view would hold after Android's mount instructions: 18/18 in each of the three props modes. Correctness only; no Android
+timing exists for this version.

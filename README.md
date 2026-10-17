@@ -3,10 +3,12 @@
 Theme switching for React Native (Fabric) that does not re-render your components. A theme change is applied to the
 already mounted views inside the shadow tree commit, so the JS thread stays free.
 
-> **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android works but
-> commits synchronously on the JS thread and has less testing. Uniwind support is verified against Uniwind 1.12.x.
+> **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android commits
+> synchronously on the JS thread and has less testing (the current version is checked in the native harness built as on Android,
+> not yet on a device). Uniwind support is verified against Uniwind 1.12.x.
 
-Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, Release; see `docs/BENCHMARK.md`):
+Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, Release, 2026-10-14; more in
+[Benchmarks](#benchmarks)):
 
 | | JS thread time per switch |
 |---|---|
@@ -89,6 +91,48 @@ hold (shadows, transforms, safe-area and screen units, data / rtl variants) is s
 
 Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIWIND_INTEGRATION.md](docs/UNIWIND_INTEGRATION.md).
 
+## Benchmarks
+
+Three kinds of numbers, not comparable with each other: on the iOS simulator (whole app), in the native harness (React Native's
+C++ renderer on Linux, native work only), and correctness checks. Full tables: `docs/BENCHMARK.md`; how to reproduce:
+`docs/LOCAL_TESTING.md`.
+
+**Theme switch, iOS simulator** (the table at the top, `uniwind-benchmarks`, 2003 views, measured 2026-10-14). The switch path has
+not changed since (harness: 4.6 ms before, 4.7 ms after, native part).
+
+**Native cost inside React Native's renderer** (`cpp/harness`, Docker on Linux, 2026-10-17, medians of 15, each arm in its own
+process; React's render and JS are not included). `none` is React Native without the engine, `44eb043` the engine before the
+freeze / mount work:
+
+| 2003 views | none | 44eb043 | current |
+|---|---|---|---|
+| mount, total native | 15.0 ms | 70.7 ms | 21.1 ms |
+| unrelated React commit | 0.22 ms | 2.94 ms | 0.26 ms |
+| theme switch, sync | - | 4.58 ms | 4.72 ms |
+| first React commit after a switch | 0.22 ms | 4.80 ms | 3.09 ms |
+
+| 5 tabs x 400 cards, 4 frozen (`freezeOnBlur`) | none | 44eb043 | current |
+|---|---|---|---|
+| theme switch, sync / async | - | 3.54 / 3.08 ms | 2.91 / 2.83 ms |
+| reveal a frozen tab after a switch (sync) | 11.0 ms | 20.3 ms | 12.4 ms |
+| views with the old theme in the reveal commit | - | 800 | 0 |
+
+Reproduce: `docker build -f cpp/harness/Dockerfile -t shadewind-harness . && docker run --rm shadewind-harness` (tests, the same
+tests with the renderer built as on Android, then these tables).
+
+**Uniwind class resolution in C++** (`nativeResolver`, `docs/ARCHITECTURE.md` section 19): correctness and size so far, no speed
+yet.
+
+| | |
+|---|---|
+| results equal to Uniwind 1.12's own `resolveStyles` | 137,790 of 137,790 cases (the rest of the classNames fall back to Uniwind on purpose) |
+| class table (example-real), built by Metro | 26 KB, 123 classes |
+| bundle size (example-real, iOS Release) | +29.6 KB JS (+1.9 %), +26.2 KB Hermes bytecode (+1.2 %) |
+| speed vs Uniwind's JS, first screen | not measured yet: `-resolveBench 1` and the `-resolverOff 1` A/B in `docs/LOCAL_TESTING.md` step 6 |
+
+**Not measured yet:** this version on a device or simulator (mount A/B against 44eb043, the resolver's speed and its effect on the
+first screen), and anything on Android. No speed claim is made for these until those runs exist.
+
 ## Architecture
 
 Shadewind has two parts: a **native engine** (shipped) and an **own style compiler** (design stage, not built yet).
@@ -124,7 +168,8 @@ Rules the design holds to:
 3. A view always renders correctly at mount; an unbound view is stale after a switch, with a dev warning.
 4. JS never sits on the switch path: `setTheme` is a native call.
 
-Measured, honestly: on a 2003-view benchmark the engine is about 100x faster than Uniwind. On a real app (tovtam, Release, iOS
+Measured, honestly (before the 2026-10-17 work; see [Benchmarks](#benchmarks)): on a 2003-view benchmark the engine is about 100x
+faster than Uniwind. On a real app (tovtam, Release, iOS
 simulator) the gain is small today (about one frame, no stale frames on returning to a hidden tab) because most remaining cost is
 React consumers of theme values; see `docs/TOVTAM_PORT.md`, `docs/STRATEGY.md`, `docs/RENDER_CORE.md`.
 
