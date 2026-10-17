@@ -2309,7 +2309,7 @@ SPEC CHECKSUMS:
   ReactCommon: 02f6a489d5eb4ab79d7deba5cd4434e0ba351a07
   ReactNativeDependencies: 6738e602b46fd24aa453cd58267ec3bb8bf29d27
   RNScreens: 7fb621f7b7bf936e2ca7b25e46e07000d90c794c
-  Shadewind: 1f9c5d43e089be91bd4f905079a5a90c5301a022
+  Shadewind: 776cc1283cf5187d60a89c7286ffa1eaa8a02b5c
   Yoga: 18b74b3ade30bebc1904004dfaceae1dd02a330a
 
 PODFILE CHECKSUM: 761ee783543d682e266af3e8d273f0caa655d5cb
