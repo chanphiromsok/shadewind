@@ -25,6 +25,19 @@ namespace {
 
 constexpr auto kOverlayClass = "com/margelo/nitro/shadewind/ThemeTransitionOverlay";
 
+// findClassStatic makes a global reference that is never released: look it up and resolve the methods once.
+struct Overlay {
+  facebook::jni::alias_ref<jclass> cls = facebook::jni::findClassStatic(kOverlayClass);
+  facebook::jni::JStaticMethod<void(jlong, jint, jdouble)> begin = cls->getStaticMethod<void(jlong, jint, jdouble)>("begin");
+  facebook::jni::JStaticMethod<void(jlong)> run = cls->getStaticMethod<void(jlong)>("run");
+};
+
+const Overlay& overlay() {
+  static const Overlay instance; // after the thread is attached: both callers hold a ThreadScope
+
+  return instance;
+}
+
 } // namespace
 
 // The overlay is Kotlin (ThemeTransitionOverlay.kt). These are called from the JS thread and from the mount hook (UI thread), the
@@ -32,10 +45,9 @@ constexpr auto kOverlayClass = "com/margelo/nitro/shadewind/ThemeTransitionOverl
 void themeTransitionBegin(uint64_t id, ThemeTransitionPreset preset, double durationMs) {
   try {
     facebook::jni::ThreadScope scope;
-    auto cls = facebook::jni::findClassStatic(kOverlayClass);
-    auto begin = cls->getStaticMethod<void(jlong, jint, jdouble)>("begin");
+    const auto& o = overlay();
 
-    begin(cls, static_cast<jlong>(id), static_cast<jint>(preset), durationMs);
+    o.begin(o.cls, static_cast<jlong>(id), static_cast<jint>(preset), durationMs);
   } catch (...) {
   }
 }
@@ -43,10 +55,9 @@ void themeTransitionBegin(uint64_t id, ThemeTransitionPreset preset, double dura
 void themeTransitionRun(uint64_t id) {
   try {
     facebook::jni::ThreadScope scope;
-    auto cls = facebook::jni::findClassStatic(kOverlayClass);
-    auto run = cls->getStaticMethod<void(jlong)>("run");
+    const auto& o = overlay();
 
-    run(cls, static_cast<jlong>(id));
+    o.run(o.cls, static_cast<jlong>(id));
   } catch (...) {
   }
 }

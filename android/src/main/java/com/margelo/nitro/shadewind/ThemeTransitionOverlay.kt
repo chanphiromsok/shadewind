@@ -42,6 +42,10 @@ object ThemeTransitionOverlay {
   private var overlayMs = 0L
   private var fading = false
 
+  // The newest transition whose mount was reported. The mount notification is posted at the front of the queue, so it can
+  // overtake the snapshot message of the same transition: that snapshot would show the new theme and sit on top, so it is skipped.
+  private var mountedId = 0L
+
   @JvmStatic
   @DoNotStrip
   fun begin(id: Long, preset: Int, durationMs: Double) {
@@ -66,6 +70,12 @@ object ThemeTransitionOverlay {
 
   private fun snapshot(id: Long, preset: Int, durationMs: Long) {
     val previous = overlay
+
+    if (mountedId >= id) {
+      remove(previous) // the screen already shows this theme
+
+      return
+    }
 
     try {
       val activity = NitroModules.applicationContext?.currentActivity
@@ -123,6 +133,8 @@ object ThemeTransitionOverlay {
   }
 
   private fun fadeOut(id: Long) {
+    mountedId = maxOf(mountedId, id)
+
     val view = overlay ?: return
 
     if (overlayId == id) {
