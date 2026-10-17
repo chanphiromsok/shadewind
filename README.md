@@ -4,8 +4,8 @@ Theme switching for React Native (Fabric) that does not re-render your component
 already mounted views inside the shadow tree commit, so the JS thread stays free.
 
 > **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android commits
-> synchronously on the JS thread and has less testing (the current version is checked in the native harness built as on Android,
-> not yet on a device). Uniwind support is verified against Uniwind 1.12.x.
+> synchronously on the JS thread and has less testing (the native harness is built as on Android, and the theme switch was checked
+> on an emulator in one app, not on a physical device). Uniwind support is verified against Uniwind 1.12.x.
 
 Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, Release, 2026-10-14; more in
 [Benchmarks](#benchmarks)):
@@ -17,6 +17,10 @@ Measured on 2003 views, 10 theme changes (`uniwind-benchmarks`, iOS simulator, R
 | Shadewind `hookAsync` (default) | ~0.1 ms JS idle, about 11 ms until mounted |
 
 Theme values only: `backgroundColor`, `borderColor`, `color` and `opacity`. Everything else keeps rendering through React.
+
+With Uniwind, the adapter applies a switch with `hookDeferred`: the commit runs on the JS thread but is mounted together with
+React's own commit, so views React re-renders (for example a `LinearGradient`'s `colors`) change in the same frame as the engine's.
+It costs about 6 ms of JS time for 473 views (`example-real`, iOS simulator) against ~0.5 ms for `hookAsync`; see `docs/HANDOFF.md`.
 
 ## Install
 
@@ -199,8 +203,8 @@ Docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [RENDER_CORE](docs/RENDER_CORE.md), 
 - `freezeOnBlur` (Suspense / Activity hiding a screen) and rapid toggles are covered by the native harness (`cpp/harness`: React
   Native's renderer, no device): a revealed screen is themed inside the commit that shows it. On a device they were verified
   manually on the iOS simulator (`docs/DESIGN.md`, `docs/LOCAL_TESTING.md`). Android: the harness also builds React Native's
-  renderer as on Android and checks what its mounting layer sends each Java view (`rawProps`, in all three props modes), but this
-  version has not been compiled with the NDK or run on an Android device or emulator.
+  renderer as on Android and checks what its mounting layer sends each Java view (`rawProps`, in all three props modes). The package
+  compiles with the NDK (arm64) and the theme switch ran on an emulator; physical Android devices and other ABIs were not tried.
 - Relies on a private React Native API (`getNodeFromInternalInstanceHandle`) to find a view's shadow node.
 
 ## Contributing
