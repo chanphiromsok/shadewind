@@ -104,7 +104,7 @@ function Probe() {
           const total = [...renders.values()].reduce((a, b) => a + b, 0);
 
           setText(
-            `theme=${r.theme} reg=${r.registered} inTree=${r.inTree} notInTree=${r.notInTree} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} renders=${total} STALE ${String(r.stale ?? '').slice(0, 500)}`
+            `theme=${r.theme} reg=${r.registered} inTree=${r.inTree} notInTree=${r.notInTree} hidden=${r.hidden} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} renders=${total} STALE ${String(r.stale ?? '').slice(0, 500)}`
           );
         }}
       >

@@ -126,3 +126,31 @@ cold). 5 launches per arm, median of the 12 per launch:
 
 Does not reproduce the earlier tovtam run (64.8 -> 60.3 ms); the cause of the larger gain is not identified (different package build,
 later fixes). Metric is JS stall, not time to pixels. `medianBusyMs` (about 352 ms) includes the wait window and is not informative.
+
+## Native harness, engine branch vs 44eb043 (2026-10-17, Docker on Linux, `cpp/harness`)
+
+Native work only (React's render and the adapter hooks are not included), each arm in its own process, medians of 15. `none` is
+React Native with no engine. Not comparable with the simulator tables above; compare the columns.
+
+2003 views (uniwind-benchmarks screen):
+
+| metric | none | baseline (44eb043) | current |
+|---|---|---|---|
+| mount: React commit (hook + layout) | 5.04 ms | 13.84 ms | 6.81 ms |
+| mount: refs attach + flush | 0.09 ms | 14.28 ms | 3.32 ms |
+| mount: total (with node creation) | 15.04 ms | 70.71 ms | 21.10 ms |
+| React commit, before any switch | 0.22 ms | 2.94 ms | 0.26 ms |
+| switch, sync ('hook') | - | 4.58 ms | 4.72 ms |
+| next React commit | 0.22 ms | 4.80 ms | 3.09 ms |
+| switch, async ('hookAsync') commit | - | 5.49 ms | 4.64 ms |
+| first / second React commit after it | 0.36 / 0.26 ms | 9.25 / 1.55 ms | 7.91 / 0.72 ms |
+
+5 tabs x 400 cards, 4 frozen:
+
+| metric | none | baseline (44eb043) | current |
+|---|---|---|---|
+| switch, sync / async | - | 3.54 / 3.08 ms | 2.91 / 2.83 ms |
+| reveal a frozen tab (commit + flush), after a sync / async switch | 11.04 / 9.55 ms | 20.29 / 23.94 ms | 12.40 / 15.35 ms |
+| stale views in a reveal commit | - | 800 | 0 |
+
+The 44eb043 mount numbers grow with the number of re-mounts (see `docs/ARCHITECTURE.md` section 18).

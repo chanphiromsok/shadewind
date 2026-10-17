@@ -623,3 +623,42 @@ in ms (className / no Pressable / static host), then the in-launch differences:
   launches ranged from 44 to 65 ms, so the honest reading is: level with plain to about 2 ms behind, not faster.
 - Both arms moved a lot between launches (launch 4 and 5 ran 15-20 ms faster for the whole process), which is why only in-launch
   differences are used.
+
+## 18. Bindings that survive a freeze, proven subtrees, native harness (2026-10-17)
+
+Measured in `cpp/harness` (React Native 0.86.2's C++ renderer on Linux, the engine's commit hook in real `ShadowTree` commits, a
+stand-in for React's Fabric renderer; Docker, one machine, each arm in its own process, medians of 15). Native work only: React's
+render and the adapter hooks are not in these numbers. Reproduce with `docker run --rm shadewind-harness` (`cpp/harness/README.md`).
+
+What changed and why:
+
+- **Freeze.** React detaches the refs of a subtree it hides (Suspense / Activity, so `freezeOnBlur`) and the refs unregistered the
+  views. The reveal commit then held the old theme and a second commit, after the refs re-attached, fixed it: a possible stale
+  frame (harness: 800 stale views in the reveal commit of a 400-card tab at 44eb043). Now a detach keeps the binding (an unmount
+  frees it with the shadow node family; a view unbinds only when its styles stop being themeable or a Pressable is pressed), a
+  re-attach with the same styles costs nothing, and the hook themes the revealed subtree inside the reveal commit: 0 stale views,
+  no extra commit. A switch skips `display: none` subtrees; they are themed when they show.
+- **Proven subtrees.** The committed root is the object the hook returned (`ShadowTree::tryCommit`). The hook remembers which
+  roots it produced for which theme epoch and registration generation; a subtree of the new tree that is the very node of such a
+  root needs nothing and is skipped. An unrelated React commit on the 2003-view screen: 0.26 ms against 0.22 ms with no engine
+  (44eb043: 2.9 ms).
+- **React's handles.** Clones made off the JS thread (iOS `hookAsync`) do not repoint React's node handles, so the first React
+  commit after such a switch themes the views again (7.9 ms on 2003 views, 44eb043 9.3 ms); clones on the JS thread do repoint
+  them (`transferRuntimeShadowNodeReference`), so the second commit is cheap again (0.7 ms; 44eb043 1.5 ms).
+- **Registration.** One `registerMany` call per commit instead of one JSI call per view; a style table shared by every view of a
+  style; a smaller entry in a folly F14 map; prewarm incremental and off the JS thread on Android too; expired views and styles are
+  purged as the maps grow. Mount of the 2003-view screen, native part: 21.1 ms against 15.0 ms with no engine (44eb043: 70.7 ms in
+  the same run, which grows with every re-mount because its registry and prewarmed props of unmounted views live until a purge
+  every 128 commits).
+- **Unchanged:** the switch itself (clone every themed view): about 4.6 ms for 2003 views in both engines.
+
+Tried and dropped:
+
+- Forcing layout in the switch commit, so Yoga configures the clones and the next React commit does not clone them again: the next
+  commit went from 1.9 to 0.5 ms, but with frozen tabs every switch paid Yoga's `zeroOutLayoutRecursively` over the hidden
+  subtrees (2.8 -> 10.7 ms).
+- Skipping subtrees newer than the last registration by tag: React creates parents after their children, so a new container's
+  tag is above the tags of the views registered inside it; it skipped whole screens (caught by the harness tests).
+
+Not measured yet: the JS side of mount on a device (fewer JSI calls should show in `className - static`), and Android.
+`docs/LOCAL_TESTING.md` lists the device runs.

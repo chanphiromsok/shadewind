@@ -70,7 +70,8 @@ export async function measureSwitch(themes: [ThemeName, ThemeName], count: numbe
     // the first switch is cold (props cache empty), report the warm ones
     runs: runs.slice(1),
     theme: report.theme,
-    tree: `${report.treeMatchesExpected ?? '?'}/${report.registered ?? '?'}`,
+    // views in frozen screens (`hidden`) are themed when they show, so they are not compared: right = visible ones
+    tree: `${report.treeMatchesExpected ?? '?'}/${(report.inTree ?? 0) - (report.hidden ?? 0)}`,
   };
 }
 

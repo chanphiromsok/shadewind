@@ -129,14 +129,16 @@ Docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [RENDER_CORE](docs/RENDER_CORE.md), 
 - **Mount cost.** The switch is fast; mounting is not free, because every view registers with the engine. After the host-direct
   `View` / `Text` change, mounting 30 feed cards on a real-app benchmark (Release, iOS simulator) is level with plain Uniwind
   (64.4 ms against 65.3 ms, a tie, not a win); see `docs/ARCHITECTURE.md` section 17b.
-- **Cost on every commit.** The commit hook walks the whole shadow tree of the surface on every commit, including frozen tabs
-  (measured on a tree of about 1,500 nodes: 0.41 ms average, 2.7 ms worst, iOS simulator). It grows linearly with the node
-  count and is not measured on a physical device.
+- **Cost on every commit.** The commit hook runs in every commit. It skips the subtrees the previous commit already themed and
+  `display: none` subtrees (frozen screens), so a React commit costs about what React changed; a mount commit still visits the new
+  nodes once (`cpp/harness`, native only). After a theme switch made off the JS thread (iOS `hookAsync`), the first React commit
+  themes the views again on the JS thread, once.
 
 - Up to 6 themes; every theme must define every key a view registers.
 - No state variants and no scoped themes on the fast path.
-- Rapid-toggle and `freezeOnBlur` behaviour (react-native-screens on bottom tabs and on a native stack) were verified manually on
-  the iOS simulator (`docs/DESIGN.md`), not by a saved test. Android is not verified for freeze.
+- `freezeOnBlur` (Suspense / Activity hiding a screen) and rapid toggles are covered by the native harness (`cpp/harness`: React
+  Native's renderer, no device): a revealed screen is themed inside the commit that shows it. On a device they were verified
+  manually on the iOS simulator (`docs/DESIGN.md`, `docs/LOCAL_TESTING.md`); Android is not verified for freeze.
 - Relies on a private React Native API (`getNodeFromInternalInstanceHandle`) to find a view's shadow node.
 
 ## Contributing

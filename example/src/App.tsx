@@ -87,7 +87,7 @@ function Home({ navigation }: NativeStackScreenProps<Routes, 'Home'>) {
             const r = ShadewindEngine.inspect();
 
             setDebug(
-              `theme=${r.theme} registered=${r.registered} inTree=${r.inTree} notInTree=${r.notInTree} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} layerOK=${r.layerMatchesExpected} ${r.samples ?? ''}`
+              `theme=${r.theme} registered=${r.registered} inTree=${r.inTree} notInTree=${r.notInTree} hidden=${r.hidden} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} layerOK=${r.layerMatchesExpected} ${r.samples ?? ''}`
             );
           }}
         >

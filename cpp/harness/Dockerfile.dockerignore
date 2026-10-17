@@ -1,0 +1,7 @@
+*
+!cpp/ThemeHook.hpp
+!cpp/ThemeEngine.hpp
+!cpp/css
+!cpp/harness
+cpp/harness/.deps
+cpp/harness/build
