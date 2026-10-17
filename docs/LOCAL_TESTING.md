@@ -4,7 +4,8 @@ How to verify a change to the engine on a machine with Xcode and the iOS simulat
 first failure and report it with the exact output. Record every number in `docs/BENCHMARK.md` with the date, the commit, the
 simulator and how many launches it is based on.
 
-Branch under test: `engine/freeze-and-mount`. Baseline for every A/B: `main` at `44eb043`.
+Code under test: `main` (the `engine/freeze-and-mount` work, merged at `c2509f7`). Baseline for every A/B: commit `44eb043`, the
+code before it (`git worktree add ../shadewind-baseline 44eb043`); "baseline" below means that checkout.
 
 ## 0. Prerequisites
 
@@ -33,7 +34,7 @@ node .yarn/releases/yarn-4.11.0.cjs eslint src
 node .yarn/releases/yarn-4.11.0.cjs prepare        # bob build + nitrogen
 ```
 
-Pass: no type errors in `src/` (the example files have a few old ones: compare with `main`), no new lint errors in `src/`, the build
+Pass: no type errors in `src/` (the example files have a few old ones: compare with the baseline), no new lint errors in `src/`, the build
 succeeds.
 
 ## 3. Package the library for the apps
@@ -48,7 +49,7 @@ cd example-real && rm -rf node_modules/shadewind && npm install && cd ios && bun
 ```
 
 Check that `example-real/node_modules/shadewind/cpp/ThemeEngine.hpp`, `.../cpp/css/StyleResolver.hpp` and
-`.../metro-babel-transformer.cjs` exist (they do not on `main`): if not, the app still runs the old engine.
+`.../metro-babel-transformer.cjs` exist (they do not at the baseline): if not, the app still runs the old engine.
 
 ## 4. Freeze correctness on the simulator (the reason for this branch)
 
@@ -74,10 +75,10 @@ Tabs: Explore, Moment, Range, Notification, Account; the Light / Dark buttons ar
 4. Hold a card (Pressable pressed) while switching the theme from a second finger on the Account tab, release. Pass: the pressed
    colour shows while held, the theme colour after release.
 
-Then `main`: repeat 1 and 2 and note whether a wrong colour is visible in the recording right after the reveal. That frame is what
+Then the baseline: repeat 1 and 2 and note whether a wrong colour is visible in the recording right after the reveal. That frame is what
 this branch removes.
 
-## 5. Theme switch and mount on `example-real` (A/B with `main`)
+## 5. Theme switch and mount on `example-real` (A/B with the baseline)
 
 Launch argument `-realBench 1` runs the benchmark by itself 15 s after launch and shows the result on top of the app
 (mount of 30 feed cards in four variants, then idle and stall of 12 switches):
@@ -86,15 +87,13 @@ Launch argument `-realBench 1` runs the benchmark by itself 15 s after launch an
 xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -realBench 1
 ```
 
-5 launches per arm, arms interleaved (branch, main, branch, main, ...), reinstalling between arms (step 3 with the other checkout).
+5 launches per arm, arms interleaved (current, baseline, current, baseline, ...), reinstalling between arms (step 3 with the other checkout).
 Report per launch: `className` / `static` mount means, `className - static` (the in-launch statistic `docs/ARCHITECTURE.md` 17b
-uses), idle and stall medians. Pass: `className - static` not worse than `main` beyond the launch-to-launch spread; stall and idle
+uses), idle and stall medians. Pass: `className - static` not worse than the baseline beyond the launch-to-launch spread; stall and idle
 not worse; `tree a/b` equal.
 
-Note: on this branch the class resolver (step 6) is on in the `className` arm once its table is built (at the first idle,
-long before the 15 s mark). To see its share, run the branch arm a second time with the resolver off: add
-`nativeResolver.setEnabled(false)` (from `shadewind/uniwind`) after `installUniwind()` in `example-real/src/boot.ts`, repackage
-(step 3), and report both.
+Note: in the current code the class resolver (step 6) is on in the `className` arm from launch (its table is built by Metro). To
+see its share, run the current arm a second time with the launch argument `-resolverOff 1` added (same build), and report both.
 
 ## 6. Native class resolution on `example-real`
 
@@ -176,6 +175,6 @@ thread). Report with a same-run plain Uniwind number only; the emulator's absolu
 ## What to send back
 
 - the harness tables (step 1)
-- the freeze sequences with the probe lines and whether a wrong colour was visible, branch and `main` (step 4)
-- per-launch numbers for steps 5-8, with the spread, branch and `main` side by side (step 6 on the branch only)
+- the freeze sequences with the probe lines and whether a wrong colour was visible, current and baseline (step 4)
+- per-launch numbers for steps 5-8, with the spread, current and baseline side by side (step 6 on the current code only)
 - anything that failed, with the full output
