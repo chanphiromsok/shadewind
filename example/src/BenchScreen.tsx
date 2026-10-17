@@ -221,7 +221,7 @@ export default function BenchScreen() {
       median(warm.map(f)).toFixed(2);
     const nat =
       mode === 'native'
-        ? ` | ${strategy}: scan ${median(warm.map((x) => x.native!.scanMs)).toFixed(2)} clone ${median(warm.map((x) => x.native!.cloneMs)).toFixed(2)} (props ${median(warm.map((x) => x.native!.propsMs)).toFixed(2)}, reused ${median(warm.map((x) => x.native!.reused ?? 0))}, pre-built ${median(warm.map((x) => x.native!.precloned ?? 0))}) collect ${median(warm.map((x) => x.native!.collectMs)).toFixed(2)} direct ${median(warm.map((x) => x.native!.directMs)).toFixed(2)} commit ${median(warm.map((x) => x.native!.commitMs)).toFixed(2)} total ${median(warm.map((x) => x.native!.totalMs)).toFixed(2)}`
+        ? ` | ${strategy}: scan ${median(warm.map((x) => x.native!.scanMs)).toFixed(2)} clone ${median(warm.map((x) => x.native!.cloneMs)).toFixed(2)} (props ${median(warm.map((x) => x.native!.propsMs)).toFixed(2)}, reused ${median(warm.map((x) => x.native!.reused ?? 0))}, visited ${median(warm.map((x) => x.native!.visited ?? 0))}, skipped ${median(warm.map((x) => x.native!.skipped ?? 0))}) commit ${median(warm.map((x) => x.native!.commitMs)).toFixed(2)} total ${median(warm.map((x) => x.native!.totalMs)).toFixed(2)}`
         : '';
 
     setReport(
@@ -336,7 +336,7 @@ export default function BenchScreen() {
     const t = await coldOnce();
 
     setReport(
-      `COLD first switch, fresh mount, ${count} views: commit ${t.commitMs.toFixed(2)} ms | to screen ${(t.visualMs ?? 0).toFixed(2)} ms | scan ${t.scanMs.toFixed(2)} clone ${t.cloneMs.toFixed(2)} (props ${t.propsMs.toFixed(2)}, reused ${t.reused ?? 0}, pre-built ${t.precloned ?? 0})`
+      `COLD first switch, fresh mount, ${count} views: commit ${t.commitMs.toFixed(2)} ms | to screen ${(t.visualMs ?? 0).toFixed(2)} ms | scan ${t.scanMs.toFixed(2)} clone ${t.cloneMs.toFixed(2)} (props ${t.propsMs.toFixed(2)}, reused ${t.reused ?? 0}, visited ${t.visited ?? 0})`
     );
   };
 
@@ -365,7 +365,7 @@ export default function BenchScreen() {
       baseGaps.push(pacing.current.before);
       // commit ms, nodes taken from the pre-built buffer, props rebuilt ms, scan ms, clone ms
       detail.push(
-        `${t.commitMs.toFixed(1)}c ${t.precloned ?? 0}p ${t.propsMs.toFixed(1)}pr ${t.scanMs.toFixed(1)}s ${t.cloneMs.toFixed(1)}cl ${(t.visualMs ?? 0).toFixed(1)}v ${pacing.current.after.toFixed(1)}m/${pacing.current.after1500.toFixed(1)}M/${pacing.current.before.toFixed(1)}b/${pacing.current.remount.toFixed(0)}R${(t.precloned ?? 0) < count ? ` miss[${t.misses}]` : ''}`
+        `${t.commitMs.toFixed(1)}c ${t.reused ?? 0}r ${t.propsMs.toFixed(1)}pr ${t.scanMs.toFixed(1)}s ${t.cloneMs.toFixed(1)}cl ${(t.visualMs ?? 0).toFixed(1)}v ${pacing.current.after.toFixed(1)}m/${pacing.current.after1500.toFixed(1)}M/${pacing.current.before.toFixed(1)}b/${pacing.current.remount.toFixed(0)}R${(t.reused ?? 0) < count ? ` miss[${t.misses}]` : ''}`
       );
     }
 
@@ -450,13 +450,7 @@ export default function BenchScreen() {
         <Pressable
           testID="bench-strategy"
           onPress={() =>
-            setStrategy((v) =>
-              v === 'hook'
-                ? 'hookAsync'
-                : v === 'hookAsync'
-                  ? 'stock'
-                  : 'hook'
-            )
+            setStrategy((v) => (v === 'hook' ? 'hookAsync' : 'hook'))
           }
           style={styles.tab}
         >

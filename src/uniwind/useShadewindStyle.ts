@@ -313,10 +313,17 @@ export const useShadewindStyle = (
   };
 };
 
+type EngineRef = ((node: unknown) => void) & {
+  pause(): void;
+  resume(): void;
+};
+
 type RefHolder = {
   themed: ThemedStyles;
   user: Ref<unknown> | undefined;
-  ref: ((node: unknown) => void) & { pause(): void; resume(): void };
+  ref: EngineRef;
+  // a later render bound the view to other styles, or to none: this holder's detach unbinds
+  superseded: boolean;
 };
 
 const makeHolder = (
@@ -327,20 +334,33 @@ const makeHolder = (
   let registered: unknown = null;
   let attached: unknown = null;
 
+  const holder: RefHolder = {
+    themed,
+    user,
+    superseded: false,
+    ref: null as unknown as EngineRef,
+  };
+
   const ref = (node: unknown) => {
     attached = node;
 
-    if (registered) {
-      engine().unregister(registered);
-      registered = null;
-    }
-
     if (node) {
+      // another host instance under the same holder (the element type changed): the old one is unmounted, forget it
+      if (registered && registered !== node) {
+        registered = null;
+      }
+
+      // a re-attach of the same view (Suspense/Activity reveal) is already registered: register() returns at once
       if (engine().register(node, themed, renderThemeFor(node, themed))) {
         registered = node;
       } else {
         onRegisterFailed?.();
       }
+    } else if (holder.superseded && registered) {
+      // React's own props are right for the view now. A plain detach (a hide, an unmount) keeps the binding: the commit hook
+      // themes a hidden subtree when it shows, and an unmounted view takes its entry with it.
+      engine().unregister(registered);
+      registered = null;
     }
 
     if (typeof user === 'function') {
@@ -350,25 +370,23 @@ const makeHolder = (
     }
   };
 
-  return {
-    themed,
-    user,
-    ref: Object.assign(ref, {
-      // a Pressable unbinds the view while it is pressed (React draws the pressed style) and binds it again on release
-      pause() {
-        if (registered) {
-          engine().unregister(registered);
-          registered = null;
-        }
-      },
-      resume() {
-        // no render theme: the props React has now may still be the pressed ones, so let the next commit apply the theme
-        if (attached && !registered && engine().register(attached, themed)) {
-          registered = attached;
-        }
-      },
-    }),
-  };
+  holder.ref = Object.assign(ref, {
+    // a Pressable unbinds the view while it is pressed (React draws the pressed style) and binds it again on release
+    pause() {
+      if (registered) {
+        engine().unregister(registered);
+        registered = null;
+      }
+    },
+    resume() {
+      // no render theme: the props React has now may still be the pressed ones, so let the next commit apply the theme
+      if (attached && !registered && engine().register(attached, themed)) {
+        registered = attached;
+      }
+    },
+  });
+
+  return holder;
 };
 
 /**
@@ -383,7 +401,10 @@ export const useEngineRef = (
   const holder = useRef<RefHolder | null>(null);
 
   if (!themed) {
-    holder.current = null;
+    if (holder.current) {
+      holder.current.superseded = true;
+      holder.current = null;
+    }
 
     return userRef;
   }
@@ -391,6 +412,10 @@ export const useEngineRef = (
   let h = holder.current;
 
   if (!h || h.themed !== themed || h.user !== userRef) {
+    if (h) {
+      h.superseded = true;
+    }
+
     h = holder.current = makeHolder(themed, userRef, onRegisterFailed);
   }
 

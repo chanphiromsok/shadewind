@@ -316,6 +316,31 @@ const checkStyles = (styles: ThemedStyles, themes: readonly string[]) => {
 
 const attachedNodes = new WeakSet<object>();
 
+// Native styles per styles content: every view with the same styles shares one object, so native parses them once and caches
+// one entry, however many views mount and unmount. Bounded: an app has few distinct themed styles, and inline objects that
+// change on every render start over past the limit.
+const nativeByKey = new Map<string, Record<string, Record<string, unknown>>>();
+
+const nativeFor = (key: string, styles: ThemedStyles) => {
+  let native = nativeByKey.get(key);
+
+  if (!native) {
+    if (nativeByKey.size >= 512) {
+      nativeByKey.clear();
+    }
+
+    native = Object.fromEntries(
+      Object.entries(styles).map(([name, style]) => [
+        name,
+        toNativeProps(style as ThemedStyle),
+      ])
+    );
+    nativeByKey.set(key, native);
+  }
+
+  return native;
+};
+
 export type UseThemedResult<T extends object> = {
   // any: a host component's ref type differs per component (View, Text, ScrollView, ...)
 
@@ -348,29 +373,28 @@ export function useThemed<T extends object = ViewStyle>(
   // No subscription (rule 1): the style is the current theme's at this render. An engine view is then kept right by the
   // commit hook; a fallback view is stale after a later switch until its next render (dev warning above).
   const theme = getTheme();
-  const native = useMemo(
-    () =>
-      engine
-        ? Object.fromEntries(
-            Object.entries(stable).map(([name, style]) => [
-              name,
-              toNativeProps(style as ThemedStyle),
-            ])
-          )
-        : null,
-    [engine, stable]
-  );
+  const native = engine ? nativeFor(key, stable) : null;
 
-  // React 19 calls the returned function on detach; typed as void so any host ref type accepts it
+  // No cleanup on purpose: React runs ref cleanups when it hides a subtree (Suspense, Activity, freezeOnBlur), and the binding
+  // must outlive that so the commit that shows the subtree again themes it. An unmount frees it with the view.
   const ref = useCallback<RefCallback<unknown>>(
     (node) => {
-      if (!node || !native) {
-        return undefined;
+      if (!node) {
+        return;
       }
 
-      // `theme` names the theme this render used, which only describes the props of a node's first attach. A re-attach (screen
-      // revealed after a freeze) finds props the commit hook may have re-themed meanwhile, so it passes none and the next commit
-      // applies the current theme.
+      if (!native) {
+        // the styles are no longer something the engine takes: React's props are right for this view from now on
+        if (ShadewindEngine.isRegistered(node)) {
+          ShadewindEngine.unregister(node);
+        }
+
+        return;
+      }
+
+      // `theme` names the theme this render used, which only describes the props of a node's first attach. A re-attach of a
+      // view whose styles changed finds props the commit hook may have re-themed meanwhile, so it passes none and the next
+      // commit applies the current theme.
       const first = typeof node === 'object' && !attachedNodes.has(node);
 
       if (typeof node === 'object') {
@@ -378,8 +402,6 @@ export function useThemed<T extends object = ViewStyle>(
       }
 
       ShadewindEngine.registerRaw(node, native, first ? theme : undefined);
-
-      return () => ShadewindEngine.unregister(node);
     },
     // `theme` is read at attach time only: it names the theme this render used; a later switch is applied by the hook
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -477,15 +499,12 @@ export function useThemedProps<T extends Record<string, unknown>>(
       ),
     [stable] // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // no cleanup: the binding outlives a Suspense/Activity hide (see useThemed)
   const ref = useCallback<RefCallback<unknown>>(
     (node) => {
-      if (!node) {
-        return undefined;
+      if (node) {
+        ShadewindEngine.registerRaw(node, native);
       }
-
-      ShadewindEngine.registerRaw(node, native);
-
-      return () => ShadewindEngine.unregister(node);
     },
     [native]
   );

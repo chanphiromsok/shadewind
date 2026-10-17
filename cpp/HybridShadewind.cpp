@@ -1,16 +1,10 @@
 #include "HybridShadewind.hpp"
 #include "css/ClassMerge.hpp"
-#include "css/ColorParser.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
 #include <react/renderer/components/root/RootShadowNode.h>
 #include <react/renderer/components/view/ViewProps.h>
-#include <react/renderer/core/PropsParserContext.h>
-#include <react/renderer/core/RawProps.h>
-#include <react/renderer/core/RawValue.h>
-#include <react/renderer/graphics/Color.h>
-#include <react/renderer/graphics/PlatformColorParser.h>
 #include <react/renderer/mounting/ShadowTree.h>
 #include <react/renderer/mounting/ShadowTreeRegistry.h>
 #include <react/renderer/uimanager/UIManager.h>
@@ -19,8 +13,8 @@
 #include <atomic>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <type_traits>
-#include <unordered_set>
 #include "ShadewindNative.hpp"
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
@@ -85,6 +79,17 @@ void runOnMain(std::function<void()> work) {
   });
 }
 
+void runInBackground(std::function<void()> work, qos_class_t qos) {
+  auto* task = new std::function<void()>(std::move(work));
+
+  dispatch_async_f(dispatch_get_global_queue(qos, 0), task, [](void* context) {
+    auto* function = static_cast<std::function<void()>*>(context);
+
+    (*function)();
+    delete function;
+  });
+}
+
 // Main-thread busy probe (iOS only): see below.
 std::atomic<bool> gBusyObserverInstalled{false};
 
@@ -103,21 +108,10 @@ void runLoopActivity(CFRunLoopObserverRef, CFRunLoopActivity activity, void*) {
     }
   }
 }
-
-void runInBackground(std::function<void()> work) {
-  auto* task = new std::function<void()>(std::move(work));
-
-  dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), task, [](void* context) {
-    auto* function = static_cast<std::function<void()>*>(context);
-
-    (*function)();
-    delete function;
-  });
-}
 #endif
 
 // Results of the last background / main-thread pass, read by the next setTheme call (they finish after it returned).
-std::atomic<double> gLastAsyncCommitMs{0};
+[[maybe_unused]] std::atomic<double> gLastAsyncCommitMs{0};
 // setTheme call -> main thread done mounting (the screen update), of the last switch
 std::atomic<double> gLastVisualMs{0};
 
@@ -126,100 +120,6 @@ using Clock = std::chrono::steady_clock;
 double ms(Clock::time_point from, Clock::time_point to) {
   return std::chrono::duration<double, std::milli>(to - from).count();
 }
-
-// How an update reaches the screen. The two hook strategies keep the theme in the commit hook (no nativeProps overlay);
-// the others merge into nativeProps_DEPRECATED first, so a later React clone of the node keeps the new values (baselines).
-enum class Strategy {
-  HookAsync, // default: typed props applied inside a commit hook, commit on a background thread (JS thread free right away)
-  Hook,   // the same with a synchronous commit
-  Stock,  // UIManager::updateShadowTree (whole-tree walk, linear de-duplication)
-  Fast,   // one ShadowTree::commit + cloneMultiple: only the touched nodes and their ancestors (internal: flushPending)
-  FastAsync, // same, but the UI thread mounts it later instead of the caller waiting for it
-  Direct, // update the native views right away, shadow tree is synced by the next React clone
-  Both,   // direct update now + single-pass commit to keep the shadow tree exact
-};
-
-bool parseStrategy(const std::string& name, Strategy& out) {
-  if (name == "hook") out = Strategy::Hook;
-  else if (name == "hookAsync") out = Strategy::HookAsync;
-  else if (name == "stock") out = Strategy::Stock;
-  else if (name == "fastAsync") out = Strategy::FastAsync;
-  else if (name == "direct") out = Strategy::Direct;
-  else if (name == "both") out = Strategy::Both;
-  else return false;
-
-  return true;
-}
-
-struct ApplyTimings {
-  double directMs = 0;
-  double commitMs = 0;
-};
-
-// One commit per surface, cloning only the families we touch (RN's animation backend does the same).
-void commitSingleSurfacePass(UIManager& ui, const std::vector<Update>& updates, bool mountSynchronously) {
-  std::unordered_map<SurfaceId, std::vector<const Update*>> bySurface;
-
-  for (const auto& update : updates) {
-    bySurface[update.family->getSurfaceId()].push_back(&update);
-  }
-
-  const auto contextContainer = ui.getContextContainer();
-
-  for (const auto& [surfaceId, group] : bySurface) {
-    std::unordered_set<std::shared_ptr<const ShadowNodeFamily>> families;
-    std::unordered_map<const ShadowNodeFamily*, const folly::dynamic*> propsByFamily;
-
-    families.reserve(group.size());
-    propsByFamily.reserve(group.size());
-
-    for (const auto* update : group) {
-      families.insert(update->family);
-      propsByFamily.emplace(update->family.get(), &update->props);
-    }
-
-    ui.getShadowTreeRegistry().visit(surfaceId, [&](const ShadowTree& shadowTree) {
-      shadowTree.commit(
-          [&](const RootShadowNode& oldRoot) {
-            return std::static_pointer_cast<RootShadowNode>(oldRoot.cloneMultiple(
-                families,
-                [&](const ShadowNode& node, const ShadowNodeFragment& fragment) {
-                  auto props = ShadowNodeFragment::propsPlaceholder();
-                  auto it = propsByFamily.find(&node.getFamily());
-
-                  if (it != propsByFamily.end()) {
-                    PropsParserContext context{surfaceId, *contextContainer};
-
-                    props = node.getComponentDescriptor().cloneProps(context, node.getProps(), RawProps(*it->second));
-                  }
-
-                  return node.clone({.props = props, .children = fragment.children, .state = node.getState()});
-                }));
-          },
-          {.mountSynchronously = mountSynchronously});
-    });
-  }
-}
-
-} // namespace
-
-// Builds the per-theme props of newly registered views on a background thread (see ThemeHook::prewarm).
-void HybridShadewind::schedulePrewarm() {
-#if defined(__APPLE__)
-  auto* task = new std::function<void()>([hook = _hook]() { hook->prewarm(); });
-
-  dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), task, [](void* context) {
-    auto* function = static_cast<std::function<void()>*>(context);
-
-    (*function)();
-    delete function;
-  });
-#else
-  _hook->prewarm();
-#endif
-}
-
-namespace {
 
 // An (almost) empty commit: the commit hook does the real work on it. Same trick as RN's animation backend.
 void commitTick(UIManager& ui, bool mountSynchronously = true) {
@@ -230,81 +130,35 @@ void commitTick(UIManager& ui, bool mountSynchronously = true) {
   });
 }
 
-std::shared_ptr<const TypedDelta> toTypedDelta(UIManager& ui, SurfaceId surfaceId, const folly::dynamic& props) {
-  auto delta = std::make_shared<TypedDelta>();
-  delta->raw = props;
+// The hook's last commit, as the JS timing object (`ThemeTimings` in src/internal.tsx).
+jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs, double totalMs) {
+  auto result = jsi::Object(rt);
 
-  const auto color = [&](const char* key) -> std::optional<SharedColor> {
-    if (const auto* value = props.get_ptr(key)) {
-      SharedColor parsed;
+  result.setProperty(rt, "views", static_cast<double>(stats.applied));
+  result.setProperty(rt, "scanMs", stats.scanMs);
+  result.setProperty(rt, "cloneMs", stats.cloneMs);
+  result.setProperty(rt, "propsMs", stats.propsMs);
+  result.setProperty(rt, "reused", static_cast<double>(stats.reused));
+  result.setProperty(rt, "visited", static_cast<double>(stats.visited));
+  result.setProperty(rt, "skipped", static_cast<double>(stats.skipped));
+  result.setProperty(rt, "hidden", static_cast<double>(stats.hidden));
+  result.setProperty(
+      rt,
+      "misses",
+      std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
+          "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
+          reasonsText());
+  result.setProperty(rt, "commitMs", commitMs);
+  result.setProperty(rt, "visualMs", gLastVisualMs.load());
+  result.setProperty(rt, "totalMs", totalMs);
 
-      fromRawValue(*ui.getContextContainer(), surfaceId, RawValue(*value), parsed);
-
-      return parsed;
-    }
-
-    return std::nullopt;
-  };
-
-  delta->background = color("backgroundColor");
-  delta->border = color("borderColor");
-  delta->text = color("color");
-
-  if (const auto* opacity = props.get_ptr("opacity"); opacity && opacity->isNumber()) {
-    delta->opacity = static_cast<Float>(opacity->asDouble());
-  }
-
-  return delta;
-}
-
-ApplyTimings applyUpdates(UIManager& ui, std::vector<Update>& updates, Strategy strategy) {
-  ApplyTimings timings;
-
-  for (const auto& update : updates) {
-    mergeNativeProps(*update.family, update.props);
-  }
-
-  if (updates.empty()) {
-    return timings;
-  }
-
-  if (strategy == Strategy::Direct || strategy == Strategy::Both) {
-    const auto t0 = Clock::now();
-
-    for (const auto& update : updates) {
-      ui.synchronouslyUpdateViewOnUIThread(update.tag, update.props);
-    }
-
-    timings.directMs = ms(t0, Clock::now());
-  }
-
-  if (strategy == Strategy::Stock) {
-    const auto t0 = Clock::now();
-    std::unordered_map<Tag, folly::dynamic> tagToProps;
-
-    tagToProps.reserve(updates.size());
-
-    for (const auto& update : updates) {
-      tagToProps.emplace(update.tag, update.props);
-    }
-
-    ui.updateShadowTree(std::move(tagToProps));
-    timings.commitMs = ms(t0, Clock::now());
-  } else if (strategy == Strategy::Fast || strategy == Strategy::FastAsync || strategy == Strategy::Both) {
-    const auto t0 = Clock::now();
-
-    commitSingleSurfacePass(ui, updates, strategy != Strategy::FastAsync);
-    timings.commitMs = ms(t0, Clock::now());
-  }
-
-  return timings;
+  return result;
 }
 
 } // namespace
 
 std::string HybridShadewind::getTheme() {
-  std::lock_guard<std::mutex> lock(_themeMutex);
-  return _theme;
+  return _engine.theme();
 }
 
 void HybridShadewind::loadHybridMethods() {
@@ -312,8 +166,8 @@ void HybridShadewind::loadHybridMethods() {
 
   registerHybrids(this, [](Prototype& prototype) {
     prototype.registerRawHybridMethod("register", 4, &HybridShadewind::registerNode);
+    prototype.registerRawHybridMethod("registerMany", 4, &HybridShadewind::registerMany);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
-    prototype.registerRawHybridMethod("refreshReactNodes", 1, &HybridShadewind::refreshReactNodes);
     prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
     prototype.registerRawHybridMethod("flushPending", 0, &HybridShadewind::flushPending);
     prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
@@ -333,124 +187,135 @@ HybridShadewind::State& HybridShadewind::sharedState() {
 }
 
 // The hook keeps the UIManager's ContextContainer alive, so its address cannot be reused by a later UIManager.
-bool HybridShadewind::hookRegisteredWith(UIManager& ui) {
-  return _state.registeredContainer.lock() == ui.getContextContainer();
+UIManager* HybridShadewind::attachedUIManager(jsi::Runtime& rt) {
+  auto binding = UIManagerBinding::getBinding(rt);
+
+  if (!binding) {
+    return nullptr;
+  }
+
+  auto& ui = binding->getUIManager();
+
+  if (_state.registeredContainer.lock() != ui.getContextContainer()) {
+    ui.registerCommitHook(_engine.hook());
+    _state.registeredContainer = ui.getContextContainer();
+  }
+
+  return &ui;
 }
 
-// Colour props arrive from JS as CSS strings (hex, rgb(), hsl(), oklch()) or as numbers already processed by processColor.
-// Strings are parsed here (css::parseColor) and replaced by the unsigned ARGB number React Native expects.
-static bool isColorKey(const std::string& key) {
-  return key == "colors" || (key.size() >= 5 && (key.compare(key.size() - 5, 5, "Color") == 0 || key.compare(key.size() - 5, 5, "color") == 0)) ||
-         key == "color";
-}
-
-static void normalizeColorStrings(folly::dynamic& props) {
-  if (!props.isObject()) {
+// Builds the props of every theme for newly registered views off the JS thread (see ThemeHook::prewarm). One pending run covers
+// every registration made before it starts.
+void HybridShadewind::schedulePrewarm() {
+  if (_state.prewarmScheduled.exchange(true)) {
     return;
   }
 
-  for (auto& item : props.items()) {
-    if (!item.first.isString() || !isColorKey(item.first.getString())) {
-      continue;
-    }
+  auto run = [hook = _engine.hookShared(), &scheduled = _state.prewarmScheduled]() {
+    scheduled = false; // before reading the queue: a registration from now on schedules the next run
+    hook->prewarm();
+  };
 
-    auto convert = [](folly::dynamic& value) {
-      if (value.isString()) {
-        if (const auto argb = css::parseColor(value.getString())) {
-          value = static_cast<int64_t>(*argb);
-        }
-      }
-    };
-
-    if (item.second.isArray()) {
-      for (auto& entry : item.second) {
-        convert(entry);
-      }
-    } else {
-      convert(item.second);
-    }
-  }
+#if defined(__APPLE__)
+  runInBackground(std::move(run), QOS_CLASS_UTILITY);
+#else
+  std::thread(std::move(run)).detach();
+#endif
 }
 
-// register(shadowNode, { light: { backgroundColor: 4294967295 }, dark: { ... } })
-// Props must already be in the raw format React Native sends to native (e.g. processed colors).
-jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
-  if (count < 2 || !args[1].isObject()) {
-    throw jsi::JSError(rt, "Shadewind.register(node, propsByTheme) expects 2 arguments");
-  }
-
-  auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, args[0]);
+// One registration: `props` is { light: { backgroundColor: 4294967295 }, dark: { ... } } (colours as processColor numbers or CSS
+// strings); `styleId` tags it so views of one style share the parsed form; `renderTheme` is the theme the view rendered with,
+// passed only on a node's first attach.
+void HybridShadewind::registerOne(
+    jsi::Runtime& rt,
+    UIManager& ui,
+    const jsi::Value& nodeValue,
+    const jsi::Value& propsValue,
+    const jsi::Value& styleIdValue,
+    const jsi::Value& renderThemeValue) {
+  auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, nodeValue);
 
   if (!node) {
-    throw jsi::JSError(rt, "Shadewind.register: first argument is not a ShadowNode");
+    throw jsi::JSError(rt, "Shadewind.register: not a ShadowNode");
   }
 
   const SurfaceId surface = node->getFamily().getSurfaceId();
-  const bool tagged = count >= 3 && args[2].isNumber();
-  const auto styleKey = std::make_pair(tagged ? static_cast<int64_t>(args[2].asNumber()) : int64_t{-1}, static_cast<int>(surface));
-  State::SharedStyle style;
-  bool cached = false;
+  const int64_t styleId = styleIdValue.isNumber() ? static_cast<int64_t>(styleIdValue.asNumber()) : -1;
+  auto style = _engine.cachedStyle(styleId, surface);
 
-  if (tagged) {
-    std::lock_guard<std::mutex> lock(_state.styleMutex);
-    const auto it = _state.styleCache.find(styleKey);
-
-    if (it != _state.styleCache.end()) {
-      style = it->second;
-      cached = true;
+  if (!style) {
+    if (!propsValue.isObject()) {
+      throw jsi::JSError(rt, "Shadewind.register: per-theme props must be an object");
     }
-  }
 
-  if (!cached) {
-    auto themes = args[1].asObject(rt);
+    auto themes = propsValue.asObject(rt);
     auto names = themes.getPropertyNames(rt);
-    auto propsByTheme = std::make_shared<PropsByTheme>();
+    PropsByTheme props;
 
     for (size_t i = 0; i < names.size(rt); i++) {
       auto name = names.getValueAtIndex(rt, i).asString(rt);
-      auto props = jsi::dynamicFromValue(rt, themes.getProperty(rt, name));
 
-      normalizeColorStrings(props);
-      propsByTheme->emplace(name.utf8(rt), std::move(props));
+      props.emplace_back(name.utf8(rt), jsi::dynamicFromValue(rt, themes.getProperty(rt, name)));
     }
 
-    style.props = std::move(propsByTheme);
+    style = _engine.buildStyle(styleId, surface, std::move(props), *ui.getContextContainer());
   }
 
-  if (auto binding = UIManagerBinding::getBinding(rt)) {
-    auto& ui = binding->getUIManager();
+  if (renderThemeValue.isString()) {
+    const auto renderTheme = renderThemeValue.asString(rt).utf8(rt);
 
-    if (!hookRegisteredWith(ui)) {
-      ui.registerCommitHook(*_hook);
-      _state.registeredContainer = ui.getContextContainer();
-    }
+    _engine.registerView(*node, std::move(style), &renderTheme);
+  } else {
+    _engine.registerView(*node, std::move(style), nullptr);
+  }
+}
 
-    if (!cached) {
-      for (const auto& [name, props] : *style.props) {
-        style.typed.emplace(name, toTypedDelta(ui, surface, props));
-      }
-    }
-
-    // cached only once the typed deltas exist (they need a UIManager), so a hit is always complete
-    if (tagged && !cached) {
-      std::lock_guard<std::mutex> lock(_state.styleMutex);
-      _state.styleCache.emplace(styleKey, style);
-    }
-
-    // JS names the theme it rendered the view with: equal to the current theme means the props React gave us are current
-    bool renderedWithCurrent = false;
-
-    if (count >= 4 && args[3].isString()) {
-      const auto renderTheme = args[3].asString(rt).utf8(rt);
-      std::lock_guard<std::mutex> lock(_themeMutex);
-
-      renderedWithCurrent = !_theme.empty() && renderTheme == _theme;
-    }
-
-    _hook->add(node->getFamilyShared(), style.typed, node->getProps(), node->getComponentName(), surface, renderedWithCurrent);
+// register(shadowNode, propsByTheme, styleId?, renderTheme?)
+jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (count < 2) {
+    throw jsi::JSError(rt, "Shadewind.register(node, propsByTheme, styleId?, renderTheme?) expects at least 2 arguments");
   }
 
-  _registry.add(node->getFamilyShared(), style.props);
+  if (auto* ui = attachedUIManager(rt)) {
+    const jsi::Value undefined;
+
+    registerOne(rt, *ui, args[0], args[1], count > 2 ? args[2] : undefined, count > 3 ? args[3] : undefined);
+    schedulePrewarm();
+  }
+
+  return jsi::Value::undefined();
+}
+
+// registerMany(nodes, propsByTheme[], styleIds[], renderThemes[]): the registrations of one React commit in one call, then the
+// one commit that themes views registered with another theme's props (a re-attach, a switch between render and attach).
+jsi::Value HybridShadewind::registerMany(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (count < 4 || !args[0].isObject() || !args[1].isObject() || !args[2].isObject() || !args[3].isObject()) {
+    throw jsi::JSError(rt, "Shadewind.registerMany(nodes, propsByTheme, styleIds, renderThemes) expects 4 arrays");
+  }
+
+  auto* ui = attachedUIManager(rt);
+
+  if (ui == nullptr) {
+    return jsi::Value::undefined();
+  }
+
+  auto nodes = args[0].asObject(rt).asArray(rt);
+  auto props = args[1].asObject(rt).asArray(rt);
+  auto ids = args[2].asObject(rt).asArray(rt);
+  auto themes = args[3].asObject(rt).asArray(rt);
+  const size_t length = nodes.size(rt);
+
+  for (size_t i = 0; i < length; i++) {
+    registerOne(rt, *ui, nodes.getValueAtIndex(rt, i), props.getValueAtIndex(rt, i), ids.getValueAtIndex(rt, i), themes.getValueAtIndex(rt, i));
+  }
+
+  if (length > 0) {
+    schedulePrewarm();
+  }
+
+  if (_engine.hook().hasStale()) {
+    commitTick(*ui);
+  }
 
   return jsi::Value::undefined();
 }
@@ -460,95 +325,20 @@ jsi::Value HybridShadewind::unregisterNode(jsi::Runtime& rt, const jsi::Value&, 
     return jsi::Value::undefined();
   }
 
-  auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, args[0]);
-
-  if (node) {
-    _registry.remove(&node->getFamily());
-    _hook->remove(&node->getFamily());
+  if (auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, args[0])) {
+    _engine.unregisterView(*node);
   }
 
   return jsi::Value::undefined();
 }
 
-// refreshReactNodes(nodes): repoint the JS wrappers React holds (fiber.stateNode.node) at the nodes of the committed tree.
-// React rebuilds its tree from those wrappers (un-hiding a frozen screen, re-attaching untouched children), so a wrapper
-// that still points at the pre-update node silently brings the old props back. Returns how many wrappers were updated.
-jsi::Value HybridShadewind::refreshReactNodes(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
-  auto binding = UIManagerBinding::getBinding(rt);
-
-  if (count < 1 || !args[0].isObject() || !binding) {
-    return jsi::Value(0);
-  }
-
-  auto& ui = binding->getUIManager();
-  auto array = args[0].asObject(rt).asArray(rt);
-  const size_t length = array.size(rt);
-  std::unordered_map<SurfaceId, std::shared_ptr<const RootShadowNode>> roots;
-  int refreshed = 0;
-
-  for (size_t i = 0; i < length; i++) {
-    auto value = array.getValueAtIndex(rt, i);
-
-    if (!value.isObject()) {
-      continue;
-    }
-
-    auto object = value.asObject(rt);
-
-    if (!object.hasNativeState<ShadowNodeWrapper>(rt)) {
-      continue;
-    }
-
-    auto wrapper = object.getNativeState<ShadowNodeWrapper>(rt);
-
-    if (!wrapper->shadowNode) {
-      continue;
-    }
-
-    const auto& family = wrapper->shadowNode->getFamily();
-    const auto surfaceId = family.getSurfaceId();
-    auto root = roots.find(surfaceId);
-
-    if (root == roots.end()) {
-      std::shared_ptr<const RootShadowNode> current;
-
-      ui.getShadowTreeRegistry().visit(surfaceId, [&](const ShadowTree& tree) {
-        current = tree.getCurrentRevision().rootShadowNode;
-      });
-
-      root = roots.emplace(surfaceId, std::move(current)).first;
-    }
-
-    if (!root->second) {
-      continue;
-    }
-
-    auto ancestors = family.getAncestors(*root->second);
-
-    if (ancestors.empty()) {
-      continue;
-    }
-
-    std::shared_ptr<const ShadowNode> node = root->second;
-
-    for (const auto& ancestor : ancestors) {
-      node = node->getChildren()[ancestor.second];
-    }
-
-    wrapper->shadowNode = std::move(node);
-    ++refreshed;
-  }
-
-  return jsi::Value(refreshed);
-}
-
 // Debug: for every registered view compare the background colour of
 //   - the node in the committed shadow tree,
-//   - our nativeProps_DEPRECATED overlay,
-//   - what the registry expects for the current theme.
-// Tells where a stale colour comes from after a freeze / navigation.
+//   - what UIKit holds for it (iOS),
+//   - what the current theme gives it.
+// Views inside a `display: none` subtree (a frozen screen) are counted apart: the hook themes them when they show.
 jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
-  std::string theme = getTheme();
+  const std::string theme = getTheme();
   auto binding = UIManagerBinding::getBinding(rt);
   auto report = jsi::Object(rt);
 
@@ -559,44 +349,38 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
   }
 
   auto& ui = binding->getUIManager();
-  auto updates = _registry.collect(theme);
+  const auto views = _engine.hook().registered();
 
-  const auto asColor = [](const folly::dynamic* value) -> int64_t {
-    if (value == nullptr || !value->isNumber()) {
-      return -1;
-    }
+  const auto expectedOf = [](const std::shared_ptr<const TypedDelta>& delta) -> int64_t {
+    const auto* value = delta ? delta->raw.get_ptr("backgroundColor") : nullptr;
 
-    return static_cast<int64_t>(static_cast<uint32_t>(value->asInt()));
+    return value != nullptr && value->isNumber() ? static_cast<int64_t>(static_cast<uint32_t>(value->asInt())) : -1;
   };
-
-  int inTree = 0, notInTree = 0, treeMatches = 0, nativeMatches = 0, layerMatches = 0;
-  std::string samples;
-  std::string stale;
 
   std::vector<Tag> tags;
 
-  tags.reserve(updates.size());
+  tags.reserve(views.size());
 
-  for (const auto& update : updates) {
-    tags.push_back(update.tag);
+  for (const auto& view : views) {
+    tags.push_back(view.family->getTag());
   }
 
   const auto uikit = readBackgroundsOnMain(tags);
-  std::unordered_map<Tag, size_t> uikitIndex;
+  int inTree = 0, notInTree = 0, hidden = 0, treeMatches = 0, nativeMatches = 0, layerMatches = 0;
+  std::string samples;
+  std::string stale;
 
-  for (size_t i = 0; i < uikit.size(); ++i) {
-    uikitIndex.emplace(uikit[i].tag, i);
-  }
-
-  for (const auto& update : updates) {
-    const int64_t expected = asColor(update.props.get_ptr("backgroundColor"));
+  for (size_t i = 0; i < views.size(); i++) {
+    const auto& view = views[i];
+    const int64_t expected = expectedOf(view.delta);
     int64_t treeBg = -1;
     bool found = false;
+    bool underHidden = false;
     const Props* treeProps = nullptr;
 
-    ui.getShadowTreeRegistry().visit(update.family->getSurfaceId(), [&](const ShadowTree& tree) {
+    ui.getShadowTreeRegistry().visit(view.family->getSurfaceId(), [&](const ShadowTree& tree) {
       auto root = tree.getCurrentRevision().rootShadowNode;
-      auto ancestors = update.family->getAncestors(*root);
+      auto ancestors = view.family->getAncestors(*root);
 
       if (ancestors.empty()) {
         return;
@@ -605,9 +389,11 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
       const ShadowNode* node = root.get();
 
       for (const auto& ancestor : ancestors) {
+        underHidden = underHidden || isHidden(*node);
         node = node->getChildren()[ancestor.second].get();
       }
 
+      underHidden = underHidden || isHidden(*node);
       found = true;
       treeProps = node->getProps().get();
 
@@ -616,56 +402,46 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
         const auto* viewProps = static_cast<const ViewProps*>(node->getProps().get());
 
         if (viewProps->backgroundColor) {
-          treeBg = colorBits(*viewProps->backgroundColor);
+          treeBg = colorBits(viewProps->backgroundColor);
         }
       }
     });
 
-    int64_t nativeBg = -1;
-
-    {
-#if SHADEWIND_HAS_NATIVE_PROPS_MUTEX
-      std::lock_guard<std::mutex> lock(update.family->nativePropsMutex);
-#endif
-      if (update.family->nativeProps_DEPRECATED && update.family->nativeProps_DEPRECATED->isObject()) {
-        nativeBg = asColor(update.family->nativeProps_DEPRECATED->get_ptr("backgroundColor"));
-      }
+    if (!found) {
+      ++notInTree;
+      continue;
     }
 
-    found ? ++inTree : ++notInTree;
+    ++inTree;
 
-    if (found && treeBg == expected) {
+    if (underHidden) {
+      ++hidden;
+      continue;
+    }
+
+    if (treeBg == expected) {
       ++treeMatches;
-    } else if (found && stale.size() < 700) {
-      stale += "tag " + std::to_string(update.tag) + " " + _hook->describe(update.family.get(), treeProps) + "; ";
+    } else if (stale.size() < 700) {
+      stale += "tag " + std::to_string(tags[i]) + " " + _engine.hook().describe(view.family.get(), treeProps) + "; ";
     }
 
-    // what UIKit holds (the UIView ivar and the painted layer); `overlay` is RN's nativeProps_DEPRECATED, which only the older
-    // strategies write, so it is NOT the screen
-    const auto& u = uikit[uikitIndex[update.tag]];
+    const auto& u = uikit[i];
 
-    if (u.viewColor == expected) {
-      ++nativeMatches;
-    }
+    nativeMatches += u.viewColor == expected ? 1 : 0;
+    layerMatches += u.layerColor == expected ? 1 : 0;
 
-    if (u.layerColor == expected) {
-      ++layerMatches;
-    }
-
-    (void)nativeBg;
-
-    if (samples.size() < 600 && (u.viewColor != expected || u.layerColor != expected || (found && treeBg != expected))) {
-      samples += "tag " + std::to_string(update.tag) + (found ? "" : " (not in tree)") + ": tree=" + std::to_string(treeBg) +
-          " view=" + std::to_string(u.viewColor) + " layer=" + std::to_string(u.layerColor) +
-          " overlay=" + std::to_string(nativeBg) + " expected=" + std::to_string(expected) + "; ";
+    if (samples.size() < 600 && (u.viewColor != expected || u.layerColor != expected || treeBg != expected)) {
+      samples += "tag " + std::to_string(tags[i]) + ": tree=" + std::to_string(treeBg) + " view=" + std::to_string(u.viewColor) +
+          " layer=" + std::to_string(u.layerColor) + " expected=" + std::to_string(expected) + "; ";
     }
   }
 
-  report.setProperty(rt, "registered", static_cast<double>(updates.size()));
+  report.setProperty(rt, "registered", static_cast<double>(views.size()));
   report.setProperty(rt, "inTree", inTree);
   report.setProperty(rt, "notInTree", notInTree);
+  report.setProperty(rt, "hidden", hidden);
   report.setProperty(rt, "treeMatchesExpected", treeMatches);
-  report.setProperty(rt, "nativePropsMatchExpected", nativeMatches); // now: UIView.backgroundColor == expected
+  report.setProperty(rt, "nativePropsMatchExpected", nativeMatches); // UIView.backgroundColor == expected (iOS)
   report.setProperty(rt, "layerMatchesExpected", layerMatches);
   report.setProperty(rt, "samples", jsi::String::createFromUtf8(rt, samples));
   report.setProperty(rt, "stale", jsi::String::createFromUtf8(rt, stale));
@@ -673,10 +449,16 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
   return report;
 }
 
-// Applies the current theme to views registered since the last flush (mounted late, or revealed after a freeze).
-// One commit for all of them. No-op until setTheme was called once.
-// Kept for API compatibility: it used to warm the pre-built nodes of the next switch. Those are gone (they were never used and
-// raced with layout), so there is nothing to warm.
+// Kept for API compatibility: registerMany flushes what this used to. A view registered alone (register) is themed here.
+jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
+  if (auto* ui = attachedUIManager(rt); ui != nullptr && _engine.hook().hasStale()) {
+    commitTick(*ui);
+  }
+
+  return jsi::Value::undefined();
+}
+
+// Kept for API compatibility: it used to warm the pre-built nodes of the next switch, which are gone.
 jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
   return jsi::Value::undefined();
 }
@@ -712,48 +494,6 @@ jsi::Value HybridShadewind::mainBusyMs(jsi::Runtime&, const jsi::Value&, const j
   return jsi::Value(busy);
 }
 
-jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
-  if (auto uiBinding = UIManagerBinding::getBinding(rt); uiBinding && hookRegisteredWith(uiBinding->getUIManager())) {
-    schedulePrewarm();
-  }
-
-  std::string theme;
-
-  {
-    std::lock_guard<std::mutex> lock(_themeMutex);
-    theme = _theme;
-  }
-
-  if (theme.empty()) {
-    _registry.collectPending(""); // drops the pending list
-    return jsi::Value::undefined();
-  }
-
-  auto binding = UIManagerBinding::getBinding(rt);
-
-  if (_hookMode) {
-    _registry.collectPending(theme); // not used in hook mode, just drop the list
-
-    if (binding && _hook->hasUnapplied()) {
-      commitTick(binding->getUIManager());
-    }
-
-    return jsi::Value::undefined();
-  }
-
-  auto updates = _registry.collectPending(theme);
-
-  if (!binding || updates.empty()) {
-    return jsi::Value::undefined();
-  }
-
-  applyUpdates(binding->getUIManager(), updates, Strategy::Fast);
-
-  return jsi::Value::undefined();
-}
-
-// setTheme(name, strategy?) pushes the registered props of `name` to every live view without touching React.
-// strategy: 'hookAsync' (default) | 'hook' | 'stock' | 'fast' | 'fastAsync' | 'direct' | 'both'
 static css::ClassMerge gClassMerge;
 
 // ---- class merge: zero-copy argument reads ------------------------------------------------------------------------------
@@ -878,7 +618,7 @@ jsi::Value HybridShadewind::mergeClasses(jsi::Runtime& rt, const jsi::Value&, co
   return mergeAscii(rt, args, count);
 }
 
-// configure(names): declares the themes in order. Returns { maxThemes, ok } (ok false: more names than slots).
+// configure(names): declares the themes in order (a new JS session). Returns { maxThemes, ok } (ok false: more names than slots).
 jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isObject() || !args[0].asObject(rt).isArray(rt)) {
     throw jsi::JSError(rt, "Shadewind.configure(names) expects an array of theme names");
@@ -891,7 +631,7 @@ jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const
     names.push_back(array.getValueAtIndex(rt, i).asString(rt).utf8(rt));
   }
 
-  const bool ok = _hook->declareThemes(names);
+  const bool ok = _engine.configure(names);
   jsi::Object result(rt);
 
   result.setProperty(rt, "maxThemes", ThemeHook::maxThemes());
@@ -900,148 +640,76 @@ jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const
   return result;
 }
 
+// setTheme(name, strategy?) applies `name` to every registered view without touching React.
+// strategy: 'hookAsync' (default; the commit runs off the JS thread on iOS) | 'hook' (the commit runs on the JS thread)
 jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isString()) {
     throw jsi::JSError(rt, "Shadewind.setTheme(name) expects a string");
   }
 
-  auto name = args[0].asString(rt).utf8(rt);
-  Strategy strategy = Strategy::HookAsync;
+  const auto name = args[0].asString(rt).utf8(rt);
+  bool async = true;
 
   if (count > 1 && args[1].isString()) {
     const auto requested = args[1].asString(rt).utf8(rt);
 
-    if (!parseStrategy(requested, strategy)) {
-      throw jsi::JSError(rt, "Shadewind.setTheme: unknown strategy '" + requested + "' (hook, hookAsync, stock, fastAsync, direct, both)");
+    if (requested != "hook" && requested != "hookAsync") {
+      throw jsi::JSError(rt, "Shadewind.setTheme: unknown strategy '" + requested + "' (hook, hookAsync)");
     }
+
+    async = requested == "hookAsync";
   }
 
-  {
-    std::lock_guard<std::mutex> lock(_themeMutex);
-    _theme = name;
-  }
+  auto* ui = attachedUIManager(rt);
 
-  auto binding = UIManagerBinding::getBinding(rt);
-
-  if (!binding) {
+  if (ui == nullptr) {
     throw jsi::JSError(rt, "Shadewind.setTheme: Fabric UIManager is not available (New Architecture only)");
-  }
-
-  _hookMode = strategy == Strategy::Hook || strategy == Strategy::HookAsync;
-
-  if (strategy == Strategy::HookAsync) {
-    const auto a0 = Clock::now();
-
-    _hook->setTheme(name);
-
-    // The commit (scan + clone + mount hand-off) runs off the JS thread. The hook keeps working for every commit.
-#if defined(__APPLE__)
-    // weak: a GCD thread must never drop the last reference of the binding (it owns a jsi::Function)
-    auto* task = new std::function<void()>([weakBinding = std::weak_ptr<UIManagerBinding>(binding), a0]() {
-      auto locked = weakBinding.lock();
-
-      if (!locked) {
-        return;
-      }
-
-      const auto c0 = Clock::now();
-
-      // `mountSynchronously = false` would queue a rendering update on the RuntimeScheduler, whose queues only the JS thread
-      // may touch. `true` is what React Native uses for commits made off the JS thread: on iOS the mount itself is still
-      // dispatched asynchronously to the main queue.
-      commitTick(locked->getUIManager(), true);
-      gLastAsyncCommitMs = ms(c0, Clock::now());
-
-      // The commit queued its mount on the main queue; this block queues behind it, so when it runs the views are mounted
-      // (the next vsync presents them). That is the time from the setTheme call to the screen update.
-      runOnMain([a0]() { gLastVisualMs = ms(a0, Clock::now()); });
-    });
-
-    dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), task, [](void* context) {
-      auto* function = static_cast<std::function<void()>*>(context);
-
-      (*function)();
-      delete function;
-    });
-#else
-    commitTick(binding->getUIManager());
-#endif
-
-    const auto a1 = Clock::now();
-    const auto stats = _hook->stats();
-    auto result = jsi::Object(rt);
-
-    result.setProperty(rt, "views", static_cast<double>(stats.applied));
-    result.setProperty(rt, "scanMs", stats.scanMs);   // from the previous run
-    result.setProperty(rt, "cloneMs", stats.cloneMs); // from the previous run
-    result.setProperty(rt, "propsMs", stats.propsMs);
-    result.setProperty(rt, "reused", static_cast<double>(stats.reused));
-    result.setProperty(
-        rt,
-        "misses",
-        std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
-            "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
-            reasonsText());
-    result.setProperty(rt, "collectMs", 0.0);
-    result.setProperty(rt, "directMs", 0.0);
-    result.setProperty(rt, "commitMs", gLastAsyncCommitMs.load()); // previous background commit
-    result.setProperty(rt, "visualMs", gLastVisualMs.load());      // previous setTheme -> mounted on the main thread
-    result.setProperty(rt, "totalMs", ms(a0, a1));                 // what the JS thread actually paid
-
-    return result;
-  }
-
-  if (_hookMode) {
-    const auto h0 = Clock::now();
-
-    _hook->setTheme(name);
-    commitTick(binding->getUIManager());
-
-    const auto h1 = Clock::now();
-    const auto stats = _hook->stats();
-    auto result = jsi::Object(rt);
-
-    result.setProperty(rt, "views", static_cast<double>(stats.applied));
-    result.setProperty(rt, "scanMs", stats.scanMs);
-    result.setProperty(rt, "cloneMs", stats.cloneMs);
-    result.setProperty(rt, "propsMs", stats.propsMs);
-    result.setProperty(rt, "reused", static_cast<double>(stats.reused));
-    result.setProperty(
-        rt,
-        "misses",
-        std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
-            "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
-            reasonsText());
-    result.setProperty(rt, "collectMs", 0.0);
-    result.setProperty(rt, "directMs", 0.0);
-    result.setProperty(rt, "commitMs", ms(h0, h1));
-    result.setProperty(rt, "totalMs", ms(h0, h1));
-
-    return result;
   }
 
   const auto t0 = Clock::now();
 
-  // `updates` pins every family until after the commit
-  auto updates = _registry.collect(name);
+  _engine.setTheme(name);
 
-  const auto t1 = Clock::now();
+#if defined(__APPLE__)
+  if (async) {
+    // The commit (walk + clone + mount hand-off) runs off the JS thread. The hook keeps working for every commit.
+    // weak: a GCD thread must never drop the last reference of the binding (it owns a jsi::Function)
+    std::weak_ptr<UIManagerBinding> weakBinding = UIManagerBinding::getBinding(rt);
 
-  auto applied = applyUpdates(binding->getUIManager(), updates, strategy);
+    runInBackground(
+        [weakBinding, t0]() {
+          auto locked = weakBinding.lock();
 
-  const auto t2 = Clock::now();
+          if (!locked) {
+            return;
+          }
 
-  auto timings = jsi::Object(rt);
-  timings.setProperty(rt, "views", static_cast<double>(updates.size()));
-  timings.setProperty(rt, "collectMs", ms(t0, t1));
-  timings.setProperty(rt, "directMs", applied.directMs);
-  timings.setProperty(rt, "commitMs", applied.commitMs);
-  timings.setProperty(rt, "scanMs", 0.0);
-  timings.setProperty(rt, "cloneMs", 0.0);
-  timings.setProperty(rt, "propsMs", 0.0);
-  timings.setProperty(rt, "totalMs", ms(t0, t2));
+          const auto c0 = Clock::now();
 
-  return timings;
+          // `mountSynchronously = false` would queue a rendering update on the RuntimeScheduler, whose queues only the JS thread
+          // may touch. `true` is what React Native uses for commits made off the JS thread: on iOS the mount itself is still
+          // dispatched asynchronously to the main queue.
+          commitTick(locked->getUIManager(), true);
+          gLastAsyncCommitMs = ms(c0, Clock::now());
+
+          // The commit queued its mount on the main queue; this block queues behind it, so when it runs the views are mounted
+          // (the next vsync presents them). That is the time from the setTheme call to the screen update.
+          runOnMain([t0]() { gLastVisualMs = ms(t0, Clock::now()); });
+        },
+        QOS_CLASS_USER_INTERACTIVE);
+
+    // the stats and the commit time are those of the previous run (this one finishes after the call returns)
+    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(t0, Clock::now()));
+  }
+#else
+  (void)async; // Android commits on the JS thread for now
+#endif
+
+  commitTick(*ui);
+
+  const double elapsed = ms(t0, Clock::now());
+
+  return timingsOf(rt, _engine.hook().stats(), elapsed, elapsed);
 }
 
 } // namespace margelo::nitro::shadewind

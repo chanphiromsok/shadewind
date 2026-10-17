@@ -46,22 +46,19 @@ const uniwindContext = () =>
     }
   ).UniwindContext);
 
-// one ref per themed-style object, shared by every view that uses it. A React 19 ref callback may return its cleanup, so there is
-// no per-view holder (and no ref(null) call that would need to know which node it is for)
-const refs = new WeakMap<object, (node: unknown) => (() => void) | undefined>();
+// one ref per themed-style object, shared by every view that uses it. No cleanup: the binding outlives a Suspense/Activity hide
+// (the commit hook themes the view when it shows) and goes away with the view; other styles register over it, and a className
+// the engine cannot take renders the adapter instead (another element type, so another view)
+const refs = new WeakMap<object, (node: unknown) => void>();
 
 const sharedRef = (themed: object) => {
   let ref = refs.get(themed);
 
   if (!ref) {
     ref = (node) => {
-      if (!node) {
-        return undefined;
+      if (node) {
+        engine().register(node, themed as never, renderThemeFor(node, themed));
       }
-
-      engine().register(node, themed as never, renderThemeFor(node, themed));
-
-      return () => engine().unregister(node);
     };
     refs.set(themed, ref);
   }

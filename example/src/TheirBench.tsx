@@ -139,7 +139,7 @@ export default function TheirBench({
         total: timings.totalMs,
         views: timings.views,
         reused: timings.reused,
-        precloned: timings.precloned,
+        visited: timings.visited,
         misses: timings.misses,
       });
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import { processColor, type ColorValue } from 'react-native';
 import { NitroModules } from 'react-native-nitro-modules';
 import type { Shadewind } from './Shadewind.nitro';
@@ -11,6 +11,12 @@ type RawMethods = {
     styleId?: number,
     renderTheme?: string
   ): void;
+  registerMany(
+    shadowNodes: unknown[],
+    propsByTheme: object[],
+    styleIds: number[],
+    renderThemes: Array<string | undefined>
+  ): void;
   unregister(shadowNode: unknown): void;
   configure(names: string[]): { maxThemes: number; ok: boolean };
   loadClassTable(text: string): boolean;
@@ -21,7 +27,6 @@ type RawMethods = {
   resetMainBusy(): void;
   mainBusyMs(): number;
   inspect(): InspectReport;
-  refreshReactNodes(nodes: unknown[]): number;
 };
 
 // Created on first use, not at import: a styling library that imports the engine from a component module can be evaluated before
@@ -39,6 +44,8 @@ export type InspectReport = {
   registered?: number;
   inTree?: number;
   notInTree?: number;
+  /** Registered views inside a `display: none` subtree (a frozen screen): themed when they show, not compared. */
+  hidden?: number;
   treeMatchesExpected?: number;
   /** iOS: registered views whose UIView.backgroundColor equals the expected theme colour. */
   nativePropsMatchExpected?: number;
@@ -49,43 +56,42 @@ export type InspectReport = {
   stale?: string;
 };
 
-/** Native-side breakdown of one setTheme call, in milliseconds. */
+/** Native-side breakdown of the engine's last commit, in milliseconds. */
 export type ThemeTimings = {
+  /** Views cloned with their theme's props. */
   views: number;
-  /** 'hook' strategy: time spent finding views that need an update inside the commit hook. */
+  /** A commit that changed nothing: the walk. */
   scanMs: number;
-  /** 'hook' strategy: time spent building typed props and cloning the nodes. */
+  /** A commit that changed something: walk, props and clones. */
   cloneMs: number;
-  /** 'hook' strategy: part of cloneMs spent building the typed props. */
+  /** Part of cloneMs spent building the typed props. */
   propsMs: number;
-  /** 'hook' strategies: views whose props came from the per-view cache instead of being rebuilt. */
+  /** Views whose props came from the per-view cache instead of being rebuilt. */
   reused?: number;
-  /** 'hook' strategies: views whose node was taken from the pre-built buffer (no clone on the critical path). */
-  precloned?: number;
-  /** 'hook' strategies: why nodes missed the pre-built buffer, as notOurs/noBuffer/source/props/children counts. */
+  /** Nodes the walk visited. */
+  visited?: number;
+  /** Subtrees skipped because the previous commit had already themed them. */
+  skipped?: number;
+  /** `display: none` subtrees skipped (frozen screens, themed when they show). */
+  hidden?: number;
+  /** Why props were rebuilt and how text was recoloured (debug). */
   misses?: string;
   /** 'hookAsync': time from the previous setTheme call until the main thread finished mounting it. */
   visualMs?: number;
-  collectMs: number;
-  directMs: number;
+  /** 'hook': the commit; 'hookAsync': the previous background commit. */
   commitMs: number;
+  /** What the JS thread paid inside the call. */
   totalMs: number;
 };
 
 /**
  * How a theme change reaches the screen. Unknown names throw.
- * - 'hookAsync' (default): typed props are applied inside a commit hook (so every commit, React's too, keeps the theme) and the
- *   commit runs on a background thread: the JS thread is free right away (about 0.05 ms for 2000 views), the screen updates a few
- *   ms later. On Android the commit is currently synchronous.
- * - 'hook': the same, but the commit runs synchronously on the JS thread (about 4-8 ms for 2000 views).
- * - 'stock': React Native's UIManager::updateShadowTree (whole-tree walk). Benchmark baseline.
- * - 'fastAsync': one single-pass shadow-tree commit that clones only the touched nodes; the UI thread mounts it later.
- * - 'direct': update the native views immediately, the shadow tree catches up on the next React clone. Benchmark baseline.
- * - 'both': direct update now plus a single-pass commit. Benchmark baseline.
- * The last four are measurement baselines and are not supported for production use.
+ * - 'hookAsync' (default): the commit runs on a background thread, the JS thread is free right away. On Android it is synchronous
+ *   for now.
+ * - 'hook': the commit runs synchronously on the JS thread.
+ * Either way the theme is applied inside a commit hook, so every later commit (React's too) keeps it.
  */
-export type ThemeStrategy =
-  'hook' | 'hookAsync' | 'stock' | 'fastAsync' | 'direct' | 'both';
+export type ThemeStrategy = 'hook' | 'hookAsync';
 
 /** Style subset supported in v0: visual-only props that don't need a Yoga layout pass. */
 export type ThemedStyle = {
@@ -159,6 +165,8 @@ export function toNativeProps(style: ThemedStyle): Record<string, unknown> {
 }
 
 // Private React Native API (same one RN's own DOM APIs use). Isolated here because it can change.
+let nodeFromHandle: ((handle: unknown) => unknown) | undefined;
+
 const getShadowNode = (ref: unknown): unknown => {
   const handle = (ref as { __internalInstanceHandle?: unknown } | null)
     ?.__internalInstanceHandle;
@@ -167,63 +175,43 @@ const getShadowNode = (ref: unknown): unknown => {
     return null;
   }
 
-  const {
-    getNodeFromInternalInstanceHandle,
-  } = require('react-native/Libraries/ReactNative/RendererProxy');
-
-  return getNodeFromInternalInstanceHandle(handle);
-};
-
-// Views we manage. Used to find React's own handles to their nodes (fiber.stateNode.node).
-const registered = new Set<unknown>();
-
-type Fiber = {
-  tag: number;
-  return: Fiber | null;
-  alternate: Fiber | null;
-  stateNode?: { node?: unknown };
-};
-
-const HOST_COMPONENT_TAG = 5;
-
-// React rebuilds its tree from these handles, so after a native update they must point at the committed nodes,
-// for the views we changed and for every host ancestor (their child lists come from React's handles too).
-// Private React internals: isolated here, can change between React versions.
-const refreshReact = () => {
-  const nodes: unknown[] = [];
-  const seenNodes = new Set<unknown>();
-  const seenFibers = new Set<Fiber>();
-
-  registered.forEach((ref) => {
-    let fiber =
-      (ref as { __internalInstanceHandle?: Fiber }).__internalInstanceHandle ??
-      null;
-
-    while (fiber && !seenFibers.has(fiber)) {
-      seenFibers.add(fiber);
-
-      if (fiber.tag === HOST_COMPONENT_TAG) {
-        for (const candidate of [fiber, fiber.alternate]) {
-          const node = candidate?.stateNode?.node;
-
-          if (node && !seenNodes.has(node)) {
-            seenNodes.add(node);
-            nodes.push(node);
-          }
-        }
-      }
-
-      fiber = fiber.return;
+  nodeFromHandle ??= (
+    require('react-native/Libraries/ReactNative/RendererProxy') as {
+      getNodeFromInternalInstanceHandle: (handle: unknown) => unknown;
     }
-  });
+  ).getNodeFromInternalInstanceHandle;
 
-  if (nodes.length > 0) {
-    getNative().refreshReactNodes(nodes);
-  }
+  return nodeFromHandle(handle);
 };
 
-// Only the older strategies rely on React's handles being repointed; 'hook' fixes the tree inside the commit.
-let needsReactRefresh = false;
+// The native styles each mounted view (its ref, the public instance) is registered with. React detaches and re-attaches refs when
+// it hides and reveals a subtree (Suspense, Activity, freezeOnBlur); the registration stays meanwhile (the commit hook themes the
+// subtree when it shows), so a re-attach with the same styles costs nothing. A WeakMap: an unmounted view is simply collected, and
+// its native entry goes with its shadow node family.
+const registeredWith = new WeakMap<object, object>();
+
+// Registrations since the last flush, sent in one native call after React's commit.
+const pendingNodes: unknown[] = [];
+const pendingProps: object[] = [];
+const pendingIds: number[] = [];
+const pendingThemes: Array<string | undefined> = [];
+
+const flushRegistrations = () => {
+  if (pendingNodes.length === 0) {
+    return;
+  }
+
+  getNative().registerMany(
+    pendingNodes,
+    pendingProps,
+    pendingIds,
+    pendingThemes
+  );
+  pendingNodes.length = 0;
+  pendingProps.length = 0;
+  pendingIds.length = 0;
+  pendingThemes.length = 0;
+};
 
 let flushScheduled = false;
 
@@ -236,11 +224,7 @@ const scheduleFlush = () => {
   flushScheduled = true;
   Promise.resolve().then(() => {
     flushScheduled = false;
-    getNative().flushPending();
-
-    if (needsReactRefresh) {
-      refreshReact();
-    }
+    flushRegistrations();
   });
 };
 
@@ -262,6 +246,37 @@ const styleIdOf = (native: object): number => {
   return id;
 };
 
+const registerNative = (
+  ref: unknown,
+  native: Record<string, Record<string, unknown>>,
+  renderTheme: string | undefined
+): boolean => {
+  const key = typeof ref === 'object' && ref !== null ? ref : null;
+
+  if (key !== null && registeredWith.get(key) === native) {
+    return true;
+  }
+
+  const node = getShadowNode(ref);
+
+  if (!node) {
+    return false;
+  }
+
+  pendingNodes.push(node);
+  pendingProps.push(native);
+  pendingIds.push(styleIdOf(native));
+  pendingThemes.push(renderTheme);
+
+  if (key !== null) {
+    registeredWith.set(key, native);
+  }
+
+  scheduleFlush();
+
+  return true;
+};
+
 export const ShadewindEngine = {
   /** Experimental: native tailwind-merge compatible class merge (see docs/ARCHITECTURE.md section 13). */
   loadClassTable(text: string): boolean {
@@ -274,13 +289,12 @@ export const ShadewindEngine = {
   configure(names: string[]): { maxThemes: number; ok: boolean } {
     return getNative().configure(names);
   },
+  /**
+   * Binds a mounted view (its ref) to per-theme styles. `renderTheme`: the theme its props were rendered with, known only on the
+   * view's first attach. Registrations are sent to native after the commit, all at once. Returns false when the ref is not a
+   * Fabric host view.
+   */
   register(ref: unknown, styles: ThemedStyles, renderTheme?: string) {
-    const node = getShadowNode(ref);
-
-    if (!node) {
-      return false;
-    }
-
     // the same `styles` object is registered by every view of one className: convert it once
     let native = nativeByStyles.get(styles);
 
@@ -294,12 +308,7 @@ export const ShadewindEngine = {
       nativeByStyles.set(styles, native);
     }
 
-    getNative().register(node, native, styleIdOf(native), renderTheme);
-
-    registered.add(ref);
-    scheduleFlush();
-
-    return true;
+    return registerNative(ref, native, renderTheme);
   },
   /** Registers with props already converted by toNativeProps (used by the public useThemed). */
   registerRaw(
@@ -307,22 +316,25 @@ export const ShadewindEngine = {
     native: Record<string, Record<string, unknown>>,
     renderTheme?: string
   ) {
-    const node = getShadowNode(ref);
-
-    if (!node) {
-      return false;
+    return registerNative(ref, native, renderTheme);
+  },
+  /** Whether `ref` is bound (registered or about to be). */
+  isRegistered(ref: unknown): boolean {
+    return typeof ref === 'object' && ref !== null && registeredWith.has(ref);
+  },
+  /**
+   * Unbinds a view that stays mounted (a pressed Pressable, styles the engine cannot take any more): React's props are right for
+   * it from now on. An unmount needs no call.
+   */
+  unregister(ref: unknown) {
+    if (typeof ref === 'object' && ref !== null) {
+      registeredWith.delete(ref);
     }
 
-    getNative().register(node, native, styleIdOf(native), renderTheme);
-    registered.add(ref);
-    scheduleFlush();
+    // keep the native order: a queued registration of this view goes first
+    flushRegistrations();
 
-    return true;
-  },
-  unregister(ref: unknown) {
     const node = getShadowNode(ref);
-
-    registered.delete(ref);
 
     if (node) {
       getNative().unregister(node);
@@ -330,16 +342,9 @@ export const ShadewindEngine = {
   },
   /** Applies a theme to every registered view without rendering any React component. */
   setTheme(name: string, strategy: ThemeStrategy = 'hookAsync'): ThemeTimings {
-    const timings = getNative().setTheme(name, strategy);
+    flushRegistrations();
 
-    // the hook family fixes the tree inside the commit; only the older strategies need React's handles repointed
-    needsReactRefresh = strategy !== 'hook' && strategy !== 'hookAsync';
-
-    if (needsReactRefresh) {
-      refreshReact();
-    }
-
-    return timings;
+    return getNative().setTheme(name, strategy);
   },
   /** Measurement: clears the longest main-thread busy period (iOS only; starts the run loop observer on first call). */
   resetMainBusy(): void {
@@ -349,15 +354,14 @@ export const ShadewindEngine = {
   mainBusyMs(): number {
     return getNative().mainBusyMs();
   },
-  /**
-   * Optional hint that a theme switch is probably coming (call it from `onPressIn` of a theme toggle). It reads, off the
-   * JS thread, the memory the switch will use, so a switch after a long idle does not pay for cold caches. Changes nothing.
-   */
+  /** Kept for compatibility; does nothing. */
   prepare(): void {
     getNative().prepare();
   },
-  /** Debug only. Compares committed tree, nativeProps overlay and expected theme colours. */
+  /** Debug only. Compares the committed tree, UIKit and the expected theme colours. */
   inspect(): InspectReport {
+    flushRegistrations();
+
     return getNative().inspect();
   },
   getTheme(): string {
@@ -366,21 +370,17 @@ export const ShadewindEngine = {
 };
 
 /**
- * Callback ref that registers a view's per-theme style on mount and unregisters on unmount.
- * Keep `styles` referentially stable (module constant or useMemo), or the view re-registers every render.
+ * Callback ref that registers a view's per-theme style when it attaches. The registration outlives a Suspense/Activity hide (the
+ * commit hook themes the view when it shows again) and goes away with the view.
+ * Keep `styles` referentially stable (module constant or useMemo).
  */
 export function useThemedRef(styles: ThemedStyles) {
-  const current = useRef<unknown>(null);
   const stable = useMemo(() => styles, [styles]);
 
   return useCallback(
     (ref: unknown) => {
       if (ref) {
-        current.current = ref;
         ShadewindEngine.register(ref, stable);
-      } else if (current.current) {
-        ShadewindEngine.unregister(current.current);
-        current.current = null;
       }
     },
     [stable]
