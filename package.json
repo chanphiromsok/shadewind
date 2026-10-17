@@ -39,6 +39,7 @@
     "cpp",
     "nitrogen",
     "metro.cjs",
+    "metro-babel-transformer.cjs",
     "metro.d.ts",
     "bin",
     "nitro.json",

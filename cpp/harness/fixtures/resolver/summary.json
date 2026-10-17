@@ -6,13 +6,34 @@
     "dark",
     "ocean"
   ],
-  "stylesheetClasses": 256,
-  "tableClasses": 231,
+  "stylesheetClasses": 259,
+  "tableClasses": 234,
   "fallbackClasses": 25,
-  "appLiterals": 270,
-  "classNames": 1514,
-  "fallbackClassNames": 259,
-  "cases": 136260,
-  "resolvableCases": 112950,
-  "tableBuildMsNode": 4.37
+  "appLiterals": 274,
+  "classNames": 1531,
+  "fallbackClassNames": 254,
+  "cases": 137790,
+  "resolvableCases": 114930,
+  "tableBuildMsNode": 5.53,
+  "prebuilt": {
+    "classes": 232,
+    "onlyOnDevice": [
+      "border-hairline",
+      "w-ratio"
+    ],
+    "meta": {
+      "uniwind": "1.12.0",
+      "platform": "ios",
+      "themes": [
+        "light",
+        "dark",
+        "ocean"
+      ],
+      "fingerprint": "6ab98cf9cd58a74febc3d5c27cf86f7e985e9bc0776597339c7ff8170b366e12",
+      "fallback": 27,
+      "deviceDependent": 2
+    },
+    "bytes": 55896,
+    "androidBytes": 55903
+  }
 }

@@ -1,5 +1,9 @@
 import type { ThemedStyles } from '../internal';
-import { installNativeResolver, type ResolverStore } from './nativeResolver';
+import {
+  installNativeResolver,
+  offerPrebuiltTable,
+  type ResolverStore,
+} from './nativeResolver';
 
 // The only file that reads Uniwind's runtime. Everything is loaded lazily and inside try/catch: the module that imports this is
 // evaluated while React Native is still setting up (Uniwind's component barrel), and a missing or unsupported Uniwind must
@@ -29,6 +33,7 @@ type Internals = {
   };
   UniwindListener: {
     subscribe: (listener: () => void, dependencies: number[]) => () => void;
+    getSnapshot?: (dependencies: number[]) => number;
   };
   StyleDependency: { Theme: number; Variables: number };
 };
@@ -141,6 +146,66 @@ export function installUniwind(): InstallResult {
   }
 
   return result;
+}
+
+/** What shadewind/metro writes next to a prebuilt table (metro-babel-transformer.cjs). */
+export type PrebuiltTableMeta = {
+  uniwind: string;
+  platform: string;
+  themes: string[];
+  fingerprint: string | null;
+  fallback: number;
+  deviceDependent: number;
+};
+
+/**
+ * Called by the code shadewind/metro appends to Uniwind's CSS module, right after Uniwind loaded the stylesheet: the class table
+ * built at bundle time. It is kept with the store's stylesheet, variables and variables revision of this moment, and used at install
+ * only if they are still the store's (and the platform and Uniwind version are the ones it was built for). Never throws.
+ */
+export function registerPrebuiltStyleTable(
+  json: string,
+  meta: PrebuiltTableMeta
+): void {
+  try {
+    const { Platform } = require('react-native') as {
+      Platform: { OS: string; isTV?: boolean };
+    };
+    const version = String(
+      (require('uniwind/package.json') as { version?: string }).version
+    );
+
+    // Uniwind picks TV variables on the device: a table built for the phone platform does not apply
+    if (
+      typeof json !== 'string' ||
+      Platform.OS !== meta.platform ||
+      Platform.isTV ||
+      version !== meta.uniwind ||
+      !TESTED.some((minor) => version.startsWith(`${minor}.`))
+    ) {
+      return;
+    }
+
+    const { UniwindStore } = require('uniwind-internal/core/native');
+    const { UniwindListener } = require('uniwind-internal/core/listener');
+    const { StyleDependency } = require('uniwind-internal/common/consts');
+    const store = UniwindStore as unknown as ResolverStore;
+
+    offerPrebuiltTable({
+      json,
+      fallback: meta.fallback,
+      deviceDependent: meta.deviceDependent,
+      stylesheet: store.stylesheet,
+      vars: store.vars,
+      variablesRevision: (
+        UniwindListener as Internals['UniwindListener']
+      ).getSnapshot?.([StyleDependency.Variables]),
+    });
+  } catch (error) {
+    if (__DEV__) {
+      console.warn('[shadewind] prebuilt class table not used', error);
+    }
+  }
 }
 
 export type { ThemedStyles };

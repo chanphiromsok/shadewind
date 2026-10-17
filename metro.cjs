@@ -8,11 +8,17 @@
 //   module.exports = withShadewind(withUniwindConfig(config, { cssEntryFile: './global.css' }));
 //
 // It must be the OUTERMOST wrapper (after withUniwindConfig) so it sees the files Uniwind's resolver picked.
+//
+// It also builds the native class resolver's table while Metro bundles (metro-babel-transformer.cjs, wrapped around the
+// project's own Babel transformer), so the first screen resolves natively. `withShadewind(config, { prebuildStyleTable: false })`
+// leaves the Babel transformer alone: the app then builds the table on the device when idle.
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const PACKAGE_ROOT = fs.realpathSync(__dirname);
+const BABEL_TRANSFORMER = path.join(PACKAGE_ROOT, 'metro-babel-transformer.cjs');
+const UPSTREAM_ENV = 'SHADEWIND_UPSTREAM_BABEL_TRANSFORMER';
 const PREFIX = 'uniwind-internal/';
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'];
 // files of Uniwind replaced by the engine-aware versions: resolved file path -> `shadewind/uniwind/<name>`
@@ -34,10 +40,20 @@ const realOrSelf = (file) => {
 /**
  * @template {object} C
  * @param {C} config Metro config, already wrapped with withUniwindConfig
+ * @param {{ prebuildStyleTable?: boolean }} [options]
  * @returns {C}
  */
-function withShadewind(config) {
+function withShadewind(config, options = {}) {
   const resolver = config.resolver ?? {};
+  const transformer = config.transformer ?? {};
+  let babelTransformerPath = transformer.babelTransformerPath;
+
+  if (options.prebuildStyleTable !== false && babelTransformerPath && realOrSelf(babelTransformerPath) !== BABEL_TRANSFORMER) {
+    // Metro's transform workers are started after the config is loaded and inherit the environment
+    process.env[UPSTREAM_ENV] = babelTransformerPath;
+    babelTransformerPath = BABEL_TRANSFORMER;
+  }
+
   const previous = resolver.resolveRequest;
   const projectRoot = config.projectRoot ?? process.cwd();
   const pinnedOrigin = path.join(projectRoot, 'package.json');
@@ -60,6 +76,7 @@ function withShadewind(config) {
 
   return {
     ...config,
+    ...(babelTransformerPath !== transformer.babelTransformerPath && { transformer: { ...transformer, babelTransformerPath } }),
     resolver: {
       ...resolver,
       resolveRequest: (context, moduleName, platform) => {

@@ -4,16 +4,22 @@
 //    transformer does for iOS; the copy of the app gets a third theme and a source file with the variants the app does not use
 //    (responsive, theme, focus / disabled, important, relative line heights, classes the table cannot hold),
 // 2. loads the result into Uniwind's own UniwindStore,
-// 3. builds the native table with src/uniwind/styleTable.ts (the code the app runs),
+// 3. builds the native table with src/uniwind/styleTable.ts (the code the app runs), twice: as the device builds it (from Uniwind's
+//    store), and as shadewind/metro builds it at bundle time (the app's Metro config, getDefaultConfig -> withUniwindConfig ->
+//    withShadewind, and Uniwind's own Metro transformer on the CSS entry, with React Native's Babel transformer behind ours): the
+//    two must be equal except for the classes that read the pixel ratio or hairline width (unknown at bundle time),
 // 4. resolves every className literal (the app's, the extra file's), every ordered pair of classes that set the same property
 //    (precedence) and random combinations with Uniwind's own resolveStyles, for every theme, interaction state and five screen
 //    widths (Tailwind's breakpoints exactly, and below them).
 //
-// Run from a directory whose node_modules has uniwind@1.12.0, tailwindcss@4.3.3 and esbuild:
+// Run from a directory whose node_modules has uniwind@1.12.0, tailwindcss@4.3.3, esbuild, metro@0.84.6 (with metro-config and
+// metro-transform-worker) and @react-native/metro-config@0.86.2, after building the package (bob build: the Metro transformer
+// loads lib/module):
 //   node <repo>/cpp/harness/fixtures/resolver/generate.mjs <repo> [app dir, default example-real]
-// Writes table.json, cases.jsonl and summary.json next to this script.
+// Writes table.json (the device's table), table.prebuilt.json (the bundle's), cases.jsonl and summary.json next to this script.
 //
-// cases.jsonl: a header line {themes, widths, states}, then one line per className: {c, fb} and, when it does not fall back,
+// cases.jsonl: a header line {themes, widths, states}, then one line per className: {c, fb, pfb (falls back with the prebuilt
+// table)} and, when it does not fall back,
 // `u` (the distinct results) and `i` (for each theme, width and state in header order, the index of its result in `u`). A result
 // is {styles: [[key, value]] in key order, deps, sum, data}; undefined, NaN and ±Infinity values are {"$u":1}, {"$nan":1} and
 // {"$inf":±1}, as in the table.
@@ -56,10 +62,21 @@ if (!dark) {
   throw new Error('global.css has no `@variant dark { ... }` block to copy for the extra theme');
 }
 
+// and two utilities whose values read device-fixed runtime fields (Uniwind's hairlineWidth() and pixelRatio() CSS functions)
 fs.writeFileSync(
   path.join(work, 'global.css'),
-  css.replace(dark[0], `${dark[0]}\n\n    ${dark[0].replace('@variant dark', '@variant ocean').replace(/--color-brand:[^;]*;/, '--color-brand: #0077be;')}`)
+  `${css.replace(dark[0], `${dark[0]}\n\n    ${dark[0].replace('@variant dark', '@variant ocean').replace(/--color-brand:[^;]*;/, '--color-brand: #0077be;')}`)}
+@utility border-hairline {
+  border-width: hairlineWidth();
+}
+
+@utility w-ratio {
+  width: pixelRatio(2);
+}
+`
 );
+
+const DEVICE_CLASSES = ['border-hairline', 'w-ratio'];
 
 // classNames Tailwind must compile (it scans this file) and the cases resolve, beyond what the app uses
 const EXTRA = [
@@ -103,6 +120,8 @@ const EXTRA = [
   'text-shadow-sm', 'p-2 shadow-md',
   // platforms
   'ios:p-2 android:p-3', 'native:m-1 web:m-2',
+  // device-fixed runtime values: in the device's table, not in the bundle's
+  'border-hairline', 'w-ratio', 'border-hairline border-brand', 'p-2 w-ratio',
 ];
 
 fs.writeFileSync(path.join(work, 'src', '__resolver_extra.ts'), `export const EXTRA = ${JSON.stringify(EXTRA, null, 2)};\n`);
@@ -179,6 +198,103 @@ const table = buildStyleTable({
 const buildMs = performance.now() - t0;
 const parsed = JSON.parse(table.json);
 const unsupported = new Set([...parsed.fallback, ...parsed.reserved]);
+
+// ---- the bundle's table: Uniwind's Metro transformer on the CSS entry, in the app's Metro config with withShadewind
+
+const libTable = path.join(repo, 'lib', 'module', 'uniwind', 'styleTable.js');
+
+if (!fs.existsSync(libTable) || fs.statSync(libTable).mtimeMs < fs.statSync(path.join(repo, 'src/uniwind/styleTable.ts')).mtimeMs) {
+  throw new Error('lib/module is older than src: build the package first (bob build)');
+}
+
+const fromHere = createRequire(path.join(cwd, 'package.json'));
+const { getDefaultConfig } = fromHere('@react-native/metro-config');
+const { withUniwindConfig } = fromHere('uniwind/metro');
+const { withShadewind } = createRequire(path.join(repo, 'package.json'))('./metro.cjs');
+
+const bundleTable = async (platform) => {
+  const metroConfig = withShadewind(
+    withUniwindConfig(getDefaultConfig(work), { cssEntryFile: './global.css', extraThemes: ['ocean'] })
+  );
+  const transformer = fromHere(metroConfig.transformerPath);
+  const result = await transformer.transform(
+    metroConfig.transformer,
+    work,
+    'global.css',
+    fs.readFileSync(path.join(work, 'global.css')),
+    {
+      dev: false,
+      hot: false,
+      minify: false,
+      platform,
+      type: 'module',
+      unstable_transformProfile: 'hermes-stable',
+      customTransformOptions: {},
+      experimentalImportSupport: false,
+      inlineRequires: false,
+      inlinePlatform: true,
+    }
+  );
+  const names = result.dependencies.map((dependency) => dependency.name);
+
+  if (!names.includes('shadewind/uniwind')) {
+    throw new Error(`${platform}: the CSS module does not depend on shadewind/uniwind (${names.join(', ')})`);
+  }
+
+  // the module as the app runs it, with the two modules it requires stood in for
+  let registered = null;
+  const stand = {
+    uniwind: { Uniwind: { __reinit: () => {} } },
+    'shadewind/uniwind': { registerPrebuiltStyleTable: (json, meta) => (registered = { json, meta }) },
+  };
+  const moduleRequire = (name) => {
+    if (!(name in stand)) {
+      throw new Error(`unexpected require(${name})`);
+    }
+
+    return stand[name];
+  };
+
+  new Function('__d', result.output[0].data.code)((factory) =>
+    factory(globalThis, moduleRequire, moduleRequire, moduleRequire, { exports: {} }, {}, names)
+  );
+
+  if (!registered) {
+    throw new Error(`${platform}: the CSS module did not register a table`);
+  }
+
+  return registered;
+};
+
+const prebuilt = await bundleTable('ios');
+const prebuiltParsed = JSON.parse(prebuilt.json);
+
+// equal to the device's table, except for the classes that read device-fixed values (fallback in the bundle's)
+const onlyOnDevice = Object.keys(parsed.classes).filter((name) => !(name in prebuiltParsed.classes));
+const mismatched = Object.keys(prebuiltParsed.classes).filter(
+  (name) => JSON.stringify(prebuiltParsed.classes[name]) !== JSON.stringify(parsed.classes[name])
+);
+
+if (mismatched.length > 0) {
+  throw new Error(`bundle and device tables differ for ${mismatched.join(' ')}`);
+}
+
+if (JSON.stringify(onlyOnDevice.sort()) !== JSON.stringify([...DEVICE_CLASSES].sort())) {
+  throw new Error(`classes only in the device's table: ${onlyOnDevice.join(' ')} (expected ${DEVICE_CLASSES.join(' ')})`);
+}
+
+if (
+  prebuilt.meta.deviceDependent !== DEVICE_CLASSES.length ||
+  JSON.stringify(prebuiltParsed.themes) !== JSON.stringify(parsed.themes) ||
+  !parsed.fallback.every((name) => prebuiltParsed.fallback.includes(name)) ||
+  prebuiltParsed.fallback.length !== parsed.fallback.length + DEVICE_CLASSES.length
+) {
+  throw new Error(`bundle table metadata: ${JSON.stringify(prebuilt.meta)}`);
+}
+
+// Android goes through the same path (its own platform variables)
+const androidPrebuilt = await bundleTable('android');
+const unsupportedPrebuilt = new Set([...prebuiltParsed.fallback, ...prebuiltParsed.reserved]);
 
 // ---- classNames: every string literal of the app that names a class, plus generated combinations
 
@@ -291,7 +407,7 @@ let fallbackClassNames = 0;
 
 for (const className of classNames) {
   const fallback = tokensOf(className).some((token) => unsupported.has(token));
-  const line = { c: className, fb: fallback };
+  const line = { c: className, fb: fallback, pfb: tokensOf(className).some((token) => unsupportedPrebuilt.has(token)) };
 
   cases += themes.length * WIDTHS.length * STATES.length;
 
@@ -335,6 +451,7 @@ for (const className of classNames) {
 }
 
 fs.writeFileSync(path.join(here, 'table.json'), table.json + '\n');
+fs.writeFileSync(path.join(here, 'table.prebuilt.json'), prebuilt.json + '\n');
 fs.writeFileSync(path.join(here, 'cases.jsonl'), lines.join('\n') + '\n');
 fs.writeFileSync(
   path.join(here, 'summary.json'),
@@ -352,6 +469,13 @@ fs.writeFileSync(
       cases,
       resolvableCases: resolvable,
       tableBuildMsNode: Math.round(buildMs * 100) / 100,
+      prebuilt: {
+        classes: Object.keys(prebuiltParsed.classes).length,
+        onlyOnDevice: DEVICE_CLASSES,
+        meta: prebuilt.meta,
+        bytes: prebuilt.json.length,
+        androidBytes: androidPrebuilt.json.length,
+      },
     },
     null,
     2

@@ -20,6 +20,7 @@ declare module 'uniwind-internal/core/native' {
 declare module 'uniwind-internal/core/listener' {
   export const UniwindListener: {
     subscribe: (listener: () => void, dependencies: number[]) => () => void;
+    getSnapshot: (dependencies: number[]) => number;
   };
 }
 

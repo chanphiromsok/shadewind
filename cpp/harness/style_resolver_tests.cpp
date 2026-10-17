@@ -3,7 +3,8 @@
 // the app does not use), cases.jsonl every className literal, every ordered pair of classes that set the same property and random
 // combinations, for every theme, five screen widths and six interaction states, with Uniwind's result. The resolver must return the
 // same keys in the same order with the same values, dependencies and dependency sum, or fall back exactly where a class of the
-// className is not in the table.
+// className is not in the table. table.prebuilt.json is the table shadewind/metro built from the same CSS at bundle time (through
+// Uniwind's own Metro transformer): the same results, or a fallback where a class reads a device-fixed value (pfb).
 
 #include "css/StyleResolver.hpp"
 
@@ -109,6 +110,11 @@ TEST(StyleResolver, MatchesUniwind) {
   ASSERT_TRUE(resolver.load(slurp(std::string(FIXTURES_DIR) + "/resolver/table.json"), &error)) << error;
   ASSERT_EQ(resolver.unsupportedCount(), 0u);
 
+  StyleResolver prebuilt;
+
+  ASSERT_TRUE(prebuilt.load(slurp(std::string(FIXTURES_DIR) + "/resolver/table.prebuilt.json"), &error)) << error;
+  ASSERT_EQ(prebuilt.unsupportedCount(), 0u);
+
   const folly::dynamic summary = folly::parseJson(slurp(std::string(FIXTURES_DIR) + "/resolver/summary.json"));
   std::istringstream lines(slurp(std::string(FIXTURES_DIR) + "/resolver/cases.jsonl"));
   std::string line;
@@ -121,7 +127,7 @@ TEST(StyleResolver, MatchesUniwind) {
   const folly::dynamic& states = header["states"];
   const size_t combinations = themes.size() * widths.size() * states.size();
   StyleResolver::Result result;
-  int64_t cases = 0, resolved = 0, mismatches = 0;
+  int64_t cases = 0, resolved = 0, mismatches = 0, prebuiltResolved = 0;
 
   while (std::getline(lines, line)) {
     if (line.empty()) {
@@ -131,6 +137,7 @@ TEST(StyleResolver, MatchesUniwind) {
     const folly::dynamic c = folly::parseJson(line);
     const std::string& className = c["c"].getString();
     const bool fallback = c["fb"].getBool();
+    const bool prebuiltFallback = c["pfb"].getBool();
 
     ASSERT_TRUE(fallback || c["i"].size() == combinations) << line;
 
@@ -151,6 +158,9 @@ TEST(StyleResolver, MatchesUniwind) {
 
           if (fallback) {
             EXPECT_FALSE(ok) << className;
+            EXPECT_FALSE(prebuilt.resolve(className, prebuilt.themeIndex(themeName.getString()), width.asDouble(),
+                                          tri(state[0]), tri(state[1]), tri(state[2]), result))
+                << "prebuilt: " << className;
             continue;
           }
 
@@ -180,6 +190,33 @@ TEST(StyleResolver, MatchesUniwind) {
                           << "\nnative styles: " << folly::toJson(styles) << "\nnative deps: " << folly::toJson(dependencies)
                           << " sum " << result.dependencySum;
           }
+
+          // the bundle's table: the same result, or a fallback exactly where it lacks a class
+          const bool prebuiltOk =
+              prebuilt.resolve(className, prebuilt.themeIndex(themeName.getString()), width.asDouble(), tri(state[0]),
+                               tri(state[1]), tri(state[2]), result);
+
+          if (prebuiltFallback) {
+            EXPECT_FALSE(prebuiltOk) << "prebuilt: " << className;
+            continue;
+          }
+
+          ASSERT_TRUE(prebuiltOk) << "prebuilt, unexpected fallback: " << className;
+          ++prebuiltResolved;
+
+          folly::dynamic prebuiltDependencies = folly::dynamic::array;
+
+          for (const int dependency : result.dependencies) {
+            prebuiltDependencies.push_back(dependency);
+          }
+
+          if (!(same(encode(prebuilt, result), styles) && same(prebuiltDependencies, expected["deps"]) &&
+                result.dependencySum == expected["sum"].asInt()) &&
+              ++mismatches <= 20) {
+            ADD_FAILURE() << "prebuilt differs: " << folly::toJson(className) << " theme " << themeName << " width " << width
+                          << " state " << folly::toJson(state) << "\nprebuilt: " << folly::toJson(encode(prebuilt, result))
+                          << "\ndevice table: " << folly::toJson(styles);
+          }
         }
       }
     }
@@ -189,6 +226,9 @@ TEST(StyleResolver, MatchesUniwind) {
   // the generator's counts: a truncated fixture must not pass
   EXPECT_EQ(cases, summary["cases"].asInt());
   EXPECT_EQ(resolved, summary["resolvableCases"].asInt());
+  // the classNames with a device-fixed class are the only difference
+  EXPECT_GT(prebuiltResolved, 0);
+  EXPECT_LT(prebuiltResolved, resolved);
 }
 
 TEST(StyleResolver, RejectsBadTables) {

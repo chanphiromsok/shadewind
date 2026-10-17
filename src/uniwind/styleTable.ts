@@ -39,6 +39,12 @@ export type StyleTableInput = {
    * theme is evaluated; its changing fields are watched while the table is built (and restored after).
    */
   runtime: { currentThemeName: string } & Record<string, unknown>;
+  /**
+   * Runtime fields fixed for a session on a device but unknown where the table is built (at Metro time: `pixelRatio`,
+   * `hairlineWidth`). A value that reads one is treated like one reading a changing field, and its class is listed in
+   * `deviceDependent`.
+   */
+  deviceFixed?: readonly string[];
 };
 
 // Uniwind 1.12's runtime (core/native/runtime.ts): fields that change while the app runs. A value that reads one is not fixed.
@@ -57,6 +63,8 @@ export type StyleTable = {
   json: string;
   classes: number;
   fallback: number;
+  /** Fallback classes with a value that read a `deviceFixed` field and no changing one: a table built on the device can hold them. */
+  deviceDependent: string[];
 };
 
 // Uniwind's resolveStyles rewrites these after resolving (parsers/*): the resolver does not, so such a class falls back
@@ -126,7 +134,7 @@ export const buildStyleTable = (input: StyleTableInput): StyleTable => {
 
   try {
     // every read of a changing runtime field is recorded while the table is built
-    for (const key of CHANGING_RUNTIME) {
+    for (const key of [...CHANGING_RUNTIME, ...(input.deviceFixed ?? [])]) {
       const descriptor = Object.getOwnPropertyDescriptor(runtime, key);
 
       if (!descriptor) {
@@ -175,6 +183,9 @@ const build = (
   runtimeReads: Set<string>
 ): StyleTable => {
   const { stylesheet, varsByTheme, themes, runtime } = input;
+  const deviceFixed = new Set(input.deviceFixed ?? []);
+  // getters whose value read device-fixed runtime fields only
+  const deviceGetters = new Set<Var>();
 
   // Evaluates one value getter for one theme, recording every variable it reads. `override` sets one variable the way a class of
   // the className does it in resolveStyles (`vars[name] = getter` on a clone of the theme's variables).
@@ -213,7 +224,15 @@ const build = (
     try {
       const value = getter(recorder);
 
-      return runtimeReads.size > 0 ? null : { value, reads };
+      if (runtimeReads.size > 0) {
+        if ([...runtimeReads].every((key) => deviceFixed.has(key))) {
+          deviceGetters.add(getter);
+        }
+
+        return null;
+      }
+
+      return { value, reads };
     } catch {
       return null;
     }
@@ -458,6 +477,7 @@ const build = (
 
   const classes: Record<string, unknown[]> = {};
   const fallback: string[] = [];
+  const deviceDependent: string[] = [];
 
   for (const name of Object.keys(stylesheet)) {
     const styles = stylesheet[name];
@@ -467,6 +487,15 @@ const build = (
       classes[name] = out;
     } else {
       fallback.push(name);
+
+      if (
+        Array.isArray(styles) &&
+        styles.some((style) =>
+          style.entries.some(([, getter]) => deviceGetters.has(getter))
+        )
+      ) {
+        deviceDependent.push(name);
+      }
     }
   }
 
@@ -484,5 +513,6 @@ const build = (
     json,
     classes: Object.keys(classes).length,
     fallback: fallback.length,
+    deviceDependent,
   };
 };

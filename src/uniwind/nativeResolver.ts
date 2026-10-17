@@ -5,10 +5,17 @@ import { buildStyleTable, type UniwindStyle } from './styleTable';
 // and theme (UniwindStore.getStyles); this replaces what runs on a cache miss: the first render of a className, a new
 // pressed / focused state, a new theme, a new screen width.
 //
-// The table is Uniwind's stylesheet evaluated once per theme (styleTable.ts). It is built when the JS thread is idle after
-// install, so the first screen is still resolved by Uniwind's JS; every resolution after that goes native when it can:
+// The table is Uniwind's stylesheet evaluated once per theme (styleTable.ts). It comes from one of two places:
 //
-// - no scoped theme and no scoped variables (Uniwind's context): the table has neither,
+// - prebuilt: shadewind/metro builds it while Metro bundles and appends it to Uniwind's CSS module, which hands it over right
+//   after Uniwind loaded the stylesheet (registerPrebuiltStyleTable in install.ts). Loading it is a native parse, so it is used
+//   from install on, first screen included. Classes that read the pixel ratio or hairline width are not in it (unknown at bundle
+//   time); if there are any, the table is rebuilt on the device when the JS thread is idle;
+// - runtime: built on the device when the JS thread is idle (no prebuilt table, or a stale one).
+//
+// A resolution goes native only when:
+//
+// - there is no scoped theme and no scoped variables (Uniwind's context): the table has neither,
 // - the table was built from the stylesheet and variables the store holds now (a CSS reload replaces them; updateCSSVariables
 //   changes them in place and notifies Variables, which marks the table stale until it is rebuilt),
 // - every class of the className is in the table (natively: otherwise the native call answers undefined).
@@ -44,18 +51,39 @@ export type ResolverStore = {
 
 export type ResolverListener = {
   subscribe: (listener: () => void, dependencies: number[]) => () => void;
+  getSnapshot?: (dependencies: number[]) => number;
+};
+
+/** A table built at bundle time, with the store state it was handed over with (registerPrebuiltStyleTable). */
+export type PrebuiltTable = {
+  json: string;
+  /** classes Uniwind's JS keeps resolving */
+  fallback: number;
+  /** of those, classes left out because they read device-fixed runtime fields: a table built on the device can hold them */
+  deviceDependent: number;
+  stylesheet: unknown;
+  vars: unknown;
+  /** UniwindListener's Variables revision then: a change before install makes the table stale */
+  variablesRevision: number | undefined;
 };
 
 export type ResolverStatus = {
   /** off: not installed or disabled; waiting: the table is not built yet; stale: built from other variables, rebuilding. */
   state: 'off' | 'waiting' | 'ready' | 'stale' | 'failed';
+  /** where the table in use came from */
+  source: 'prebuilt' | 'runtime' | null;
   /** classes in the table / classes Uniwind's JS keeps resolving (post-processed or runtime-dependent values, data / rtl variants). */
   classes: number;
   fallback: number;
-  /** JS thread time of the last build (styleTable.ts) and of loading it natively (parse). */
+  /** size of the table's JSON */
+  tableBytes: number;
+  /** JS thread time of the last build on the device (styleTable.ts; 0 for a prebuilt table) and of loading it natively (parse). */
   buildMs: number;
   loadMs: number;
   builds: number;
+  /** cache misses of Uniwind's getStyles since launch: resolved natively / by Uniwind's JS */
+  native: number;
+  uniwind: number;
   error?: string;
 };
 
@@ -63,19 +91,28 @@ const REBUILD_DELAY_MS = 500;
 
 const status: ResolverStatus = {
   state: 'off',
+  source: null,
   classes: 0,
   fallback: 0,
+  tableBytes: 0,
   buildMs: 0,
   loadMs: 0,
   builds: 0,
+  native: 0,
+  uniwind: 0,
 };
 let store: ResolverStore | null = null;
 let original: Resolve | null = null;
+let listener: ResolverListener | null = null;
+let variablesDependency = -1;
 let nativeResolve: NativeResolve | null = null;
 let enabled = true;
 let builtFrom: { stylesheet: unknown; vars: unknown } | null = null;
 let stale = true;
+// a prebuilt table without device-dependent classes: rebuild on the device when idle to add them
+let upgrade = false;
 let scheduled = false;
+let prebuilt: PrebuiltTable | null = null;
 
 const now = () =>
   (
@@ -108,13 +145,90 @@ const schedule = (delayMs: number) => {
   whenIdle(() => {
     scheduled = false;
 
-    if (enabled && stale) {
+    if (enabled && (stale || upgrade)) {
       rebuild();
     }
   }, delayMs);
 };
 
-/** Builds the table from the store now and loads it natively (normally done when idle). */
+// loads a table natively; true when it is in use
+const load = (
+  json: string,
+  from: { stylesheet: unknown; vars: unknown },
+  source: 'prebuilt' | 'runtime'
+): boolean => {
+  stale = true;
+  nativeResolve = null;
+
+  const t0 = now();
+  const result = ShadewindEngine.loadStyleTable(json);
+  const global = globalThis as { __swResolve?: NativeResolve };
+
+  status.loadMs = now() - t0;
+  status.tableBytes = json.length;
+  status.classes = result.classes;
+
+  if (!result.ok || result.unsupported > 0 || !global.__swResolve) {
+    status.state = 'failed';
+    status.error =
+      result.error ??
+      `${result.unsupported} classes of the table could not be read natively`;
+    return false;
+  }
+
+  builtFrom = from;
+  nativeResolve = global.__swResolve;
+  stale = false;
+  status.source = source;
+  status.state = enabled ? 'ready' : 'off';
+  status.error = undefined;
+
+  return true;
+};
+
+// the prebuilt table, if it belongs to the store as it is now
+const loadPrebuilt = (): boolean => {
+  const table = prebuilt;
+
+  if (!table || !store || !enabled) {
+    return false;
+  }
+
+  const revision = listener?.getSnapshot?.([variablesDependency]);
+
+  if (
+    table.stylesheet !== store.stylesheet ||
+    table.vars !== store.vars ||
+    revision !== table.variablesRevision
+  ) {
+    prebuilt = null;
+    return false;
+  }
+
+  prebuilt = null;
+
+  try {
+    if (!load(table.json, table, 'prebuilt')) {
+      return false;
+    }
+  } catch (error) {
+    status.state = 'failed';
+    status.error = String(error);
+    return false;
+  }
+
+  status.fallback = table.fallback;
+  status.buildMs = 0;
+
+  if (table.deviceDependent > 0) {
+    upgrade = true;
+    schedule(REBUILD_DELAY_MS);
+  }
+
+  return true;
+};
+
+/** Builds the table from the store now, on the device, and loads it natively (normally done when idle). */
 export function rebuild(): ResolverStatus {
   if (!store) {
     return { ...status };
@@ -122,8 +236,7 @@ export function rebuild(): ResolverStatus {
 
   const current = store;
 
-  stale = true;
-  nativeResolve = null;
+  upgrade = false;
 
   try {
     const t0 = now();
@@ -133,36 +246,23 @@ export function rebuild(): ResolverStatus {
       themes: Object.keys(current.vars),
       runtime: current.runtime,
     });
-    const t1 = now();
-    const load = ShadewindEngine.loadStyleTable(table.json);
 
-    status.buildMs = t1 - t0;
-    status.loadMs = now() - t1;
-    status.classes = table.classes;
+    status.buildMs = now() - t0;
     status.fallback = table.fallback;
     status.builds++;
-
-    const global = globalThis as { __swResolve?: NativeResolve };
-
-    if (!load.ok || load.unsupported > 0 || !global.__swResolve) {
-      status.state = 'failed';
-      status.error =
-        load.error ??
-        `${load.unsupported} classes of the table could not be read natively`;
-      return { ...status };
-    }
-
-    builtFrom = { stylesheet: current.stylesheet, vars: current.vars };
-    nativeResolve = global.__swResolve;
-    stale = false;
-    status.state = enabled ? 'ready' : 'off';
-    status.error = undefined;
+    load(
+      table.json,
+      { stylesheet: current.stylesheet, vars: current.vars },
+      'runtime'
+    );
   } catch (error) {
+    stale = true;
+    nativeResolve = null;
     status.state = 'failed';
     status.error = String(error);
   }
 
-  return { ...status };
+  return nativeResolver.status();
 }
 
 function resolveStyles(
@@ -197,6 +297,7 @@ function resolveStyles(
         );
 
         if (result !== undefined) {
+          status.native++;
           return result;
         }
       } catch {
@@ -210,17 +311,28 @@ function resolveStyles(
     }
   }
 
+  status.uniwind++;
   return original!.call(this, classNames, componentProps, state, context);
 }
 
+/** Called by install.ts with the table shadewind/metro built at bundle time (see registerPrebuiltStyleTable). */
+export function offerPrebuiltTable(table: PrebuiltTable) {
+  prebuilt = table;
+
+  // a CSS reload in development, after install: the new table replaces the old one at once
+  if (store) {
+    loadPrebuilt();
+  }
+}
+
 /**
- * Puts the native resolver in front of Uniwind's resolveStyles (once) and builds the table when the JS thread is idle.
- * `variablesDependency`: Uniwind's StyleDependency.Variables.
+ * Puts the native resolver in front of Uniwind's resolveStyles (once): with the prebuilt table if there is one for the store as it
+ * is now, otherwise with a table built when the JS thread is idle. `variablesDependency`: Uniwind's StyleDependency.Variables.
  */
 export function installNativeResolver(
   target: ResolverStore,
-  listener: ResolverListener,
-  variablesDependency: number
+  uniwindListener: ResolverListener,
+  variables: number
 ) {
   if (store) {
     return;
@@ -243,17 +355,22 @@ export function installNativeResolver(
 
   store = target;
   original = prototype.resolveStyles;
+  listener = uniwindListener;
+  variablesDependency = variables;
   // getStyles calls this.resolveStyles: an own property of the instance comes first
   target.resolveStyles = resolveStyles;
 
-  listener.subscribe(() => {
+  uniwindListener.subscribe(() => {
     stale = true;
     status.state = 'stale';
     schedule(REBUILD_DELAY_MS);
-  }, [variablesDependency]);
+  }, [variables]);
 
   status.state = 'waiting';
-  schedule(0);
+
+  if (!loadPrebuilt()) {
+    schedule(0);
+  }
 }
 
 export const nativeResolver = {
@@ -261,13 +378,13 @@ export const nativeResolver = {
     ...status,
     state: !enabled && status.state === 'ready' ? 'off' : status.state,
   }),
-  /** Builds the table now (it is otherwise built when the JS thread is idle after install and after a variables change). */
+  /** Builds the table now, on the device (it is otherwise built when the JS thread is idle, unless a prebuilt one is in use). */
   rebuild,
-  /** Off: every className goes to Uniwind's own resolveStyles again. */
+  /** Off: every className goes to Uniwind's own resolveStyles again. Before install: no table is loaded or built either. */
   setEnabled(value: boolean) {
     enabled = value;
 
-    if (value && stale) {
+    if (value && stale && !loadPrebuilt()) {
       schedule(0);
     }
   },
