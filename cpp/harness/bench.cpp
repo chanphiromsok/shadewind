@@ -19,6 +19,10 @@
 #include <functional>
 #include <map>
 #include <numeric>
+#include <string>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 using namespace harness;
 
@@ -119,6 +123,8 @@ void theirBenchmark(int items, int runs) {
   Styles s;
   App app(engine, kThemes, "light");
   Series render, commit, refs, flush, total, prewarm, theme, reactAfter, reactBefore;
+
+  app.setChecks(false);
   Instance* leaf = nullptr;
 
   // render scenario: re-mount the whole screen, like their `renderKey`
@@ -165,37 +171,81 @@ void theirBenchmark(int items, int runs) {
     reactBefore.add(ms(t0, Clock::now()));
   }
 
-  // theme scenario: switch 10 times, synchronous commit ('hook')
+  const bool themes = std::strcmp(engine.name(), "none") != 0;
+  Series afterSync, asyncCommit, firstAfterAsync, secondAfterAsync;
+
+  // theme scenario, 'hook': the switch commits on the JS thread (also Android today)
   for (int run = 0; run < runs; run++) {
     const auto t0 = Clock::now();
 
     app.setTheme(run % 2 == 0 ? "dark" : "light");
     theme.add(ms(t0, Clock::now()));
 
-    if (app.lastThemeCommit().stale != 0) {
-      std::fprintf(stderr, "%s: %d stale views after a switch\n", engine.name(), app.lastThemeCommit().stale);
+    const int measuresBefore = app.react().measures();
+    const auto c0 = Clock::now();
+
+    app.rerender(*leaf, folly::dynamic::object("height", 3 + run % 2));
+    afterSync.add(ms(c0, Clock::now()));
+
+    if (std::getenv("BENCH_DEBUG") && run == runs - 1) {
+      const auto st = engine.stats();
+
+      std::fprintf(stderr, "%s next commit: applied=%d visited=%d skipped=%d measures=%d\n", engine.name(), st.applied, st.visited,
+                   st.skipped, app.react().measures() - measuresBefore);
     }
   }
 
-  // an unrelated React commit after the switches: React's handles still hold the pre-switch nodes
+  // 'hookAsync' (iOS default): the switch commits on a background thread, so React's handles keep the pre-switch nodes until
+  // the next React commit themes them again on the JS thread
   for (int run = 0; run < runs; run++) {
     const auto t0 = Clock::now();
 
-    app.rerender(*leaf, folly::dynamic::object("height", 3 + run % 2));
-    reactAfter.add(ms(t0, Clock::now()));
+    app.setThemeAsync(run % 2 == 0 ? "dark" : "light");
+    asyncCommit.add(ms(t0, Clock::now()));
+
+    const auto c0 = Clock::now();
+
+    app.rerender(*leaf, folly::dynamic::object("height", 5 + run % 2));
+
+    const auto c1 = Clock::now();
+
+    app.rerender(*leaf, folly::dynamic::object("height", 7 + run % 2));
+    firstAfterAsync.add(ms(c0, c1));
+    secondAfterAsync.add(ms(c1, Clock::now()));
+  }
+
+  // verify once, untimed: every themed view holds the theme after a sync and an async switch
+  if (themes) {
+    app.setChecks(true);
+    app.setTheme(app.theme() == "dark" ? "light" : "dark");
+
+    int stale = app.lastThemeCommit().stale;
+
+    app.setThemeAsync(app.theme() == "dark" ? "light" : "dark");
+    stale += app.lastThemeCommit().stale;
+    app.rerender(*leaf, folly::dynamic::object("height", 9));
+    stale += app.lastReactCommit().stale;
+
+    if (stale != 0) {
+      std::fprintf(stderr, "%s: %d stale views\n", engine.name(), stale);
+      std::exit(2);
+    }
   }
 
   const std::string sc = "2003 views (uniwind-benchmarks screen)";
   const std::string e = engine.name();
 
-  record(sc, "mount: create nodes (render)", e, render.median());
+  record(sc, "mount: create nodes (render, same for all)", e, render.median());
   record(sc, "mount: React commit (hook + layout)", e, commit.median());
-  record(sc, "mount: refs + flush after commit", e, refs.median());
+  record(sc, "mount: refs attach + flush", e, refs.median());
   record(sc, "mount: total", e, total.median());
-  record(sc, "prewarm (off JS thread on iOS)", e, prewarm.median());
-  record(sc, "theme switch (sync commit)", e, theme.median());
+  record(sc, "prewarm after mount (off JS thread on iOS)", e, prewarm.median());
   record(sc, "React commit, before any switch", e, reactBefore.median());
-  record(sc, "React commit, after switches", e, reactAfter.median());
+  record(sc, "switch, sync ('hook', JS thread)", e, theme.median());
+  record(sc, "  next React commit", e, afterSync.median());
+  record(sc, "switch, async ('hookAsync', background thread)", e, asyncCommit.median());
+  record(sc, "  first React commit after it", e, firstAfterAsync.median());
+  record(sc, "  second React commit after it", e, secondAfterAsync.median());
 }
 
 template <typename EngineT>
@@ -223,14 +273,21 @@ void tabsBenchmark(int tabs, int cards, int runs) {
 
   engine.prewarm();
 
-  Series theme, reveal, reactAfter;
+  const bool themes = std::strcmp(engine.name(), "none") != 0;
+  Series sync, async, reveal, revealAsync, reactAfter;
   int staleInReveal = 0;
 
-  for (int run = 0; run < runs; run++) {
+  // the last round is untimed and checked: what the reveal commits show
+  for (int run = 0; run <= runs; run++) {
+    const bool verify = run == runs;
+
+    app.setChecks(verify);
+
+    // a switch on the JS thread ('hook', Android today)
     const auto t0 = Clock::now();
 
     app.setTheme(run % 2 == 0 ? "dark" : "light");
-    theme.add(ms(t0, Clock::now()));
+    sync.add(ms(t0, Clock::now()));
 
     // open tab 1 (reveal) and leave it again (hide); time the reveal commit plus its flush
     const auto r0 = Clock::now();
@@ -238,23 +295,47 @@ void tabsBenchmark(int tabs, int cards, int runs) {
     app.reveal(*screens[1]);
     reveal.add(ms(r0, Clock::now()));
     staleInReveal = std::max(staleInReveal, app.lastReactCommit().stale);
+    app.hide(*screens[1]);
 
+    // the same with the iOS default: the switch commits off the JS thread
+    const auto a0 = Clock::now();
+
+    app.setThemeAsync(run % 2 == 0 ? "light" : "dark");
+    async.add(ms(a0, Clock::now()));
+
+    const auto r1 = Clock::now();
+
+    app.reveal(*screens[1]);
+    revealAsync.add(ms(r1, Clock::now()));
+    staleInReveal = std::max(staleInReveal, app.lastReactCommit().stale);
     app.hide(*screens[1]);
 
     const auto c0 = Clock::now();
 
     app.rerender(*leaf, folly::dynamic::object("height", 1 + run % 2));
     reactAfter.add(ms(c0, Clock::now()));
+
+    if (verify) {
+      for (auto* series : {&sync, &async, &reveal, &revealAsync, &reactAfter}) {
+        series->values.pop_back();
+      }
+    }
   }
 
   const std::string sc = std::to_string(tabs) + " tabs x " + std::to_string(cards) + " cards, " + std::to_string(tabs - 1) +
       " frozen (freezeOnBlur)";
   const std::string e = engine.name();
 
-  record(sc, "theme switch (sync commit)", e, theme.median());
-  record(sc, "reveal a frozen tab (commit + flush)", e, reveal.median());
-  record(sc, "stale views in the reveal commit (max)", e, staleInReveal);
-  record(sc, "React commit, after switches", e, reactAfter.median());
+  record(sc, "switch, sync ('hook', JS thread)", e, sync.median());
+  record(sc, "switch, async ('hookAsync', background thread)", e, async.median());
+  record(sc, "reveal a frozen tab after a sync switch (commit + flush)", e, reveal.median());
+  record(sc, "reveal a frozen tab after an async switch (commit + flush)", e, revealAsync.median());
+
+  if (themes) {
+    record(sc, "stale views in a reveal commit (max over all runs)", e, staleInReveal);
+  }
+
+  record(sc, "unrelated React commit", e, reactAfter.median());
 }
 
 void print() {
@@ -300,6 +381,74 @@ void print() {
   }
 }
 
+// Runs one arm in a child process: every arm starts from a fresh heap, so one arm's allocations do not slow the next.
+void isolated(const std::function<void()>& arm) {
+  int fds[2];
+
+  if (pipe(fds) != 0) {
+    std::perror("pipe");
+    std::exit(1);
+  }
+
+  const pid_t pid = fork();
+
+  if (pid == 0) {
+    close(fds[0]);
+    arm();
+
+    for (const auto& row : gRows) {
+      for (const auto& [engine, value] : row.byEngine) {
+        dprintf(fds[1], "%s\t%s\t%s\t%.6f\n", row.scenario.c_str(), row.metric.c_str(), engine.c_str(), value);
+      }
+    }
+
+    close(fds[1]);
+    _exit(0);
+  }
+
+  close(fds[1]);
+
+  std::string data;
+  char buffer[4096];
+  ssize_t n;
+
+  while ((n = read(fds[0], buffer, sizeof(buffer))) > 0) {
+    data.append(buffer, static_cast<size_t>(n));
+  }
+
+  close(fds[0]);
+
+  int status = 0;
+
+  waitpid(pid, &status, 0);
+
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    std::fprintf(stderr, "an arm failed (status %d)\n", status);
+    std::exit(1);
+  }
+
+  size_t start = 0;
+
+  while (start < data.size()) {
+    const size_t end = data.find('\n', start);
+    const std::string line = data.substr(start, end - start);
+    std::vector<std::string> fields;
+    size_t from = 0;
+
+    for (size_t tab; (tab = line.find('\t', from)) != std::string::npos; from = tab + 1) {
+      fields.push_back(line.substr(from, tab - from));
+    }
+
+    fields.push_back(line.substr(from));
+
+    if (fields.size() == 4) {
+      record(fields[0], fields[1], fields[2], std::stod(fields[3]));
+    }
+
+    start = end == std::string::npos ? data.size() : end + 1;
+  }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -313,13 +462,13 @@ int main(int argc, char** argv) {
     }
   }
 
-  theirBenchmark<NoEngine>(1000, runs);
-  theirBenchmark<BaselineEngine>(1000, runs);
-  theirBenchmark<CurrentEngine>(1000, runs);
+  isolated([&] { theirBenchmark<NoEngine>(1000, runs); });
+  isolated([&] { theirBenchmark<BaselineEngine>(1000, runs); });
+  isolated([&] { theirBenchmark<CurrentEngine>(1000, runs); });
 
-  tabsBenchmark<NoEngine>(5, 400, runs);
-  tabsBenchmark<BaselineEngine>(5, 400, runs);
-  tabsBenchmark<CurrentEngine>(5, 400, runs);
+  isolated([&] { tabsBenchmark<NoEngine>(5, 400, runs); });
+  isolated([&] { tabsBenchmark<BaselineEngine>(5, 400, runs); });
+  isolated([&] { tabsBenchmark<CurrentEngine>(5, 400, runs); });
 
   print();
 

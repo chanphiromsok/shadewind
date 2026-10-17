@@ -100,3 +100,4 @@ target_link_libraries(harness_tests PRIVATE harness_support GTest::gtest_main)
 
 add_executable(harness_bench bench.cpp)
 target_link_libraries(harness_bench PRIVATE harness_support)
+

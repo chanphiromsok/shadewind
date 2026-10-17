@@ -270,6 +270,7 @@ public:
     std::lock_guard<std::mutex> lock(_mutex);
     bool ok = true;
 
+
     for (const auto& name : names) {
       ok = internTheme(name) != kNoTheme && ok;
     }
@@ -512,6 +513,7 @@ public:
 
     auto cloned = walkTree(*newRoot, old, walk);
     auto result = cloned ? std::static_pointer_cast<RootShadowNode>(cloned) : newRoot;
+
 
     remember(result);
 

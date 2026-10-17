@@ -117,7 +117,7 @@ public:
 
   void reveal(Instance& instance) {
     react_.reveal(instance);
-    lastReactCommit_ = check(); // what the reveal commit itself shows, before the microtask
+    lastReactCommit_ = checked(); // what the reveal commit itself shows, before the microtask
     attachAll(instance);
     afterCommit();
   }
@@ -129,7 +129,7 @@ public:
     }
 
     react_.rerender(instance, props);
-    lastReactCommit_ = check();
+    lastReactCommit_ = checked();
     afterCommit();
   }
 
@@ -158,7 +158,7 @@ public:
     theme_ = name;
     engine_.setTheme(name);
     react_.commitTick();
-    lastThemeCommit_ = check();
+    lastThemeCommit_ = checked();
   }
 
   // 'hookAsync' (the iOS default): the engine's commit on a background thread
@@ -166,7 +166,7 @@ public:
     theme_ = name;
     engine_.setTheme(name);
     react_.commitTickOffThread();
-    lastThemeCommit_ = check();
+    lastThemeCommit_ = checked();
   }
 
   // unmounted instances go away (React and Hermes drop them); their bindings with them
@@ -200,6 +200,11 @@ public:
     return lastThemeCommit_;
   }
 
+  // benchmarks turn the per-commit checks off so they are not timed
+  void setChecks(bool enabled) {
+    checks_ = enabled;
+  }
+
   Check check() const {
     Check result;
 
@@ -219,6 +224,10 @@ public:
   }
 
 private:
+  Check checked() const {
+    return checks_ ? check() : Check{};
+  }
+
   void afterCommit() {
     engine_.flush(react_);
   }
@@ -323,6 +332,7 @@ private:
   Instance* unrelated_ = nullptr;
   Check lastReactCommit_;
   Check lastThemeCommit_;
+  bool checks_ = true;
 };
 
 } // namespace harness
