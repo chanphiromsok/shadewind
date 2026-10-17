@@ -720,9 +720,14 @@ turns it off.
   except exactly the two pixel-ratio / hairline classes of the fixture; the parity test checks it on every case
   (`table.prebuilt.json`). `seam-check.mjs` covers install with it (used, no device build), with device-dependent classes (idle
   rebuild), a variables change before install (not used), the resolver off (nothing loaded), a CSS reload after install.
+- A real Release bundle of example-real (`react-native bundle`, React Native 0.86.3, iOS and Android, with the packed library):
+  one `registerPrebuiltStyleTable(...)` right after `Uniwind.__reinit(...)` in a `try`, no "not prebuilt" warning, the same
+  bundle again from a warm Metro cache, and `hermesc` compiles both.
 - Not tested: Expo's transform worker (same Babel hook, not run), and any device: `-resolveBench 1` reports where the table came
   from and how many `getStyles` misses since launch went native; `-resolverOff 1` is the A/B switch for cold launches
   (`docs/LOCAL_TESTING.md` step 6).
-- Cost: the table is in the bundle (example-real: 56 KB of JSON) and parsed natively at install, on the startup path.
+- Cost, example-real: a 26 KB table (123 classes, 2 fall back, none device-dependent), the iOS bundle 29.6 KB larger (1,546,984
+  against 1,517,337 bytes with `prebuildStyleTable: false`, +1.9 %), Hermes bytecode 26.2 KB larger (+1.2 %). It is parsed
+  natively at install, on the startup path (`-resolveBench 1` reports the load ms).
 
 The theme switch is not affected: the engine re-themes registered views natively without resolving classes again.

@@ -100,7 +100,12 @@ long before the 15 s mark). To see its share, run the branch arm a second time w
 
 Same app and build as step 5 (engine arm). The class table is built by Metro while it bundles (`withShadewind`): watch the Metro
 or Xcode build output for `[shadewind] class table not prebuilt`, which means it was not (the reason follows; the app then builds
-it on the device).
+it on the device). Quick check without a device, in `example-real`:
+
+```sh
+npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output /tmp/ios.js --assets-dest /tmp/assets
+grep -c 'registerPrebuiltStyleTable(' /tmp/ios.js     # 1
+```
 
 Launch argument `-resolveBench 1` shows one line on top of the app 5 s after launch:
 
