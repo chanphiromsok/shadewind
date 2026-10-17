@@ -20,7 +20,12 @@ import {
   type ViewProps,
   type ViewStyle,
 } from 'react-native';
-import { ShadewindEngine, toNativeProps, toNativePropsWith } from './internal';
+import {
+  ShadewindEngine,
+  toNativeProps,
+  toNativePropsWith,
+  type ThemeStrategy,
+} from './internal';
 
 // Public API, see docs/API.md. Everything diagnostic or benchmark-only lives in `shadewind/internal`.
 
@@ -174,7 +179,7 @@ export function subscribe(listener: (theme: ThemeName) => void): () => void {
   };
 }
 
-const applyTheme = (name: string) => {
+const applyTheme = (name: string, strategy?: ThemeStrategy) => {
   const { themes } = assertConfigured();
 
   if (!themes.includes(name)) {
@@ -189,7 +194,7 @@ const applyTheme = (name: string) => {
   }
 
   current = name;
-  ShadewindEngine.setTheme(name);
+  ShadewindEngine.setTheme(name, strategy);
   listeners.forEach((listener) => listener(name as ThemeName));
 };
 
@@ -197,6 +202,16 @@ const applyTheme = (name: string) => {
 export function setTheme(name: ThemeName): void {
   stopFollowing?.();
   applyTheme(name);
+}
+
+/**
+ * For shadewind/uniwind: a Uniwind theme change, applied so the native commit is mounted together with the React commit that
+ * Uniwind's own subscribers trigger in the same task (see ThemeStrategy 'hookDeferred'). Not part of the public API.
+ * @internal
+ */
+export function applyUniwindTheme(name: ThemeName): void {
+  stopFollowing?.();
+  applyTheme(name, 'hookDeferred');
 }
 
 /** Follows the OS appearance. An explicit setTheme() stops following. Returns an unsubscribe. */

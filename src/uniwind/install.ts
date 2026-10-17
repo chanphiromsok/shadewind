@@ -95,7 +95,7 @@ const probe = (): InstallResult => {
   // one subscription: every theme change (setTheme, system scheme) goes to the engine
   UniwindListener.subscribe(() => {
     try {
-      shadewind.setTheme(UniwindStore.runtime.currentThemeName);
+      shadewind.applyUniwindTheme(UniwindStore.runtime.currentThemeName);
     } catch (error) {
       if (__DEV__) {
         console.warn('[shadewind] could not apply the Uniwind theme', error);

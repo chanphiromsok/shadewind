@@ -55,6 +55,7 @@
     "!**/__fixtures__",
     "!**/__mocks__",
     "!cpp/experiments",
+    "!cpp/harness",
     "!cpp/tests",
     "!**/.*"
   ],

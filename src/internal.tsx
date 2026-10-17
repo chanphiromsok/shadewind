@@ -113,10 +113,13 @@ export type ThemeTimings = {
  * How a theme change reaches the screen. Unknown names throw.
  * - 'hookAsync' (default): the commit runs on a background thread, the JS thread is free right away. On Android it is synchronous
  *   for now.
- * - 'hook': the commit runs synchronously on the JS thread.
+ * - 'hook': the commit runs synchronously on the JS thread and is mounted at once.
+ * - 'hookDeferred': the commit runs synchronously on the JS thread but its mount is queued on the RuntimeScheduler, so it lands
+ *   with the React commit made in the same task (a Uniwind setTheme in a press handler): views the engine handles and views
+ *   React re-renders change in the same frame. Only valid inside a JS task.
  * Either way the theme is applied inside a commit hook, so every later commit (React's too) keeps it.
  */
-export type ThemeStrategy = 'hook' | 'hookAsync';
+export type ThemeStrategy = 'hook' | 'hookAsync' | 'hookDeferred';
 
 /** Style subset supported in v0: visual-only props that don't need a Yoga layout pass. */
 export type ThemedStyle = {

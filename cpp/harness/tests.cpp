@@ -88,6 +88,20 @@ protected:
   Styles styles;
 };
 
+#ifdef RN_SERIALIZABLE_STATE
+// Colours reach JS-side as CSS strings. On Android the number the engine stores goes to Java as a Double narrowed with toInt(),
+// which saturates above INT32_MAX: an unsigned ARGB turned every opaque colour into 0x7FFFFFFF (white at 50% alpha).
+TEST(AndroidColours, CssStringsSurviveJavaDoubleToInt) {
+  folly::dynamic props = folly::dynamic::object("backgroundColor", "#111111")("color", "rgb(255, 255, 255)")("borderColor", "#00000080");
+
+  sw::normalizeColorStrings(props);
+
+  EXPECT_EQ(harness::javaColourInt(props["backgroundColor"]), static_cast<int32_t>(0xFF111111u));
+  EXPECT_EQ(harness::javaColourInt(props["color"]), static_cast<int32_t>(0xFFFFFFFFu));
+  EXPECT_EQ(harness::javaColourInt(props["borderColor"]), static_cast<int32_t>(0x80000000u));
+}
+#endif
+
 TEST_F(Current, MountNeedsNoExtraCommit) {
   App app(engine, kThemes, "light");
   const int before = revision(app);

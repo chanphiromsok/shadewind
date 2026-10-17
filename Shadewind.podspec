@@ -18,6 +18,8 @@ Pod::Spec.new do |s|
     "ios/**/*.{m,mm}",
     "cpp/**/*.{hpp,cpp}",
   ]
+  # the native test harness (gtest, folly json) and experiments are not part of the app
+  s.exclude_files = ["cpp/harness/**/*", "cpp/tests/**/*", "cpp/experiments/**/*"]
 
   s.dependency 'React-jsi'
   s.dependency 'React-callinvoker'

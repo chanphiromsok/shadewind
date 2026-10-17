@@ -19,10 +19,32 @@
 
 namespace harness {
 
-// ARGB as processColor sends it
+// ARGB as processColor sends it: unsigned on iOS, a signed int32 on Android
 inline folly::dynamic argb(uint32_t value) {
+#ifdef RN_SERIALIZABLE_STATE
+  return folly::dynamic(static_cast<int64_t>(static_cast<int32_t>(value)));
+#else
   return folly::dynamic(static_cast<int64_t>(value));
+#endif
 }
+
+#ifdef RN_SERIALIZABLE_STATE
+// What the Java side makes of a colour prop: ReadableNativeMap boxes an INT64 as a Double, ColorPropConverter calls Double.toInt(),
+// which saturates at the int32 limits (Kotlin semantics).
+inline int32_t javaColourInt(const folly::dynamic& value) {
+  const double number = value.asDouble();
+
+  if (number >= 2147483647.0) {
+    return INT32_MAX;
+  }
+
+  if (number <= -2147483648.0) {
+    return INT32_MIN;
+  }
+
+  return static_cast<int32_t>(number);
+}
+#endif
 
 inline Style makeStyle(int64_t id, const char* key, std::vector<std::pair<std::string, uint32_t>> colours) {
   Style style;
@@ -393,7 +415,10 @@ private:
 
     if (const auto it = javaViews_.find(tag); it != javaViews_.end() && it->second.isObject()) {
       if (const auto* value = it->second.get_ptr("backgroundColor"); value && !value->isNull()) {
-        fromRawValue(*react_.context(), react_.surface(), RawValue(*value), colour);
+        // decoded as Java does (saturating), not with the C++ conversion that accepts any 32-bit number
+        const auto decoded = value->isNumber() ? folly::dynamic(static_cast<int64_t>(javaColourInt(*value))) : *value;
+
+        fromRawValue(*react_.context(), react_.surface(), RawValue(decoded), colour);
       }
     }
 

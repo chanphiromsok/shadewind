@@ -768,15 +768,19 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
   const auto name = args[0].asString(rt).utf8(rt);
   bool async = true;
+  // 'hookDeferred': the commit runs here, on the JS thread, but its mount is queued on the RuntimeScheduler (the same queue
+  // React's own commit of this task uses), so both reach the screen in one update.
+  bool deferred = false;
 
   if (count > 1 && args[1].isString()) {
     const auto requested = args[1].asString(rt).utf8(rt);
 
-    if (requested != "hook" && requested != "hookAsync") {
-      throw jsi::JSError(rt, "Shadewind.setTheme: unknown strategy '" + requested + "' (hook, hookAsync)");
+    if (requested != "hook" && requested != "hookAsync" && requested != "hookDeferred") {
+      throw jsi::JSError(rt, "Shadewind.setTheme: unknown strategy '" + requested + "' (hook, hookAsync, hookDeferred)");
     }
 
     async = requested == "hookAsync";
+    deferred = requested == "hookDeferred";
   }
 
   auto* ui = attachedUIManager(rt);
@@ -824,7 +828,11 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   (void)async; // Android commits on the JS thread for now
 #endif
 
-  commitTick(*ui);
+  // `mountSynchronously = false` queues the mount with RuntimeScheduler::scheduleRenderingUpdate (Scheduler.cpp), which only the JS
+  // thread may call, inside a task: this runs in the JS thread's setTheme call, which is one. Same on both platforms: React Native's
+  // Scheduler decides this, not the platform. Without it Android mounted the engine's commit on its own, ahead of React's commit
+  // (views React re-renders, e.g. LinearGradient colours, changed 4-8 frames after the engine-bound ones).
+  commitTick(*ui, !deferred);
 
   const double elapsed = ms(t0, Clock::now());
 

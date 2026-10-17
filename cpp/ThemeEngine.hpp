@@ -24,7 +24,8 @@ using namespace facebook::react;
 using PropsByTheme = std::vector<std::pair<std::string, folly::dynamic>>;
 
 // Colour props arrive from JS as CSS strings (hex, rgb(), hsl(), oklch()) or as numbers already processed by processColor.
-// Strings are parsed here (css::parseColor) and replaced by the unsigned ARGB number React Native expects.
+// Strings are parsed here (css::parseColor) and replaced by the ARGB number React Native expects: unsigned on iOS, signed int32 on
+// Android (what processColor returns there).
 inline bool isColorKey(const std::string& key) {
   return key == "colors" || (key.size() >= 5 && (key.compare(key.size() - 5, 5, "Color") == 0 || key.compare(key.size() - 5, 5, "color") == 0)) ||
          key == "color";
@@ -43,7 +44,13 @@ inline void normalizeColorStrings(folly::dynamic& props) {
     auto convert = [](folly::dynamic& value) {
       if (value.isString()) {
         if (const auto argb = css::parseColor(value.getString())) {
+#ifdef RN_SERIALIZABLE_STATE
+          // Android sends Props::rawProps to Java, which reads a colour as a Double and narrows it with toInt(): that saturates
+          // above INT32_MAX (every opaque colour became 0x7FFFFFFF, white at 50% alpha). Send the signed form, as processColor does.
+          value = static_cast<int64_t>(static_cast<int32_t>(*argb));
+#else
           value = static_cast<int64_t>(*argb);
+#endif
         }
       }
     };
