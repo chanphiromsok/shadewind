@@ -2,9 +2,9 @@
 
 #include <atomic>
 #include <chrono>
-#include <functional>
 #include <array>
 #include <cstring>
+#include <folly/container/F14Map.h>
 #include <folly/dynamic.h>
 #include <react/renderer/components/root/RootShadowNode.h>
 #include <react/renderer/components/text/ParagraphProps.h>
@@ -20,10 +20,8 @@
 #include <react/renderer/uimanager/UIManagerCommitHook.h>
 #include <mutex>
 #include <optional>
-#include <tuple>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace margelo::nitro::shadewind {
@@ -39,9 +37,20 @@ struct TypedDelta {
   folly::dynamic raw; // used for components we don't set typed fields on
 };
 
+// Themes are interned to small ids so a view's per-theme data is a flat array.
+using ThemeId = uint8_t;
+inline constexpr ThemeId kMaxThemes = 6;
+inline constexpr ThemeId kNoTheme = 0xFF;
+
+// What one style (a className, a useThemed object) changes in each theme. Built once and shared by every view registered with it,
+// so registering a view copies one pointer instead of a delta per theme.
+struct ThemeStyle {
+  std::array<std::shared_ptr<const TypedDelta>, kMaxThemes> byTheme;
+};
+
 // `yogaNode_` is protected in YogaLayoutableShadowNode; naming it through a derived class is the one legal way to reach it.
 struct YogaAccess : YogaLayoutableShadowNode {
-  static yoga::Node& node(const YogaLayoutableShadowNode& n) {
+  static facebook::yoga::Node& node(const YogaLayoutableShadowNode& n) {
     return const_cast<YogaLayoutableShadowNode&>(n).*(&YogaAccess::yogaNode_); // mutable member, pointer-to-member drops that
   }
 };
@@ -202,14 +211,25 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
   return result;
 }
 
+// `display: none`, which is also how React hides a suspended or frozen subtree (cloneHiddenInstance in React's Fabric renderer).
+// Nothing under such a node is on screen, and every way back to visible is a commit, so its subtree is themed when it shows.
+inline bool isHidden(const ShadowNode& node) {
+  // every ViewKind node is a ConcreteViewShadowNode, whose props derive from ViewProps (no RTTI across RN's libraries)
+  return node.getTraits().check(ShadowNodeTraits::Trait::ViewKind) &&
+      static_cast<const ViewProps&>(*node.getProps()).yogaStyle.display() == facebook::yoga::Display::None;
+}
+
 struct HookStats {
-  double scanMs = 0;  // finding the registered nodes that need an update
-  double cloneMs = 0; // building their new props and cloning them (propsMs + node clone)
+  double scanMs = 0;  // a commit that changed nothing: the walk
+  double cloneMs = 0; // a commit that changed something: walk + props + clones
   double propsMs = 0; // of cloneMs: building the typed props only
   int applied = 0;    // nodes cloned in the last commit that did work
   int reused = 0;     // of applied: props reused from the cache instead of rebuilt
-  bool fullApply = false; // the last commit skipped the tree scan (theme change)
+  bool fullApply = false; // the last walk could not skip unchanged subtrees (theme change, late registration, unknown old tree)
   int scanned = 0;    // registered views looked at
+  int visited = 0;    // nodes visited
+  int skipped = 0;    // subtrees skipped because the previous commit already themed them
+  int hidden = 0;     // `display: none` subtrees skipped (themed when they show)
   // how a node's props were found: React replaced them (rebuilt) / its children list is being replaced (cloned with new children)
   int missNotOurs = 0, missChildren = 0;
 };
@@ -224,119 +244,24 @@ struct HookStats {
  *
  * A view needs work when the theme changed since we last styled it, or when the props object in the new tree is not
  * the one we produced (React replaced it).
+ *
+ * The walk does not visit what it cannot change:
+ * - a subtree that is the very node object of the previous commit's tree, when that tree was themed for the current theme
+ *   and no view registered late since: nothing in it can need work (nodes are immutable). This makes a React commit cost
+ *   what React changed, not the size of the tree.
+ * - a `display: none` subtree (a frozen screen): it is themed in the commit that shows it again, before it is mounted.
  */
-class ThemeHook final : public UIManagerCommitHook, public std::enable_shared_from_this<ThemeHook> {
+class ThemeHook final : public UIManagerCommitHook {
 public:
   void commitHookWasRegistered(const UIManager& uiManager) noexcept override {
-    _contextContainer = uiManager.getContextContainer();
+    setContextContainer(uiManager.getContextContainer());
   }
 
   void commitHookWasUnregistered(const UIManager&) noexcept override {}
 
-  void add(
-      const std::shared_ptr<const ShadowNodeFamily>& family,
-      std::unordered_map<std::string, std::shared_ptr<const TypedDelta>> byTheme,
-      Props::Shared base,
-      const char* componentName,
-      SurfaceId surface,
-      bool renderedWithCurrentTheme = false) {
+  void setContextContainer(std::shared_ptr<const ContextContainer> container) {
     std::lock_guard<std::mutex> lock(_mutex);
-
-    Entry entry;
-
-    entry.family = family;
-    entry.base = std::move(base);
-    entry.componentName = componentName;
-    entry.surface = surface;
-
-    for (auto& [name, delta] : byTheme) {
-      const auto id = internTheme(name);
-
-      if (id != kNoTheme) {
-        entry.slots[id].delta = std::move(delta);
-      }
-    }
-
-    // React already rendered this view with the current theme's values (its props are `base`): nothing to apply until the
-    // theme changes or React replaces the props. Without this every mounted view is cloned once right after mount, and the
-    // flush that follows commits the whole tree again.
-    if (renderedWithCurrentTheme && _theme != kNoTheme) {
-      entry.appliedEpoch = _epoch;
-      entry.appliedProps = entry.base.get();
-    }
-
-    _entries[family.get()] = std::move(entry);
-  }
-
-  // Builds the props of every theme for views that have not been styled yet, from the props they registered with, so the
-  // first switch finds them cached. Runs on a background thread; building props only reads the (immutable) source.
-  void prewarm() {
-    struct Job {
-      const ShadowNodeFamily* family;
-      Props::Shared base;
-      const char* componentName;
-      SurfaceId surface;
-      std::vector<std::pair<ThemeId, std::shared_ptr<const TypedDelta>>> deltas;
-    };
-
-    std::vector<Job> jobs;
-
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-
-      for (const auto& [family, entry] : _entries) {
-        // lineage intact (still built from the registration props) and some themes not prepared yet
-        if (entry.base && entry.componentName) {
-          Job job{family, entry.base, entry.componentName, entry.surface, {}};
-
-          for (ThemeId id = 0; id < kMaxThemes; id++) {
-            if (entry.slots[id].delta && !entry.slots[id].produced) {
-              job.deltas.emplace_back(id, entry.slots[id].delta);
-            }
-          }
-
-          if (!job.deltas.empty()) {
-            jobs.push_back(std::move(job));
-          }
-        }
-      }
-    }
-
-    if (jobs.empty() || !_contextContainer) {
-      return;
-    }
-
-    std::vector<std::vector<std::pair<ThemeId, Props::Shared>>> built(jobs.size());
-
-    for (size_t i = 0; i < jobs.size(); i++) {
-      for (const auto& [id, delta] : jobs[i].deltas) {
-        if (auto props = buildPropsFrom(jobs[i].surface, jobs[i].componentName, *jobs[i].base, *delta)) {
-          built[i].emplace_back(id, std::move(props));
-        }
-      }
-    }
-
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    for (size_t i = 0; i < jobs.size(); i++) {
-      auto entry = _entries.find(jobs[i].family);
-
-      // only if the view still has the props we built from (React did not change them meanwhile)
-      if (entry != _entries.end() && entry->second.base == jobs[i].base) {
-        for (auto& [id, props] : built[i]) {
-          auto& slot = entry->second.slots[id].produced;
-
-          if (!slot) {
-            slot = std::move(props); // keeps a version the hook built in the meantime
-          }
-        }
-      }
-    }
-  }
-
-  void remove(const ShadowNodeFamily* family) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _entries.erase(family);
+    _contextContainer = std::move(container);
   }
 
   // Interns the declared theme names in order, so slot ids are deterministic and a later typo cannot take a slot.
@@ -356,11 +281,151 @@ public:
     return static_cast<int>(kMaxThemes);
   }
 
+  // One style's deltas by theme name -> the shared per-theme table. Names past kMaxThemes are dropped.
+  std::shared_ptr<const ThemeStyle> makeStyle(const std::vector<std::pair<std::string, std::shared_ptr<const TypedDelta>>>& byName) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    auto style = std::make_shared<ThemeStyle>();
+
+    for (const auto& [name, delta] : byName) {
+      if (const auto id = internTheme(name); id != kNoTheme) {
+        style->byTheme[id] = delta;
+      }
+    }
+
+    return style;
+  }
+
+  void add(
+      const std::shared_ptr<const ShadowNodeFamily>& family,
+      std::shared_ptr<const ThemeStyle> style,
+      Props::Shared base,
+      const char* componentName,
+      SurfaceId surface,
+      bool renderedWithCurrentTheme = false) {
+    std::lock_guard<std::mutex> lock(_mutex);
+
+    // unmounted views leave expired entries behind; drop them as the map grows, not only every 128 commits
+    if (_entries.size() >= _purgeAt) {
+      purgeExpired();
+      _purgeAt = std::max<size_t>(1024, _entries.size() * 2);
+    }
+
+    auto& entry = _entries[family.get()];
+
+    entry = Entry{};
+    entry.family = family;
+    entry.style = std::move(style);
+    entry.base = std::move(base);
+    entry.componentName = componentName;
+    entry.surface = surface;
+
+    // React already rendered this view with the current theme's values (its props are `base`): nothing to apply until the
+    // theme changes or React replaces the props. Without this every mounted view is cloned once right after mount, and the
+    // flush that follows commits the whole tree again.
+    if (renderedWithCurrentTheme && _theme != kNoTheme) {
+      entry.appliedEpoch = _epoch;
+      entry.appliedProps = entry.base.get();
+    } else if (_theme != kNoTheme) {
+      // registered with props of another theme (a re-attach, a switch between render and attach): the next commit must look
+      // at it, so the previous tree no longer proves anything
+      ++_registrationGeneration;
+      _stale = true;
+    }
+
+    _prewarmQueue.push_back(family);
+  }
+
+  void remove(const ShadowNodeFamily* family) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _entries.erase(family);
+  }
+
   void setTheme(const std::string& theme) {
     std::lock_guard<std::mutex> lock(_mutex);
     _theme = internTheme(theme);
     ++_epoch;
-    _fullPending = true;
+  }
+
+  // A view registered with another theme's props since the last commit: the caller commits once so it is themed now.
+  bool hasStale() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _stale && _theme != kNoTheme;
+  }
+
+  // Builds the props of every theme for views registered (or re-rendered by React) since the last call, from the props they
+  // registered with, so a switch finds them cached. Runs off the JS thread; building props only reads the (immutable) source.
+  void prewarm() {
+    struct Job {
+      const ShadowNodeFamily* family;
+      Props::Shared base;
+      const char* componentName;
+      SurfaceId surface;
+      std::vector<std::pair<ThemeId, std::shared_ptr<const TypedDelta>>> deltas;
+    };
+
+    std::vector<Job> jobs;
+    std::shared_ptr<const ContextContainer> context;
+
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      std::vector<std::weak_ptr<const ShadowNodeFamily>> queue;
+
+      queue.swap(_prewarmQueue);
+      context = _contextContainer;
+
+      for (const auto& weak : queue) {
+        const auto family = weak.lock();
+        const auto it = family ? _entries.find(family.get()) : _entries.end();
+
+        if (it == _entries.end() || !it->second.base || !it->second.componentName) {
+          continue;
+        }
+
+        const auto& entry = it->second;
+        Job job{family.get(), entry.base, entry.componentName, entry.surface, {}};
+
+        for (ThemeId id = 0; id < kMaxThemes; id++) {
+          if (entry.style->byTheme[id] && !entry.produced[id]) {
+            job.deltas.emplace_back(id, entry.style->byTheme[id]);
+          }
+        }
+
+        if (!job.deltas.empty()) {
+          jobs.push_back(std::move(job));
+        }
+      }
+    }
+
+    if (jobs.empty() || !context) {
+      return;
+    }
+
+    std::vector<std::vector<std::pair<ThemeId, Props::Shared>>> built(jobs.size());
+
+    for (size_t i = 0; i < jobs.size(); i++) {
+      for (const auto& [id, delta] : jobs[i].deltas) {
+        if (auto props = buildPropsFrom(*context, jobs[i].surface, jobs[i].componentName, *jobs[i].base, *delta)) {
+          built[i].emplace_back(id, std::move(props));
+        }
+      }
+    }
+
+    std::lock_guard<std::mutex> lock(_mutex);
+
+    for (size_t i = 0; i < jobs.size(); i++) {
+      auto entry = _entries.find(jobs[i].family);
+
+      // only if the view still has the props we built from (React did not change them meanwhile)
+      if (entry != _entries.end() && entry->second.base == jobs[i].base) {
+        for (auto& [id, props] : built[i]) {
+          auto& slot = entry->second.produced[id];
+
+          if (!slot) {
+            slot = std::move(props); // keeps a version the hook built in the meantime
+          }
+        }
+      }
+    }
   }
 
   // Debug (inspect): what the hook believes about one view, next to the props the committed tree holds for it.
@@ -375,42 +440,34 @@ public:
     const auto& e = it->second;
 
     return "ep=" + std::to_string(e.appliedEpoch) + "/" + std::to_string(_epoch) + " app==cur:" + std::to_string(current == e.appliedProps) +
-        " base==cur:" + std::to_string(current == e.base.get()) + " delta:" + std::to_string(_theme != kNoTheme && e.slots[_theme].delta != nullptr) +
-        " prod:" + std::to_string(_theme != kNoTheme && e.slots[_theme].produced.get() == current) + " " + (e.componentName ? e.componentName : "?");
+        " base==cur:" + std::to_string(current == e.base.get()) + " delta:" + std::to_string(_theme != kNoTheme && e.style->byTheme[_theme] != nullptr) +
+        " prod:" + std::to_string(_theme != kNoTheme && e.produced[_theme].get() == current) + " " + (e.componentName ? e.componentName : "?");
   }
 
-  bool hasUnapplied() {
+  // Debug (inspect): every live registered view with what the current theme gives it.
+  struct Registered {
+    std::shared_ptr<const ShadowNodeFamily> family;
+    std::shared_ptr<const TypedDelta> delta; // null: no style for the current theme
+  };
+
+  std::vector<Registered> registered() {
     std::lock_guard<std::mutex> lock(_mutex);
-
-    if (_theme == kNoTheme) {
-      return false;
-    }
-
-    for (const auto& [_, entry] : _entries) {
-      if (entry.appliedEpoch != _epoch) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  // Background colours of every registered view for the current theme (used by the iOS direct path).
-  std::vector<std::pair<Tag, SharedColor>> backgrounds() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    std::vector<std::pair<Tag, SharedColor>> result;
+    std::vector<Registered> result;
 
     result.reserve(_entries.size());
 
     for (const auto& [_, entry] : _entries) {
-      auto family = entry.family.lock();
-
-      if (family && _theme != kNoTheme && entry.slots[_theme].delta && entry.slots[_theme].delta->background) {
-        result.emplace_back(family->getTag(), *entry.slots[_theme].delta->background);
+      if (auto family = entry.family.lock()) {
+        result.push_back({std::move(family), _theme != kNoTheme ? entry.style->byTheme[_theme] : nullptr});
       }
     }
 
     return result;
+  }
+
+  size_t size() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _entries.size();
   }
 
   HookStats stats() {
@@ -420,87 +477,96 @@ public:
 
   RootShadowNode::Unshared shadowTreeWillCommit(
       const ShadowTree&,
-      const RootShadowNode::Shared&,
+      const RootShadowNode::Shared& oldRoot,
       const RootShadowNode::Unshared& newRoot,
       const ShadowTreeCommitOptions&) noexcept override {
     using Clock = std::chrono::steady_clock;
     const auto t0 = Clock::now();
 
-    // One pass over the new tree, under one lock hold: decide per registered view, clone it (or take its pre-built node) and
-    // record what was applied. React Native's cloneMultiple does the same job but builds a Tag->count hash map with a heap
-    // allocation per node, locks a weak_ptr per ancestor hop and re-scans every ancestor's children; this walk does a
-    // single pointer-keyed lookup per node.
+    // One pass over the new tree, under one lock hold: decide per registered view, clone it and record what was applied.
     std::unique_lock<std::mutex> lock(_mutex);
 
     if (_theme == kNoTheme || _entries.empty()) {
+      // nothing registered can be wrong in it: the next commit may skip what it shares with this tree
+      _stale = false;
+      remember(newRoot);
+
       return newRoot;
     }
 
     // views that unmounted never show up in a walk, so drop their entries now and then
     if ((++_commits & 127) == 0) {
-      for (auto it = _entries.begin(); it != _entries.end();) {
-        it = it->second.family.expired() ? _entries.erase(it) : std::next(it);
-      }
+      purgeExpired();
     }
 
     Walk walk;
 
     walk.theme = _theme;
     walk.epoch = _epoch;
-    walk.full = _fullPending;
 
-    auto cloned = walkTree(*newRoot, walk);
+    // The previous tree proves its unchanged subtrees right only if this hook produced it for the current theme and no view
+    // registered late since. A commit that failed after the hook ran never becomes a previous tree, so it proves nothing.
+    const ShadowNode* old = provenTree(oldRoot) ? oldRoot.get() : nullptr;
+
+    _stale = false;
+
+    auto cloned = walkTree(*newRoot, old, walk);
+    auto result = cloned ? std::static_pointer_cast<RootShadowNode>(cloned) : newRoot;
+
+    remember(result);
 
     const auto t1 = Clock::now();
-    if (!cloned) {
-      _stats.scanMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
-      _stats.scanned = walk.scanned;
+    const double elapsed = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-      return newRoot;
-    }
-
-    if (walk.full && _epoch == walk.epoch) {
-      _fullPending = false;
-    }
-
-    // the walk is the scan: it finds and builds in one pass, so the whole time is reported as clone time
-    _stats.scanMs = 0;
-    _stats.cloneMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    _stats.scanMs = cloned ? 0 : elapsed;
+    _stats.cloneMs = cloned ? elapsed : 0;
     _stats.propsMs = static_cast<double>(walk.propsNs) / 1e6;
     _stats.applied = walk.applied;
     _stats.reused = walk.reused;
     _stats.missNotOurs = walk.missNotOurs;
     _stats.missChildren = walk.missChildren;
-    _stats.fullApply = walk.full;
+    _stats.fullApply = old == nullptr;
     _stats.scanned = walk.scanned;
+    _stats.visited = walk.visited;
+    _stats.skipped = walk.skipped;
+    _stats.hidden = walk.hidden;
 
-    return std::static_pointer_cast<RootShadowNode>(cloned);
+    return result;
   }
 
 private:
-  // Themes are interned to small ids so a view's per-theme data is one flat array instead of three string-keyed hash maps:
-  // a theme switch touches every registered view, and chasing map nodes per view is what a cold cache pays for.
-  using ThemeId = uint8_t;
-  static constexpr ThemeId kMaxThemes = 6;
-  static constexpr ThemeId kNoTheme = 0xFF;
-
-  // One cache line per theme slot: the commit reads delta / produced of exactly one slot per view.
-  struct alignas(64) Slot {
-    std::shared_ptr<const TypedDelta> delta; // what this theme changes on the view (null: view has no style for the theme)
-    // the props we built for this theme earlier; reused while the node still holds one of our props objects
-    Props::Shared produced;
-  };
-
-  // Hot fields first (one cache line): the commit reads these for every registered view, so a cold cache pays per line.
+  // Hot fields first: the commit reads these for every registered view it visits.
   struct Entry {
     std::weak_ptr<const ShadowNodeFamily> family;
     uint64_t appliedEpoch = 0;
-    // The props object last applied. Not owning: it is always also held by slots[theme].produced, so it stays alive.
+    // The props object last applied. Not owning: it is always also held by `produced[theme]` or `base`, so it stays alive.
     const Props* appliedProps = nullptr;
-    Props::Shared base; // the props the view registered with (what produced[] is built from when pre-warming)
-    std::array<Slot, kMaxThemes> slots;
+    std::shared_ptr<const ThemeStyle> style;
+    Props::Shared base; // the props React last gave the view (what produced[] is built from)
     const char* componentName = nullptr;
     SurfaceId surface = 0;
+    std::array<Props::Shared, kMaxThemes> produced; // props built per theme, reused while the node holds one of ours
+  };
+
+  // A tree this hook returned, and what it was themed for.
+  struct Proof {
+    std::weak_ptr<const ShadowNode> root;
+    const ShadowNode* pointer = nullptr;
+    uint64_t epoch = 0;
+    uint64_t registrations = 0;
+  };
+
+  struct Walk {
+    ThemeId theme = kNoTheme;
+    uint64_t epoch = 0;
+    int scanned = 0;
+    int visited = 0;
+    int applied = 0;
+    int reused = 0;
+    int skipped = 0;
+    int hidden = 0;
+    int missNotOurs = 0, missChildren = 0;
+    int64_t propsNs = 0;
   };
 
   // Caller holds _mutex. Returns kNoTheme when more than kMaxThemes distinct themes exist.
@@ -520,29 +586,93 @@ private:
     return static_cast<ThemeId>(_themeNames.size() - 1);
   }
 
-  struct Walk {
-    ThemeId theme = kNoTheme;
-    uint64_t epoch = 0;
-    bool full = false;
-    int scanned = 0;
-    int applied = 0;
-    int reused = 0;
-    int missNotOurs = 0, missChildren = 0;
-    int64_t propsNs = 0;
-  };
+  // Caller holds _mutex.
+  void purgeExpired() {
+    std::vector<const ShadowNodeFamily*> expired;
 
-  // Returns the replacement for `node`, or nullptr when nothing under it changed. Caller holds _mutex.
-  std::shared_ptr<ShadowNode> walkTree(const ShadowNode& node, Walk& walk) {
+    for (const auto& [key, entry] : _entries) {
+      if (entry.family.expired()) {
+        expired.push_back(key);
+      }
+    }
+
+    for (const auto* key : expired) {
+      _entries.erase(key);
+    }
+  }
+
+  // Caller holds _mutex. The committed tree is the very root object a hook returned (ShadowTree::tryCommit stores it as is).
+  bool provenTree(const RootShadowNode::Shared& oldRoot) const {
+    for (const auto& proof : _proofs) {
+      if (proof.pointer == oldRoot.get() && !proof.root.expired()) {
+        return proof.epoch == _epoch && proof.registrations == _registrationGeneration;
+      }
+    }
+
+    return false;
+  }
+
+  // Caller holds _mutex. Several surfaces and retried commits interleave, hence a few slots.
+  void remember(const std::shared_ptr<const ShadowNode>& root) {
+    _proofs[_nextProof] = Proof{root, root.get(), _epoch, _registrationGeneration};
+    _nextProof = (_nextProof + 1) % _proofs.size();
+  }
+
+  // The node at the same place in the previous tree: same index, or shifted by the difference in child count (an insertion or
+  // removal above it). Anything else: no counterpart, the subtree is walked in full.
+  static const ShadowNode* counterpart(
+      const std::vector<std::shared_ptr<const ShadowNode>>& olds,
+      const std::vector<std::shared_ptr<const ShadowNode>>& news,
+      size_t i) {
+    const auto& family = news[i]->getFamily();
+
+    if (i < olds.size() && &olds[i]->getFamily() == &family) {
+      return olds[i].get();
+    }
+
+    const auto shifted = static_cast<std::ptrdiff_t>(i) + static_cast<std::ptrdiff_t>(olds.size()) -
+        static_cast<std::ptrdiff_t>(news.size());
+
+    if (shifted >= 0 && shifted < static_cast<std::ptrdiff_t>(olds.size()) && &olds[shifted]->getFamily() == &family) {
+      return olds[shifted].get();
+    }
+
+    return nullptr;
+  }
+
+  // Returns the replacement for `node`, or nullptr when nothing under it changed. `old` is the same view in a proven previous
+  // tree (or null). Caller holds _mutex.
+  std::shared_ptr<ShadowNode> walkTree(const ShadowNode& node, const ShadowNode* old, Walk& walk) {
     using Clock = std::chrono::steady_clock;
+
+    if (old == &node) {
+      ++walk.skipped;
+      return nullptr;
+    }
+
+    if (isHidden(node)) {
+      ++walk.hidden;
+      return nullptr;
+    }
+
+    // a subtree that was hidden in the previous tree was not themed then: being the same objects proves nothing
+    if (old != nullptr && isHidden(*old)) {
+      old = nullptr;
+    }
+
+    ++walk.visited;
 
     // children first: a changed child makes this node a (cheap) clone with a new children list
     ShadowNode::SharedListOfShared newChildren;
     {
       const auto& children = node.getChildren();
+      const auto* oldChildren = old != nullptr ? &old->getChildren() : nullptr;
       std::vector<std::shared_ptr<ShadowNode>> replaced;
 
       for (size_t i = 0; i < children.size(); i++) {
-        if (auto next = walkTree(*children[i], walk)) {
+        const ShadowNode* oldChild = oldChildren != nullptr ? counterpart(*oldChildren, children, i) : nullptr;
+
+        if (auto next = walkTree(*children[i], oldChild, walk)) {
           if (replaced.empty()) {
             replaced.resize(children.size());
           }
@@ -577,20 +707,17 @@ private:
     if (entry && entry->family.expired()) {
       entry = nullptr;
     }
-    const Slot* target = entry ? &entry->slots[walk.theme] : nullptr;
 
-    if (target && !target->delta) {
-      target = nullptr; // registered, but with no style for this theme
-    }
+    const TypedDelta* delta = entry ? entry->style->byTheme[walk.theme].get() : nullptr; // null: no style for this theme
 
-    if (target) {
+    if (delta) {
       ++walk.scanned;
     }
 
     const Props* current = node.getProps().get();
 
     // a registered view needs work after a theme change, or when React replaced its props with something we did not make
-    const bool needs = target && (walk.full || entry->appliedEpoch != walk.epoch || current != entry->appliedProps);
+    const bool needs = delta && (entry->appliedEpoch != walk.epoch || current != entry->appliedProps);
 
     if (!needs) {
       if (!newChildren) {
@@ -600,47 +727,49 @@ private:
       return node.clone({.children = newChildren});
     }
 
-    // the node still holds a props object we made (or the registration props the cached ones derive from)
+    // the node still holds a props object we made (or the props the cached ones derive from)
     bool ours = current == entry->appliedProps || current == entry->base.get();
 
     for (ThemeId id = 0; !ours && id < kMaxThemes; id++) {
-      ours = entry->slots[id].produced.get() == current;
+      ours = entry->produced[id].get() == current;
     }
 
     std::shared_ptr<ShadowNode> result;
     const Props* applied = nullptr;
+    auto& target = entry->produced[walk.theme];
 
-    if (ours && target->produced) {
+    if (ours && target) {
       ++walk.reused;
 
       if (newChildren) {
         ++walk.missChildren;
       }
 
-      result = cloneThemed(node, target->produced, newChildren, *target->delta);
-
-      applied = target->produced.get();
+      result = cloneThemed(node, target, newChildren, *delta);
+      applied = target.get();
     } else {
       ++walk.missNotOurs;
 
       const auto p0 = Clock::now();
-      auto props = buildProps(node, *target->delta);
+      auto props = buildProps(node, *delta);
 
       walk.propsNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - p0).count();
 
-      result = cloneThemed(node, props, newChildren, *target->delta);
+      result = cloneThemed(node, props, newChildren, *delta);
       applied = props.get();
 
-      // React changed the props: they are the new source of truth, everything built from the old ones is stale
+      // React changed the props: they are the new source of truth. Everything built from the old ones is stale; the next
+      // React commit brings these same props again (React's handle), so they become `base` and the clone below is reused.
       if (!ours) {
-        for (auto& slot : entry->slots) {
-          slot.produced = nullptr;
+        for (auto& slot : entry->produced) {
+          slot = nullptr;
         }
 
-        entry->base = nullptr;
+        entry->base = node.getProps();
+        _prewarmQueue.push_back(entry->family);
       }
 
-      entry->slots[walk.theme].produced = std::move(props); // keeps `applied` alive
+      target = std::move(props); // keeps `applied` alive
     }
 
     ++walk.applied;
@@ -679,8 +808,13 @@ private:
   }
 
   // Typed path only (View, Paragraph). Returns nullptr for any other component.
-  Props::Shared buildPropsFrom(SurfaceId surface, const char* name, const Props& source, const TypedDelta& delta) {
-    PropsParserContext context{surface, *_contextContainer};
+  static Props::Shared buildPropsFrom(
+      const ContextContainer& container,
+      SurfaceId surface,
+      const char* name,
+      const Props& source,
+      const TypedDelta& delta) {
+    PropsParserContext context{surface, container};
 
     if (std::strcmp(name, ViewComponentName) == 0) {
       auto props = copyProps<ViewShadowNodeProps>(context, source);
@@ -707,13 +841,16 @@ private:
     return nullptr;
   }
 
+  // Caller holds _mutex.
   Props::Shared buildProps(const ShadowNode& node, const TypedDelta& delta) {
-    if (auto typed = buildPropsFrom(node.getFamily().getSurfaceId(), node.getComponentName(), *node.getProps(), delta)) {
+    const auto surface = node.getFamily().getSurfaceId();
+
+    if (auto typed = buildPropsFrom(*_contextContainer, surface, node.getComponentName(), *node.getProps(), delta)) {
       return typed;
     }
 
     // anything else: let React Native parse the raw props
-    PropsParserContext context{node.getFamily().getSurfaceId(), *_contextContainer};
+    PropsParserContext context{surface, *_contextContainer};
 
     return node.getComponentDescriptor().cloneProps(context, node.getProps(), RawProps(delta.raw));
   }
@@ -751,12 +888,17 @@ private:
   }
 
   std::mutex _mutex;
-  std::unordered_map<const ShadowNodeFamily*, Entry> _entries;
+  folly::F14FastMap<const ShadowNodeFamily*, Entry> _entries;
+  std::vector<std::weak_ptr<const ShadowNodeFamily>> _prewarmQueue;
+  std::array<Proof, 16> _proofs{};
+  size_t _nextProof = 0;
   ThemeId _theme = kNoTheme;
   std::vector<std::string> _themeNames;
   uint64_t _epoch = 0;
+  uint64_t _registrationGeneration = 0; // bumped by every registration with another theme's props
+  bool _stale = false;                  // such a registration happened since the last walk
   uint64_t _commits = 0;
-  bool _fullPending = false; // set by setTheme: the next commit applies the theme to every registered view
+  size_t _purgeAt = 1024;
   HookStats _stats;
   std::shared_ptr<const ContextContainer> _contextContainer;
 };
