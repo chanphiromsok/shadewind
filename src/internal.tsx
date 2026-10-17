@@ -21,6 +21,15 @@ type RawMethods = {
   configure(names: string[]): { maxThemes: number; ok: boolean };
   loadClassTable(text: string): boolean;
   mergeClasses(...parts: string[]): string | undefined;
+  loadStyleTable(json: string): StyleTableLoad;
+  resolveClasses(
+    className: string,
+    theme: string,
+    screenWidth: number,
+    isPressed?: unknown,
+    isFocused?: unknown,
+    isDisabled?: unknown
+  ): ResolvedStyles | undefined;
   setTheme(name: string, strategy?: ThemeStrategy): ThemeTimings;
   flushPending(): void;
   prepare(): void;
@@ -37,6 +46,22 @@ const getNative = () =>
   (nativeInstance ??= NitroModules.createHybridObject<Shadewind>(
     'Shadewind'
   ) as Shadewind & RawMethods);
+
+/** loadStyleTable's answer: classes the table holds, classes it could not read (0 for a table styleTable.ts built). */
+export type StyleTableLoad = {
+  ok: boolean;
+  classes: number;
+  unsupported: number;
+  error?: string;
+};
+
+/** Uniwind's resolveStyles result, as the native resolver returns it. */
+export type ResolvedStyles = {
+  styles: Record<string, unknown>;
+  dependencies: number[];
+  dependencySum: number;
+  hasDataAttributes: boolean;
+};
 
 /** Debug report: where a stale colour comes from. All counts refer to backgroundColor of registered views. */
 export type InspectReport = {
@@ -284,6 +309,31 @@ export const ShadewindEngine = {
   },
   mergeClasses(...parts: string[]): string | undefined {
     return getNative().mergeClasses(...parts);
+  },
+  /**
+   * Installs the class table src/uniwind/styleTable.ts builds (Uniwind's stylesheet evaluated per theme) and the global host
+   * function `__swResolve` (resolveClasses without Nitro's method wrapper) in this runtime.
+   */
+  loadStyleTable(json: string): StyleTableLoad {
+    return getNative().loadStyleTable(json);
+  },
+  /** Uniwind's resolveStyles for a className, natively from the loaded table, or undefined: resolve it with Uniwind's JS. */
+  resolveClasses(
+    className: string,
+    theme: string,
+    screenWidth: number,
+    isPressed?: unknown,
+    isFocused?: unknown,
+    isDisabled?: unknown
+  ): ResolvedStyles | undefined {
+    return getNative().resolveClasses(
+      className,
+      theme,
+      screenWidth,
+      isPressed,
+      isFocused,
+      isDisabled
+    );
   },
   /** Declares the theme names in order (native slot ids). Returns the slot count and whether all names fit. */
   configure(names: string[]): { maxThemes: number; ok: boolean } {

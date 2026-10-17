@@ -11,6 +11,7 @@ import { FeedSampleStatic } from './src/bench/FeedSampleStatic';
 import { FeedSampleAot } from './src/bench/FeedSampleAot';
 import { FeedSampleNoPress } from './src/bench/FeedSampleNoPress';
 import { runIdle, runStall, type IdleResult, type StallResult } from './src/bench/stall';
+import { ResolveBench } from './src/bench/ResolveBench';
 
 type Kind = 'class' | 'static' | 'aot' | 'nopress';
 const KINDS: Kind[] = ['class', 'aot', 'nopress', 'static'];
@@ -121,6 +122,7 @@ export default function App() {
     <SafeAreaProvider>
       <RootNavigator />
       <AutoBench />
+      <ResolveBench />
       <Probe />
     </SafeAreaProvider>
   );

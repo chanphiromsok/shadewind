@@ -1,5 +1,7 @@
 // `shadewind/uniwind`: engine support for Uniwind apps. Needs `withShadewind()` from `shadewind/metro` in metro.config.js.
 export { installUniwind, type InstallResult } from './install';
+/** Uniwind's class resolution in C++ (cpp/css/StyleResolver.hpp): status, rebuild, on / off. */
+export { nativeResolver, type ResolverStatus } from './nativeResolver';
 export { View } from './View';
 export { Text } from './Text';
 export { Pressable } from './Pressable';

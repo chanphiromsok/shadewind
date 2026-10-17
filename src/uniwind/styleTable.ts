@@ -44,7 +44,14 @@ export type StyleTableInput = {
 // Uniwind 1.12's runtime (core/native/runtime.ts): fields that change while the app runs. A value that reads one is not fixed.
 // The others are fixed for the session (hairlineWidth, pixelRatio) or pure (colorMix, parseColor, cubicBezier, lightDark, which
 // reads currentThemeName: evaluated per theme).
-const CHANGING_RUNTIME = ['screen', 'orientation', 'insets', 'rtl', 'colorScheme', 'fontScale'];
+const CHANGING_RUNTIME = [
+  'screen',
+  'orientation',
+  'insets',
+  'rtl',
+  'colorScheme',
+  'fontScale',
+];
 
 export type StyleTable = {
   json: string;
@@ -83,7 +90,11 @@ const INVALID = Symbol('invalid');
 
 // JSON keeps it exactly: finite numbers, strings, booleans, null, and arrays / plain objects of them
 const isPlain = (value: unknown): boolean => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
     return true;
   }
 
@@ -98,14 +109,17 @@ const isPlain = (value: unknown): boolean => {
   if (typeof value === 'object') {
     const proto = Object.getPrototypeOf(value);
 
-    return (proto === Object.prototype || proto === null) && Object.values(value as object).every(isPlain);
+    return (
+      (proto === Object.prototype || proto === null) &&
+      Object.values(value as object).every(isPlain)
+    );
   }
 
   return false;
 };
 
 export const buildStyleTable = (input: StyleTableInput): StyleTable => {
-  const { stylesheet, varsByTheme, themes, runtime } = input;
+  const { runtime } = input;
   const runtimeReads = new Set<string>();
   const previousTheme = runtime.currentThemeName;
   const restore: Array<() => void> = [];
@@ -123,7 +137,9 @@ export const buildStyleTable = (input: StyleTableInput): StyleTable => {
         throw new Error(`cannot watch runtime.${key}`);
       }
 
-      let current = descriptor.get ? descriptor.get.call(runtime) : descriptor.value;
+      let current = descriptor.get
+        ? descriptor.get.call(runtime)
+        : descriptor.value;
 
       Object.defineProperty(runtime, key, {
         configurable: true,
@@ -137,7 +153,13 @@ export const buildStyleTable = (input: StyleTableInput): StyleTable => {
         },
       });
       restore.push(() => {
-        Object.defineProperty(runtime, key, descriptor.get || descriptor.set ? descriptor : { ...descriptor, value: current });
+        Object.defineProperty(
+          runtime,
+          key,
+          descriptor.get || descriptor.set
+            ? descriptor
+            : { ...descriptor, value: current }
+        );
       });
     }
 
@@ -148,12 +170,19 @@ export const buildStyleTable = (input: StyleTableInput): StyleTable => {
   }
 };
 
-const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable => {
+const build = (
+  input: StyleTableInput,
+  runtimeReads: Set<string>
+): StyleTable => {
   const { stylesheet, varsByTheme, themes, runtime } = input;
 
   // Evaluates one value getter for one theme, recording every variable it reads. `override` sets one variable the way a class of
   // the className does it in resolveStyles (`vars[name] = getter` on a clone of the theme's variables).
-  const evaluate = (getter: Var, theme: string, override?: { name: string; getter: Var }) => {
+  const evaluate = (
+    getter: Var,
+    theme: string,
+    override?: { name: string; getter: Var }
+  ) => {
     const themeVars = varsByTheme[theme];
 
     if (!themeVars) {
@@ -204,9 +233,17 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
     for (const style of stylesheet[className] ?? []) {
       for (const [property, getter] of style.entries) {
         if (property[0] === '-') {
-          const provider = { id: nextProvider++, name: property, getter, valid: true };
+          const provider = {
+            id: nextProvider++,
+            name: property,
+            getter,
+            valid: true,
+          };
 
-          providers.set(property, [...(providers.get(property) ?? []), provider]);
+          providers.set(property, [
+            ...(providers.get(property) ?? []),
+            provider,
+          ]);
           providerOf.set(getter, provider);
         }
       }
@@ -219,7 +256,12 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
       for (const theme of themes) {
         const result = evaluate(provider.getter, theme);
 
-        if (!result || [...result.reads].some((key) => key === 'currentColor' || providers.has(key))) {
+        if (
+          !result ||
+          [...result.reads].some(
+            (key) => key === 'currentColor' || providers.has(key)
+          )
+        ) {
           provider.valid = false;
         }
       }
@@ -249,16 +291,25 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
       for (const [property, getter] of style.entries) {
         if (property[0] !== '-' && !POST_PROCESSED.has(property)) {
           for (const result of evaluatePlain(getter)) {
-            result?.reads.forEach((key) => providers.has(key) && readVariables.add(key));
+            result?.reads.forEach(
+              (key) => providers.has(key) && readVariables.add(key)
+            );
           }
         }
       }
     }
   }
 
-  const encodeValue = (property: string, value: unknown): unknown | typeof INVALID => {
+  const encodeValue = (
+    property: string,
+    value: unknown
+  ): unknown | typeof INVALID => {
     // Uniwind multiplies a lineHeight under 6 by fontSize after resolving: the resolver does it for numbers only
-    if (property === 'lineHeight' && value !== undefined && typeof value !== 'number') {
+    if (
+      property === 'lineHeight' &&
+      value !== undefined &&
+      typeof value !== 'number'
+    ) {
       return INVALID;
     }
 
@@ -283,7 +334,9 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
     if (property[0] === '-') {
       const provider = providerOf.get(getter);
 
-      return provider && (provider.valid || !readVariables.has(property)) ? [property, { def: provider.id }] : null;
+      return provider && (provider.valid || !readVariables.has(property))
+        ? [property, { def: provider.id }]
+        : null;
     }
 
     const plain: unknown[] = [];
@@ -296,7 +349,12 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
 
       const inline = [...result.reads].filter((key) => providers.has(key));
 
-      if (inline.length > 1 || (readVariable !== null && inline.length === 1 && inline[0] !== readVariable)) {
+      if (
+        inline.length > 1 ||
+        (readVariable !== null &&
+          inline.length === 1 &&
+          inline[0] !== readVariable)
+      ) {
         return null;
       }
 
@@ -327,7 +385,13 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
       for (const theme of themes) {
         const result = evaluate(getter, theme, provider);
 
-        if (!result || result.reads.has('currentColor') || [...result.reads].some((key) => key !== readVariable && providers.has(key))) {
+        if (
+          !result ||
+          result.reads.has('currentColor') ||
+          [...result.reads].some(
+            (key) => key !== readVariable && providers.has(key)
+          )
+        ) {
           return null;
         }
 
@@ -416,5 +480,9 @@ const build = (input: StyleTableInput, runtimeReads: Set<string>): StyleTable =>
     classes,
   });
 
-  return { json, classes: Object.keys(classes).length, fallback: fallback.length };
+  return {
+    json,
+    classes: Object.keys(classes).length,
+    fallback: fallback.length,
+  };
 };

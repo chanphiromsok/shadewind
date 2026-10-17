@@ -20,8 +20,9 @@ docker build -f cpp/harness/Dockerfile -t shadewind-harness .
 docker run --rm shadewind-harness
 ```
 
-Pass: `[  PASSED  ] 15 tests`, and in the benchmark the `current` column has `0` stale views in a reveal commit. Paste the two
-benchmark tables into the report. See `cpp/harness/README.md` for what they measure.
+Pass: `[  PASSED  ] 18 tests` (the engine, `ClassMerge`, and `StyleResolver.MatchesUniwind`: the native class resolver against
+136,260 results of Uniwind's own `resolveStyles`), and in the benchmark the `current` column has `0` stale views in a reveal
+commit. Paste the two benchmark tables into the report. See `cpp/harness/README.md` for what they measure.
 
 ## 2. JS checks
 
@@ -46,8 +47,8 @@ npm pack --pack-destination example-real/vendor        # writes shadewind-0.1.0.
 cd example-real && rm -rf node_modules/shadewind && npm install && cd ios && bundle exec pod install && cd ../..
 ```
 
-Check that `example-real/node_modules/shadewind/cpp/ThemeEngine.hpp` exists (it does not on `main`): if not, the app still runs the
-old engine.
+Check that `example-real/node_modules/shadewind/cpp/ThemeEngine.hpp` and `example-real/node_modules/shadewind/cpp/css/StyleResolver.hpp`
+exist (they do not on `main`): if not, the app still runs the old engine.
 
 ## 4. Freeze correctness on the simulator (the reason for this branch)
 
@@ -90,7 +91,27 @@ Report per launch: `className` / `static` mount means, `className - static` (the
 uses), idle and stall medians. Pass: `className - static` not worse than `main` beyond the launch-to-launch spread; stall and idle
 not worse; `tree a/b` equal.
 
-## 6. uniwind-benchmarks (render and theme, the published comparison)
+Note: on this branch the class resolver (step 6) is on in the `className` arm once its table is built (at the first idle,
+long before the 15 s mark). To see its share, run the branch arm a second time with the resolver off: add
+`nativeResolver.setEnabled(false)` (from `shadewind/uniwind`) after `installUniwind()` in `example-real/src/boot.ts`, repackage
+(step 3), and report both.
+
+## 6. Native class resolution on `example-real`
+
+Same app and build as step 5. Launch argument `-resolveBench 1` builds the class table five times, then resolves every class of
+the stylesheet and 400 random combinations, in every theme, resting and pressed, with Uniwind's own `resolveStyles` and with the
+native resolver, and shows one line on top of the app 5 s after launch:
+
+```sh
+xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -resolveBench 1
+```
+
+Report the line of 3 launches: table build and load ms, cases and how many resolve natively, per-resolution µs for Uniwind and
+native on the same cases, and `parity mismatches`. Pass: `parity mismatches 0` (if not, the `FIRST` text names the className:
+send it, it is a bug), `native` well above 0, the native µs below Uniwind's. The table is built on the JS thread: if build + load
+is above ~50 ms, say so (it runs when the app is first idle, but it is still a long task).
+
+## 7. uniwind-benchmarks (render and theme, the published comparison)
 
 ```sh
 git clone https://github.com/uni-stack/uniwind-benchmarks && cd uniwind-benchmarks && bun install
@@ -118,7 +139,7 @@ medians next to `uniwind` from the same run. For the theme scenario note that `h
 metric), so also run the engine arm with the synchronous strategy (`Shadewind.setTheme(name, 'hook')`, or the example's
 `-strategy hook`) and report both.
 
-## 7. Theme-switch benchmark in `example` (2003 views, every strategy)
+## 8. Theme-switch benchmark in `example` (2003 views, every strategy)
 
 ```sh
 cd example && npx react-native run-ios --mode Release --simulator "iPhone 17 Pro"
@@ -129,7 +150,7 @@ xcrun simctl launch --terminate-running-process booted uniwindshadow.example -be
 3 warm launches per strategy (discard the first cold one). Report JS-idle median, `visualMs` (hookAsync), and the
 `treeOK / viewOK / layerOK` line, which must be 2002 / 2002 / 2002.
 
-## 8. Android (optional, emulator)
+## 9. Android (optional, emulator)
 
 `example`: `npx react-native run-android --mode release`, then `adb shell am start -a android.intent.action.VIEW -d
 "uwbench://theme?strategy=hook"`. Android commits on the JS thread and prewarms on a background thread now (it was on the JS
@@ -139,5 +160,5 @@ thread). Report with a same-run plain Uniwind number only; the emulator's absolu
 
 - the harness tables (step 1)
 - the freeze sequences with the probe lines and whether a wrong colour was visible, branch and `main` (step 4)
-- per-launch numbers for steps 5-7, with the spread, branch and `main` side by side
+- per-launch numbers for steps 5-8, with the spread, branch and `main` side by side (step 6 on the branch only)
 - anything that failed, with the full output

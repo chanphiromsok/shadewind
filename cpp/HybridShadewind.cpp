@@ -1,5 +1,6 @@
 #include "HybridShadewind.hpp"
 #include "css/ClassMerge.hpp"
+#include "css/StyleResolver.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
@@ -176,6 +177,8 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
     prototype.registerRawHybridMethod("loadClassTable", 1, &HybridShadewind::loadClassTable);
     prototype.registerRawHybridMethod("mergeClasses", 0, &HybridShadewind::mergeClasses);
+    prototype.registerRawHybridMethod("loadStyleTable", 1, &HybridShadewind::loadStyleTable);
+    prototype.registerRawHybridMethod("resolveClasses", 6, &HybridShadewind::resolveStyleClasses);
     prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
   });
 }
@@ -495,6 +498,9 @@ jsi::Value HybridShadewind::mainBusyMs(jsi::Runtime&, const jsi::Value&, const j
 }
 
 static css::ClassMerge gClassMerge;
+// Uniwind's class resolution from the table src/uniwind/styleTable.ts builds; JS thread only (loaded and read there)
+static css::StyleResolver gStyleResolver;
+static css::StyleResolver::Result gResolved;
 
 // ---- class merge: zero-copy argument reads ------------------------------------------------------------------------------
 //
@@ -588,7 +594,120 @@ jsi::Value mergeAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
   return jsi::String::createFromAscii(rt, out.data(), out.size());
 }
 
+// isPressed / isFocused / isDisabled: only a boolean equals Uniwind's `true` / `false` (resolveStyles compares with !==)
+css::StyleResolver::Tri triOf(const jsi::Value& value) {
+  if (!value.isBool()) {
+    return css::StyleResolver::Tri::Unset;
+  }
+
+  return value.getBool() ? css::StyleResolver::Tri::True : css::StyleResolver::Tri::False;
+}
+
+jsi::Value styleValue(jsi::Runtime& rt, const css::StyleResolver::Item& item) {
+  if (!item.value) {
+    return jsi::Value(item.number);
+  }
+
+  if (item.value->undefined) {
+    return jsi::Value::undefined();
+  }
+
+  const folly::dynamic& value = item.value->value;
+
+  switch (value.type()) {
+    case folly::dynamic::DOUBLE:
+      return jsi::Value(value.getDouble());
+    case folly::dynamic::INT64:
+      return jsi::Value(static_cast<double>(value.getInt()));
+    case folly::dynamic::STRING:
+      return jsi::String::createFromUtf8(rt, value.getString());
+    case folly::dynamic::BOOL:
+      return jsi::Value(value.getBool());
+    case folly::dynamic::NULLT:
+      return jsi::Value::null();
+    default:
+      return jsi::valueFromDynamic(rt, value);
+  }
+}
+
+// (className, theme, screenWidth, isPressed, isFocused, isDisabled) -> Uniwind's resolveStyles result
+// ({ styles, dependencies, dependencySum, hasDataAttributes }), or undefined: resolve it with Uniwind's JS
+jsi::Value resolveClasses(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
+  MergeInput in;
+
+  if (count < 3 || !gStyleResolver.loaded() || !args[2].isNumber() || !readAscii(rt, args, 2, in)) {
+    return jsi::Value::undefined();
+  }
+
+  const int theme = gStyleResolver.themeIndex(in.views[1]);
+  const auto state = [&](size_t i) { return i < count ? triOf(args[i]) : css::StyleResolver::Tri::Unset; };
+
+  if (!gStyleResolver.resolve(in.views[0], theme, args[2].getNumber(), state(3), state(4), state(5), gResolved)) {
+    return jsi::Value::undefined();
+  }
+
+  jsi::Object styles(rt);
+
+  for (const auto& item : gResolved.styles) {
+    styles.setProperty(rt, gStyleResolver.propertyName(item.property).c_str(), styleValue(rt, item));
+  }
+
+  jsi::Array dependencies(rt, gResolved.dependencies.size());
+
+  for (size_t i = 0; i < gResolved.dependencies.size(); i++) {
+    dependencies.setValueAtIndex(rt, i, gResolved.dependencies[i]);
+  }
+
+  jsi::Object result(rt);
+
+  result.setProperty(rt, "styles", std::move(styles));
+  result.setProperty(rt, "dependencies", std::move(dependencies));
+  result.setProperty(rt, "dependencySum", static_cast<double>(gResolved.dependencySum));
+  result.setProperty(rt, "hasDataAttributes", false);
+
+  return result;
+}
+
 } // namespace
+
+// loadStyleTable(json): installs the table src/uniwind/styleTable.ts builds from Uniwind's stylesheet, and the plain global host
+// function `__swResolve` (see resolveClasses) in this runtime. Returns { ok, classes, unsupported, error? }.
+jsi::Value HybridShadewind::loadStyleTable(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  if (count < 1 || !args[0].isString()) {
+    throw jsi::JSError(rt, "Shadewind.loadStyleTable(json) expects a string");
+  }
+
+  std::string error;
+  const bool ok = gStyleResolver.load(args[0].asString(rt).utf8(rt), &error);
+  jsi::Object result(rt);
+
+  result.setProperty(rt, "ok", ok);
+  result.setProperty(rt, "classes", static_cast<double>(gStyleResolver.classCount()));
+  result.setProperty(rt, "unsupported", static_cast<double>(gStyleResolver.unsupportedCount()));
+
+  if (!ok) {
+    result.setProperty(rt, "error", jsi::String::createFromUtf8(rt, error));
+  }
+
+  if (ok) {
+    rt.global().setProperty(
+        rt, "__swResolve",
+        jsi::Function::createFromHostFunction(
+            rt, jsi::PropNameID::forAscii(rt, "__swResolve"), 6,
+            [](jsi::Runtime& runtime, const jsi::Value&, const jsi::Value* a, size_t n) -> jsi::Value {
+              return resolveClasses(runtime, a, n);
+            }));
+  } else {
+    rt.global().setProperty(rt, "__swResolve", jsi::Value::undefined());
+  }
+
+  return result;
+}
+
+// resolveClasses(className, theme, screenWidth, isPressed?, isFocused?, isDisabled?): the Nitro raw-method form of __swResolve
+jsi::Value HybridShadewind::resolveStyleClasses(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
+  return resolveClasses(rt, args, count);
+}
 
 // loadClassTable(text): installs the generated tailwind-merge conflict table (tools/cn-table). Returns true when usable.
 // It also installs a plain global host function (`__swCn`) that skips Nitro's method wrapper (measured ~23% faster).

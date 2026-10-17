@@ -1,4 +1,5 @@
 import type { ThemedStyles } from '../internal';
+import { installNativeResolver, type ResolverStore } from './nativeResolver';
 
 // The only file that reads Uniwind's runtime. Everything is loaded lazily and inside try/catch: the module that imports this is
 // evaluated while React Native is still setting up (Uniwind's component barrel), and a missing or unsupported Uniwind must
@@ -29,7 +30,7 @@ type Internals = {
   UniwindListener: {
     subscribe: (listener: () => void, dependencies: number[]) => () => void;
   };
-  StyleDependency: { Theme: number };
+  StyleDependency: { Theme: number; Variables: number };
 };
 
 let result: InstallResult | null = null;
@@ -96,6 +97,13 @@ const probe = (): InstallResult => {
       }
     }
   }, [StyleDependency.Theme]);
+
+  // cache misses of Uniwind's getStyles resolve natively once the class table is built (nativeResolver.ts)
+  installNativeResolver(
+    UniwindStore as unknown as ResolverStore,
+    UniwindListener,
+    StyleDependency.Variables
+  );
 
   return { active: true };
 };

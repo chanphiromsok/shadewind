@@ -28,7 +28,7 @@ declare module 'uniwind-internal/core/context' {
 }
 
 declare module 'uniwind-internal/common/consts' {
-  export const StyleDependency: { Theme: number };
+  export const StyleDependency: { Theme: number; Variables: number };
 }
 
 declare module 'uniwind-internal/components/utils' {

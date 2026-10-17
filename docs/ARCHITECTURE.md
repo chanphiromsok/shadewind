@@ -662,3 +662,46 @@ Tried and dropped:
 
 Not measured yet: the JS side of mount on a device (fewer JSI calls should show in `className - static`), and Android.
 `docs/LOCAL_TESTING.md` lists the device runs.
+
+## 19. Uniwind's class resolution in C++ (2026-10-17)
+
+Uniwind caches the result of a className per state and theme (`UniwindStore.getStyles`); on a miss, `resolveStyles` splits the
+className, walks the styles of every class, keeps the winning style per property and calls every winning value's getter (a JS
+function of the theme's CSS variables). Misses happen on the first render of a className, a new pressed / focused state, a new
+theme, a new screen width, and in Shadewind's adapter once per theme for every themed className (it needs every theme's props
+for the engine). That is what now runs natively when it can.
+
+- **Table** (`src/uniwind/styleTable.ts`, JS, once per session when the JS thread is first idle): every value of the stylesheet
+  evaluated for every theme. Each evaluation records every variable it reads (a Proxy over the variables) and every read of the
+  runtime's changing fields (screen, insets, font scale, orientation, rtl, colour scheme: accessors installed on Uniwind's runtime
+  object for the build and removed after). Inline variables a class sets (`--tw-leading`, `--uniwind-em`, ...) are definitions: a
+  value that reads one is evaluated once per definition and once with none, and the resolver picks the definition that wins in
+  the className. A class falls back (stays with Uniwind's JS) when a value reads a changing runtime field or `currentColor`, reads
+  more than one inline variable, or needs Uniwind's post-processing (shadows, transforms, gradients, text shadow, font variant),
+  or when a style has data / rtl / orientation conditions. Width, theme and pressed / focused / disabled stay conditions.
+- **Resolver** (`cpp/css/StyleResolver.hpp`): Uniwind's split (`' '`, or `/\s+/` with a newline), conditions, precedence
+  (minWidth, complexity, important), inline-variable winners, key order (first set) and the post-processing table values need
+  (lineHeight under 6 times fontSize, `visibility: hidden` -> `display: none`, default border and outline colour). A className
+  with a fallback class, non-ASCII text, or an Object.prototype name returns undefined.
+- **Seam** (`src/uniwind/nativeResolver.ts`): an own `resolveStyles` on the store instance in front of Uniwind's (kept and called
+  for everything else). Native only with no scoped theme, no scoped variables, a table built from the stylesheet and variables the
+  store holds now; `Variables` (updateCSSVariables) marks it stale until an idle rebuild. `nativeResolver.setEnabled(false)` turns
+  it off. The JSI entry is the global host function `__swResolve` (the `__swCn` pattern: no Nitro method wrapper).
+
+Verified:
+
+- `cpp/harness/fixtures/resolver`: the table and Uniwind's own `resolveStyles` results come from Uniwind 1.12's bundler and store
+  in Node (example-real's CSS plus a third theme and the variants the app does not use: responsive, theme, state, important,
+  relative line heights, em letter spacing, fallback classes). 1506 classNames (app literals, every ordered pair of classes that
+  set the same property, random combinations) x 3 themes x 5 widths (the breakpoints exactly and below) x 6 states: 136,260
+  cases, 112,950 resolved natively, all equal in keys, order, values, dependencies and sum; the rest fall back exactly where a
+  class is not in the table. 25 hand-made mutants of the resolver (precedence, conditions, order, post-processing) all fail it.
+- `seam-check.mjs`: the seam in front of the real store, with a stand-in native function (13 checks; removing a guard fails it).
+- On a device: `-resolveBench 1` in example-real compares both on every case (parity count) and times them
+  (`docs/LOCAL_TESTING.md` step 6). No device numbers yet.
+
+Not covered: the first screen. The table is built after install, when the JS thread is first idle, so the first mount resolves
+with Uniwind's JS (building the table costs more JS than resolving one screen). Building it at Metro time inside `withShadewind`
+(the generator's path: `generateArtifacts`, `compileCSS`, evaluate per theme, with `pixelRatio` and `hairlineWidth` treated as
+changing) would cover the first mount too: not done. The theme switch is not affected: the engine re-themes registered views
+natively without resolving classes again.
