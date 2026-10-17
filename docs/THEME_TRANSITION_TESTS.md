@@ -51,7 +51,10 @@ from `shadewind`.
   and the overlay sits under it. Check what tovtam's theme sheet is (a `Modal` would break check 1 on Android).
 - **Android race.** The snapshot is an asynchronous message sent at setTheme time; if Choreographer's mount runs first the
   snapshot shows the new theme (no visible transition, not a corruption). `mountedId` skips the case where the mount
-  notification overtook the snapshot message. Look for a fade that looks absent on a slow device.
+  notification overtook the snapshot message. Android pulls the transaction on the committing thread, so a mount notification of an
+  earlier batch can report the theme's tree before its views are updated: `run` therefore waits one Choreographer frame callback
+  (FabricUIManager re-posts its mount-item callback every frame, ahead of ours). Check by stepping 3 toggles frame by frame: the
+  fade must not begin before the new theme is underneath. A fade that looks absent on a slow device is this race.
 - **Rapid toggle while a fade is running (iOS).** The new snapshot is expected to include the partly faded old overlay; if
   `snapshotViewAfterScreenUpdates:NO` reads model values instead of presentation values, you see a pop. Record it.
 - **Memory.** One full-window bitmap (Android ARGB_8888) or snapshot view per transition: about 8 MB on a 1080x2400 phone, freed

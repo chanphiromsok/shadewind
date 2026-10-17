@@ -7,6 +7,7 @@ import android.os.Looper
 import android.os.Message
 import android.provider.Settings
 import android.util.Log
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
@@ -61,10 +62,16 @@ object ThemeTransitionOverlay {
   @JvmStatic
   @DoNotStrip
   fun run(id: Long) {
+    // Android pulls the transaction on the committing thread, so when the mount notification runs the C++ side may already hold the
+    // theme's tree while the UI thread has not executed its mount items yet (a notification of an earlier batch can report it).
+    // FabricUIManager executes mount items from a callback it re-posts every frame (DispatchUIFrameCallback), always posted before
+    // this one, so a frame callback posted here runs after the items of the next frame and before that frame is drawn.
+    val defer = Runnable { Choreographer.getInstance().postFrameCallback { fadeOut(id) } }
+
     if (Looper.myLooper() == Looper.getMainLooper()) {
-      fadeOut(id) // the mount hook: FabricUIManager posts it at the front of the queue once the frame that mounted the views ran
+      defer.run()
     } else {
-      main.post { fadeOut(id) }
+      main.post(defer)
     }
   }
 
