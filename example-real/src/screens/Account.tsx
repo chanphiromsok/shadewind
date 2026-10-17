@@ -21,36 +21,21 @@ export default function Account() {
   const [report, setReport] = useState<string[] | null>(null);
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerClassName="pb-10"
-    >
+    <ScrollView className="flex-1 bg-background" contentContainerClassName="pb-10">
       <View className="bg-card px-4 pb-4 pt-14">
         <Text className="text-2xl font-bold text-primary">Account</Text>
       </View>
 
-      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">
-        Appearance
-      </Text>
+      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Appearance</Text>
       <View className="mx-3 flex-row overflow-hidden rounded-2xl bg-card">
-        {(['light', 'dark'] as const).map(name => (
+        {(['light', 'dark'] as const).map((name) => (
           <Pressable
             key={name}
             testID={`theme-${name}`}
             onPress={() => Uniwind.setTheme(name)}
-            className={cn(
-              'flex-1 items-center py-4 active:opacity-70',
-              name === 'light' ? 'light:bg-brand-300' : 'dark:bg-brand-300',
-            )}
+            className={cn('flex-1 items-center py-4 active:opacity-70', name === 'light' ? 'light:bg-brand-300' : 'dark:bg-brand-300')}
           >
-            <Text
-              className={cn(
-                'text-base font-semibold',
-                name === 'light'
-                  ? 'light:text-brand dark:text-primary'
-                  : 'dark:text-brand light:text-primary',
-              )}
-            >
+            <Text className={cn('text-base font-semibold', name === 'light' ? 'light:text-brand dark:text-primary' : 'dark:text-brand light:text-primary')}>
               {name === 'light' ? '☀️  Light' : '🌙  Dark'}
             </Text>
           </Pressable>
@@ -59,93 +44,54 @@ export default function Account() {
 
       {TRANSITION_TEST && (
         <>
-          <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">
-            Theme transition (test)
-          </Text>
-          <View className="mx-3 flex-row overflow-hidden rounded-2xl bg-card">
-            <Pressable
-              testID="fade-uniwind"
-              onPress={() =>
-                Uniwind.setTheme(
-                  Uniwind.currentTheme === 'dark' ? 'light' : 'dark',
-                )
-              }
-              className="flex-1 items-center py-4 active:opacity-70"
-            >
-              <Text className="text-sm font-semibold text-primary">
-                Fade (Uniwind)
-              </Text>
-            </Pressable>
-            <Pressable
-              testID="fade-engine"
-              onPress={() =>
-                setEngineTheme(getTheme() === 'dark' ? 'light' : 'dark', {
-                  transition: { type: 'fade', durationMs: 250 },
-                })
-              }
-              className="flex-1 items-center py-4 active:opacity-70"
-            >
-              <Text className="text-sm font-semibold text-primary">
-                Fade (engine)
-              </Text>
-            </Pressable>
-            <Pressable
-              testID="toggle-x3"
-              onPress={() => {
-                // three switches within 150 ms: no orphan overlay, ends in the last theme
-                const next = Uniwind.currentTheme === 'dark' ? 'light' : 'dark';
+        <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Theme transition (test)</Text>
+        <View className="mx-3 flex-row overflow-hidden rounded-2xl bg-card">
+          <Pressable
+            testID="fade-uniwind"
+            onPress={() => Uniwind.setTheme(Uniwind.currentTheme === 'dark' ? 'light' : 'dark')}
+            className="flex-1 items-center py-4 active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-primary">Fade (Uniwind)</Text>
+          </Pressable>
+          <Pressable
+            testID="fade-engine"
+            onPress={() => setEngineTheme(getTheme() === 'dark' ? 'light' : 'dark', { transition: { type: 'fade', durationMs: 250 } })}
+            className="flex-1 items-center py-4 active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-primary">Fade (engine)</Text>
+          </Pressable>
+          <Pressable
+            testID="toggle-x3"
+            onPress={() => {
+              // three switches within 150 ms: no orphan overlay, ends in the last theme
+              const next = Uniwind.currentTheme === 'dark' ? 'light' : 'dark';
 
-                Uniwind.setTheme(next);
-                setTimeout(
-                  () => Uniwind.setTheme(next === 'dark' ? 'light' : 'dark'),
-                  70,
-                );
-                setTimeout(() => Uniwind.setTheme(next), 140);
-              }}
-              className="flex-1 items-center py-4 active:opacity-70"
-            >
-              <Text className="text-sm font-semibold text-primary">
-                Toggle ×3
-              </Text>
-            </Pressable>
-          </View>
+              Uniwind.setTheme(next);
+              setTimeout(() => Uniwind.setTheme(next === 'dark' ? 'light' : 'dark'), 70);
+              setTimeout(() => Uniwind.setTheme(next), 140);
+            }}
+            className="flex-1 items-center py-4 active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-primary">Toggle ×3</Text>
+          </Pressable>
+        </View>
         </>
       )}
 
-      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">
-        Settings
-      </Text>
+      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Settings</Text>
       <View className="mx-3 overflow-hidden rounded-2xl">
-        <Row
-          onPress={() => nav.navigate('Settings', { section: 'Language' })}
-          title="Language"
-          value="English"
-        />
+        <Row onPress={() => nav.navigate('Settings', { section: 'Language' })} title="Language" value="English" />
         <View className="h-px bg-divider" />
         <Row onPress={() => nav.navigate('ThemeSheet')} title="Theme sheet" />
         <View className="h-px bg-divider" />
-        <Row
-          onPress={() => nav.navigate('Settings', { section: 'Notifications' })}
-          title="Notifications"
-          value="On"
-        />
+        <Row onPress={() => nav.navigate('Settings', { section: 'Notifications' })} title="Notifications" value="On" />
         <View className="h-px bg-divider" />
-        <Row
-          onPress={() => nav.navigate('Settings', { section: 'Privacy' })}
-          title="Privacy"
-        />
+        <Row onPress={() => nav.navigate('Settings', { section: 'Privacy' })} title="Privacy" />
         <View className="h-px bg-divider" />
-        <Row
-          onPress={() =>
-            nav.navigate('Settings', { section: 'Help & Support' })
-          }
-          title="Help & Support"
-        />
+        <Row onPress={() => nav.navigate('Settings', { section: 'Help & Support' })} title="Help & Support" />
       </View>
 
-      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">
-        Benchmark
-      </Text>
+      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Benchmark</Text>
       <View className="mx-3 rounded-2xl bg-card p-4">
         <Pressable
           testID="run-stall"
@@ -155,56 +101,37 @@ export default function Account() {
           }}
           className="items-center rounded-xl bg-brand py-3 active:opacity-80"
         >
-          <Text className="text-base font-bold text-white">
-            Run switch benchmark
-          </Text>
+          <Text className="text-base font-bold text-white">Run switch benchmark</Text>
         </Pressable>
         <Pressable
           testID="engine-report"
           onPress={() => {
             const counts = new Map<string, number>();
 
-            decisions.forEach(reason =>
-              counts.set(reason, (counts.get(reason) ?? 0) + 1),
-            );
+            decisions.forEach((reason) => counts.set(reason, (counts.get(reason) ?? 0) + 1));
             const total = [...renders.values()].reduce((a, b) => a + b, 0);
 
-            setReport([
-              `install: ${status()}`,
-              `styled renders so far: ${total}`,
-              ...[...counts]
-                .sort((a, b) => b[1] - a[1])
-                .map(([r, n]) => `${n} x ${r}`),
-            ]);
+            setReport([`install: ${status()}`, `styled renders so far: ${total}`, ...[...counts].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${n} x ${r}`)]);
           }}
           className="mt-3 items-center rounded-xl bg-card-pressed py-3 active:opacity-80"
         >
-          <Text className="text-base font-semibold text-primary">
-            Engine report
-          </Text>
+          <Text className="text-base font-semibold text-primary">Engine report</Text>
         </Pressable>
         <View className="mt-3">
           <ThemeSwitchMeter />
         </View>
         {report ? (
-          <Text
-            testID="engine-report-text"
-            className="mt-2 text-xs text-secondary"
-          >
+          <Text testID="engine-report-text" className="mt-2 text-xs text-secondary">
             {report.join('\n')}
           </Text>
         ) : null}
-        {result === 'running' ? (
-          <Text className="mt-3 text-sm text-secondary">running…</Text>
-        ) : null}
+        {result === 'running' ? <Text className="mt-3 text-sm text-secondary">running…</Text> : null}
         {result && result !== 'running' ? (
           <View className="mt-3">
             <Text testID="stall-result" className="text-sm text-primary">
               median stall {result.medianMs} ms, worst {result.worstMs} ms
             </Text>
-            <Text className="mt-1 text-xs text-secondary">
-              {result.stalls.join(', ')}
-            </Text>
+            <Text className="mt-1 text-xs text-secondary">{result.stalls.join(', ')}</Text>
           </View>
         ) : null}
       </View>
