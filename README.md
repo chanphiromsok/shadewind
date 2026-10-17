@@ -90,7 +90,8 @@ hold (shadows, transforms, safe-area and screen units, data / rtl variants) is s
 | Export | |
 |---|---|
 | `configure({ themes, initialTheme, onUnsupported })` | declare themes once, before the first render |
-| `setTheme(name)` / `getTheme()` | switch / read |
+| `setTheme(name, { transition? })` / `getTheme()` | switch / read; `transition: { type: 'fade', durationMs }` cross-fades (see below) |
+| `setDefaultTransition(t)`, `configure({ transition })` | the transition for every switch that passes none, Uniwind's `setTheme` included |
 | `useTheme()` / `subscribe(fn)` | the current theme as React state, for UI the engine does not update |
 | `followSystem(map?)` | follow the OS appearance (an explicit `setTheme` stops it) |
 | `useThemed(styles)` | `{ ref, style, engine }` for one host view |
@@ -102,6 +103,14 @@ hold (shadows, transforms, safe-area and screen units, data / rtl variants) is s
 | `shadewind/internal` | diagnostics and benchmark strategies, no semver guarantee |
 
 Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIWIND_INTEGRATION.md](docs/UNIWIND_INTEGRATION.md).
+
+### Animated switch (optional, default instant)
+
+`setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })`, or once for everything (Uniwind too):
+`setDefaultTransition({ type: 'fade', durationMs: 250 })`. A snapshot of the window is laid over the app, the theme is
+switched underneath, and the snapshot fades out once Fabric reports the new theme mounted. The overlay takes no touches. It is
+skipped (instant switch) with reduce motion on, with the app in the background or without a window, and when the picture cannot
+be taken. Android's snapshot does not include `SurfaceView` / `TextureView` content (maps, video). Without the option nothing runs.
 
 ## Benchmarks
 

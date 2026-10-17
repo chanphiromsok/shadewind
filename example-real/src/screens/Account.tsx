@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Uniwind } from 'uniwind';
+import { getTheme, setTheme as setEngineTheme } from 'shadewind';
 import { decisions, renders, status } from '../engineReport';
 import type { RootStackParamList } from '../navigation/types';
 import { Row } from '../components/ui';
@@ -35,6 +36,38 @@ export default function Account() {
             </Text>
           </Pressable>
         ))}
+      </View>
+
+      <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Theme transition (test)</Text>
+      <View className="mx-3 flex-row overflow-hidden rounded-2xl bg-card">
+        <Pressable
+          testID="fade-uniwind"
+          onPress={() => Uniwind.setTheme(Uniwind.currentTheme === 'dark' ? 'light' : 'dark')}
+          className="flex-1 items-center py-4 active:opacity-70"
+        >
+          <Text className="text-sm font-semibold text-primary">Fade (Uniwind)</Text>
+        </Pressable>
+        <Pressable
+          testID="fade-engine"
+          onPress={() => setEngineTheme(getTheme() === 'dark' ? 'light' : 'dark', { transition: { type: 'fade', durationMs: 250 } })}
+          className="flex-1 items-center py-4 active:opacity-70"
+        >
+          <Text className="text-sm font-semibold text-primary">Fade (engine)</Text>
+        </Pressable>
+        <Pressable
+          testID="toggle-x3"
+          onPress={() => {
+            // three switches within 150 ms: no orphan overlay, ends in the last theme
+            const next = Uniwind.currentTheme === 'dark' ? 'light' : 'dark';
+
+            Uniwind.setTheme(next);
+            setTimeout(() => Uniwind.setTheme(next === 'dark' ? 'light' : 'dark'), 70);
+            setTimeout(() => Uniwind.setTheme(next), 140);
+          }}
+          className="flex-1 items-center py-4 active:opacity-70"
+        >
+          <Text className="text-sm font-semibold text-primary">Toggle ×3</Text>
+        </Pressable>
       </View>
 
       <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Settings</Text>

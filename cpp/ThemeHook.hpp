@@ -347,6 +347,36 @@ public:
     ++_epoch;
   }
 
+  // The epoch `setTheme` last started (see rootCarries).
+  uint64_t epoch() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _epoch;
+  }
+
+  // Theme transitions: from now on the hook records which epoch each tree it returns was themed for. Idle (and free) until the
+  // first transition asks for it. Call before the commit whose mount is to be recognised.
+  void watchMounts() {
+    _watchMounts.store(true, std::memory_order_relaxed);
+  }
+
+  // True when `root` is a tree this hook returned for epoch `minEpoch` or later, i.e. the mount of that tree shows the theme.
+  // The mount hook calls it on the main thread: it takes a lock of its own, never the one a commit holds during its walk. A tree
+  // that is not among the last few recorded ones answers false (the next mount reports a newer root).
+  bool rootCarries(const ShadowNode* root, uint64_t minEpoch) {
+    std::lock_guard<std::mutex> lock(_mountMutex);
+
+    for (size_t i = 0; i < _mounts.size(); ++i) {
+      // newest first: an address a later tree reused is found before the one it replaced
+      const auto& mount = _mounts[(_nextMount + _mounts.size() - 1 - i) % _mounts.size()];
+
+      if (mount.pointer == root) {
+        return mount.epoch >= minEpoch;
+      }
+    }
+
+    return false;
+  }
+
   // A view registered with another theme's props since the last commit: the caller commits once so it is themed now.
   bool hasStale() {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -618,6 +648,12 @@ private:
   void remember(const std::shared_ptr<const ShadowNode>& root) {
     _proofs[_nextProof] = Proof{root, root.get(), _epoch, _registrationGeneration};
     _nextProof = (_nextProof + 1) % _proofs.size();
+
+    if (_watchMounts.load(std::memory_order_relaxed)) {
+      std::lock_guard<std::mutex> lock(_mountMutex); // lock order: _mutex, then _mountMutex
+      _mounts[_nextMount] = {root.get(), _epoch};
+      _nextMount = (_nextMount + 1) % _mounts.size();
+    }
   }
 
   // The node at the same place in the previous tree: same index, or shifted by the difference in child count (an insertion or
@@ -894,6 +930,15 @@ private:
   std::vector<std::weak_ptr<const ShadowNodeFamily>> _prewarmQueue;
   std::array<Proof, 16> _proofs{};
   size_t _nextProof = 0;
+  // Trees returned since the first transition, with the epoch they carry (rootCarries). Own lock: see rootCarries.
+  struct Mounted {
+    const ShadowNode* pointer = nullptr; // identity only, never dereferenced
+    uint64_t epoch = 0;
+  };
+  std::atomic<bool> _watchMounts{false};
+  std::mutex _mountMutex;
+  std::array<Mounted, 16> _mounts{};
+  size_t _nextMount = 0;
   ThemeId _theme = kNoTheme;
   std::vector<std::string> _themeNames;
   uint64_t _epoch = 0;

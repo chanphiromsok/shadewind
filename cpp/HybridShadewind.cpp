@@ -759,8 +759,9 @@ jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const
   return result;
 }
 
-// setTheme(name, strategy?) applies `name` to every registered view without touching React.
+// setTheme(name, strategy?, transition?) applies `name` to every registered view without touching React.
 // strategy: 'hookAsync' (default; the commit runs off the JS thread on iOS) | 'hook' (the commit runs on the JS thread)
+// transition: { type: 'fade', durationMs } cross-fades from a snapshot of the old screen (ThemeTransition.hpp); absent: instant.
 jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isString()) {
     throw jsi::JSError(rt, "Shadewind.setTheme(name) expects a string");
@@ -783,6 +784,24 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     deferred = requested == "hookDeferred";
   }
 
+  bool animated = false;
+  double transitionMs = 0;
+  auto preset = ThemeTransitionPreset::Fade;
+
+  if (count > 2 && args[2].isObject()) {
+    auto options = args[2].asObject(rt);
+    const auto type = options.getProperty(rt, "type");
+
+    if (!type.isString() || type.asString(rt).utf8(rt) != "fade") {
+      throw jsi::JSError(rt, "Shadewind.setTheme: unknown transition type (fade)");
+    }
+
+    const auto duration = options.getProperty(rt, "durationMs");
+
+    transitionMs = duration.isNumber() ? duration.asNumber() : 250;
+    animated = transitionMs > 0;
+  }
+
   auto* ui = attachedUIManager(rt);
 
   if (ui == nullptr) {
@@ -792,6 +811,17 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   const auto t0 = Clock::now();
 
   _engine.setTheme(name);
+
+  if (animated) {
+    // The mount hook is what tells the transition the new theme is on screen. Registered on first use, once per UIManager.
+    if (_state.transitionContainer.lock() != ui->getContextContainer()) {
+      ui->registerMountHook(_state.transition);
+      _state.transitionContainer = ui->getContextContainer();
+    }
+
+    // after the epoch changed (that is the one to wait for), before any commit (the snapshot is queued ahead of the mount)
+    _state.transition.begin(preset, transitionMs);
+  }
 
 #if defined(__APPLE__)
   if (async) {

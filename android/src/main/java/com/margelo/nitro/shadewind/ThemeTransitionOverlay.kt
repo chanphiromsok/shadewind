@@ -1,0 +1,165 @@
+package com.margelo.nitro.shadewind
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.provider.Settings
+import android.util.Log
+import android.view.View
+import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
+import android.widget.FrameLayout
+import android.widget.ImageView
+import com.facebook.proguard.annotations.DoNotStrip
+import com.margelo.nitro.NitroModules
+
+/**
+ * Animated theme change: a snapshot of the window is laid over the app, the engine switches the theme underneath it, and the
+ * snapshot fades out once the new theme is mounted. Called from C++ (cpp/ShadewindNative.cpp, cpp/ThemeTransition.hpp), from any
+ * thread; everything here runs on the UI thread.
+ *
+ * The snapshot is `decorView.draw(canvas)` into a Bitmap: synchronous on the UI thread, so it shows the view state at that moment
+ * (the old theme). PixelCopy would also capture SurfaceView / TextureView content, but it reads the last frame the compositor
+ * has, which can already be the new theme: SurfaceView content (maps, video) is not captured and shows through the overlay.
+ */
+@DoNotStrip
+object ThemeTransitionOverlay {
+  private const val TAG = "Shadewind"
+
+  // keep in step with ThemeTransitionPreset in cpp/ShadewindNative.hpp
+  private const val PRESET_FADE = 0
+
+  // If the mount never reports (nothing visible changed, so Fabric mounts nothing), do not leave a frozen picture on top.
+  private const val FAILSAFE_MS = 1000L
+
+  private val main = Handler(Looper.getMainLooper())
+
+  // UI thread only
+  private var overlay: ImageView? = null
+  private var overlayId = 0L
+  private var overlayMs = 0L
+  private var fading = false
+
+  @JvmStatic
+  @DoNotStrip
+  fun begin(id: Long, preset: Int, durationMs: Double) {
+    // An asynchronous message passes a sync barrier, like the Choreographer frame callback that mounts React Native's views, so
+    // this runs ahead of that mount whenever the frame callback has not started yet. (A plain post would wait behind the barrier,
+    // i.e. behind the traversal that follows the mount.) Ordered by time with the other begin calls.
+    val message = Message.obtain(main) { snapshot(id, preset, durationMs.toLong()) }
+
+    message.isAsynchronous = true
+    main.sendMessage(message)
+  }
+
+  @JvmStatic
+  @DoNotStrip
+  fun run(id: Long) {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      fadeOut(id) // the mount hook: the views are updated, nothing was drawn yet
+    } else {
+      main.post { fadeOut(id) }
+    }
+  }
+
+  private fun snapshot(id: Long, preset: Int, durationMs: Long) {
+    val previous = overlay
+
+    try {
+      val activity = NitroModules.applicationContext?.currentActivity
+      val decor = activity?.window?.decorView
+
+      if (preset != PRESET_FADE ||
+        activity == null ||
+        decor == null ||
+        activity.isFinishing ||
+        activity.isDestroyed ||
+        !decor.isShown ||
+        decor.windowVisibility != View.VISIBLE ||
+        decor.width <= 0 ||
+        decor.height <= 0 ||
+        animationsDisabled(activity)
+      ) {
+        remove(previous)
+
+        return
+      }
+
+      val bitmap = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+
+      decor.draw(Canvas(bitmap))
+
+      val view =
+        ImageView(activity).apply {
+          setImageBitmap(bitmap)
+          scaleType = ImageView.ScaleType.FIT_XY
+          isClickable = false // touches fall through to the app underneath
+          isFocusable = false
+          importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+      (decor as ViewGroup).addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+      // the new snapshot already contains what is left of the previous overlay: only now is it safe to take that away
+      remove(previous)
+
+      overlay = view
+      overlayId = id
+      overlayMs = durationMs
+      fading = false
+
+      main.postDelayed({ if (overlay === view) fade(view) }, FAILSAFE_MS)
+    } catch (error: Throwable) {
+      // OutOfMemoryError on a large screen included: the switch itself must not fail because the picture could not be taken
+      Log.w(TAG, "theme transition skipped", error)
+      remove(previous)
+    }
+  }
+
+  private fun animationsDisabled(activity: android.app.Activity): Boolean {
+    return Settings.Global.getFloat(activity.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+  }
+
+  private fun fadeOut(id: Long) {
+    val view = overlay ?: return
+
+    if (overlayId == id) {
+      fade(view)
+    }
+  }
+
+  private fun fade(view: ImageView) {
+    if (overlay !== view || fading) {
+      return
+    }
+
+    fading = true
+
+    view
+      .animate()
+      .alpha(0f)
+      .setDuration(overlayMs)
+      .setInterpolator(LinearInterpolator())
+      .withEndAction { remove(view) } // not run when the animation is cancelled: remove() is what cancels it
+      .start()
+  }
+
+  // By identity: a stale end action or timer can never remove a newer overlay.
+  private fun remove(view: ImageView?) {
+    if (view == null) {
+      return
+    }
+
+    view.animate().cancel()
+    (view.parent as? ViewGroup)?.removeView(view)
+    view.setImageDrawable(null)
+
+    if (overlay === view) {
+      overlay = null
+      overlayId = 0
+      fading = false
+    }
+  }
+}

@@ -24,8 +24,12 @@ import {
   ShadewindEngine,
   toNativeProps,
   toNativePropsWith,
+  type NativeThemeTransition,
   type ThemeStrategy,
+  type ThemeTransitionPreset,
 } from './internal';
+
+export type { ThemeTransitionPreset };
 
 // Public API, see docs/API.md. Everything diagnostic or benchmark-only lives in `shadewind/internal`.
 
@@ -55,7 +59,11 @@ export type Capabilities = Readonly<{
 }>;
 
 export type ShadewindErrorCode =
-  'UNKNOWN_THEME' | 'TOO_MANY_THEMES' | 'DUPLICATE_THEME' | 'NOT_CONFIGURED';
+  | 'UNKNOWN_THEME'
+  | 'TOO_MANY_THEMES'
+  | 'DUPLICATE_THEME'
+  | 'NOT_CONFIGURED'
+  | 'UNKNOWN_TRANSITION';
 
 export class ShadewindError extends Error {
   code: ShadewindErrorCode;
@@ -67,11 +75,29 @@ export class ShadewindError extends Error {
   }
 }
 
+/**
+ * An animated theme change: a snapshot of the old screen is laid over the app, the theme is switched underneath it, and the
+ * snapshot fades out once the new theme is mounted. It never takes touches. Skipped (instant switch) when the OS asks for reduced
+ * motion, when the app is in the background or has no window. Default: no transition.
+ */
+export type ThemeTransition = {
+  type: ThemeTransitionPreset;
+  /** Length of the fade in ms (default 250, at most 2000). 0 or less: instant. */
+  durationMs?: number;
+};
+
+export type SetThemeOptions = {
+  /** Overrides the default set by `configure` / `setDefaultTransition`; `false` forces an instant switch. */
+  transition?: ThemeTransition | false;
+};
+
 export type ConfigureOptions = {
   themes: readonly ThemeName[];
   initialTheme: ThemeName;
   /** What to do when a binding cannot use the fast path (it renders through React instead). Default 'warn'. */
   onUnsupported?: 'warn' | 'throw' | 'silent';
+  /** Transition for every theme change that does not pass its own (Uniwind's setTheme included). Default: none. */
+  transition?: ThemeTransition;
 };
 
 const SUPPORTED_KEYS: readonly ThemeKey[] = [
@@ -94,6 +120,7 @@ type Config = {
 };
 
 let config: Config | null = null;
+let defaultTransition: ThemeTransition | undefined;
 let current: string | null = null;
 let stopFollowing: (() => void) | null = null;
 const listeners = new Set<(theme: ThemeName) => void>();
@@ -111,7 +138,7 @@ const assertConfigured = (): Config => {
 
 /** Declares the themes. Call once, before the first render. A different list needs a reload (native state is per process). */
 export function configure(options: ConfigureOptions): void {
-  const { themes, initialTheme, onUnsupported = 'warn' } = options;
+  const { themes, initialTheme, onUnsupported = 'warn', transition } = options;
 
   if (new Set(themes).size !== themes.length) {
     throw new ShadewindError('DUPLICATE_THEME', 'duplicate theme name');
@@ -147,6 +174,7 @@ export function configure(options: ConfigureOptions): void {
     }
 
     config.onUnsupported = onUnsupported;
+    defaultTransition = transition ?? defaultTransition;
 
     return;
   }
@@ -161,6 +189,7 @@ export function configure(options: ConfigureOptions): void {
   }
 
   config = { themes: [...themes], onUnsupported };
+  defaultTransition = transition ?? defaultTransition; // setDefaultTransition may have run first
   current = initialTheme;
   ShadewindEngine.setTheme(initialTheme, 'hook');
 }
@@ -179,7 +208,46 @@ export function subscribe(listener: (theme: ThemeName) => void): () => void {
   };
 }
 
-const applyTheme = (name: string, strategy?: ThemeStrategy) => {
+const MAX_TRANSITION_MS = 2000;
+const DEFAULT_TRANSITION_MS = 250;
+
+/** Validates and normalises a transition for the native call; undefined means an instant switch. */
+const nativeTransition = (
+  transition: ThemeTransition | false | undefined
+): NativeThemeTransition | undefined => {
+  if (!transition) {
+    return undefined;
+  }
+
+  const { type, durationMs = DEFAULT_TRANSITION_MS } = transition;
+
+  if (type !== 'fade') {
+    throw new ShadewindError(
+      'UNKNOWN_TRANSITION',
+      `unknown transition '${String(type)}' (fade)`
+    );
+  }
+
+  if (!(durationMs > 0)) {
+    return undefined; // 0, negative or NaN: instant
+  }
+
+  return { type, durationMs: Math.min(durationMs, MAX_TRANSITION_MS) };
+};
+
+/** Sets the transition used by every theme change that passes none of its own (also Uniwind's). `undefined` clears it. */
+export function setDefaultTransition(
+  transition: ThemeTransition | undefined
+): void {
+  nativeTransition(transition); // throws on a bad preset now, not at the first switch
+  defaultTransition = transition;
+}
+
+const applyTheme = (
+  name: string,
+  strategy?: ThemeStrategy,
+  transition?: ThemeTransition | false
+) => {
   const { themes } = assertConfigured();
 
   if (!themes.includes(name)) {
@@ -193,15 +261,22 @@ const applyTheme = (name: string, strategy?: ThemeStrategy) => {
     return;
   }
 
+  const animated = nativeTransition(
+    transition === undefined ? defaultTransition : transition
+  );
+
   current = name;
-  ShadewindEngine.setTheme(name, strategy);
+  ShadewindEngine.setTheme(name, strategy, animated);
   listeners.forEach((listener) => listener(name as ThemeName));
 };
 
-/** Switches every bound view without rendering React components. Rapid calls: the last one wins. */
-export function setTheme(name: ThemeName): void {
+/**
+ * Switches every bound view without rendering React components. Rapid calls: the last one wins.
+ * `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })` cross-fades instead of switching at once.
+ */
+export function setTheme(name: ThemeName, options?: SetThemeOptions): void {
   stopFollowing?.();
-  applyTheme(name);
+  applyTheme(name, undefined, options?.transition);
 }
 
 /**

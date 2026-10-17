@@ -20,4 +20,20 @@ struct UIKitBackground {
 
 std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::react::Tag>& tags);
 
+// Animated theme change (ThemeTransition.hpp drives these; iOS: ios/ShadewindNative.mm, Android: ThemeTransitionOverlay.kt through JNI,
+// elsewhere they do nothing). Both are callable from any thread and return at once; the work happens on the main / UI thread.
+// A transition is a snapshot of the window laid over the app, which fades out once the new theme is mounted.
+// Keep the numbers in step with ThemeTransitionPreset in src/internal.tsx and PRESET_* in ThemeTransitionOverlay.kt.
+enum class ThemeTransitionPreset : int { Fade = 0 };
+
+// Queues the snapshot on the main thread. Call BEFORE the commit that themes the views: the mount is queued on the main thread after
+// this, so the snapshot shows the old theme. A new `id` replaces the previous transition: its snapshot (which includes whatever is
+// left of the previous overlay) goes on top and the previous overlay is removed at once. Does nothing (no overlay) for reduced
+// motion, a backgrounded app or a window that cannot be captured.
+void themeTransitionBegin(uint64_t id, ThemeTransitionPreset preset, double durationMs);
+
+// The theme of transition `id` is mounted: start fading its overlay out and remove it at the end. No-op when `id` was replaced,
+// skipped or already run. The platform also runs it on its own after a timeout, so an overlay never stays.
+void themeTransitionRun(uint64_t id);
+
 } // namespace margelo::nitro::shadewind

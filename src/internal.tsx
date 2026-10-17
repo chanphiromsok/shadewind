@@ -30,7 +30,11 @@ type RawMethods = {
     isFocused?: unknown,
     isDisabled?: unknown
   ): ResolvedStyles | undefined;
-  setTheme(name: string, strategy?: ThemeStrategy): ThemeTimings;
+  setTheme(
+    name: string,
+    strategy?: ThemeStrategy,
+    transition?: NativeThemeTransition
+  ): ThemeTimings;
   flushPending(): void;
   prepare(): void;
   resetMainBusy(): void;
@@ -120,6 +124,15 @@ export type ThemeTimings = {
  * Either way the theme is applied inside a commit hook, so every later commit (React's too) keeps it.
  */
 export type ThemeStrategy = 'hook' | 'hookAsync' | 'hookDeferred';
+
+/** Preset names of an animated theme change. Add a name here and to `ThemeTransitionPreset` in cpp/ShadewindNative.hpp. */
+export type ThemeTransitionPreset = 'fade';
+
+/** What the native overlay is asked for: a preset and its length. */
+export type NativeThemeTransition = {
+  type: ThemeTransitionPreset;
+  durationMs: number;
+};
 
 /** Style subset supported in v0: visual-only props that don't need a Yoga layout pass. */
 export type ThemedStyle = {
@@ -394,10 +407,17 @@ export const ShadewindEngine = {
     }
   },
   /** Applies a theme to every registered view without rendering any React component. */
-  setTheme(name: string, strategy: ThemeStrategy = 'hookAsync'): ThemeTimings {
+  setTheme(
+    name: string,
+    strategy: ThemeStrategy = 'hookAsync',
+    transition?: NativeThemeTransition
+  ): ThemeTimings {
     flushRegistrations();
 
-    return getNative().setTheme(name, strategy);
+    // no third argument without a transition: the instant switch is exactly the call it always was
+    return transition
+      ? getNative().setTheme(name, strategy, transition)
+      : getNative().setTheme(name, strategy);
   },
   /** Measurement: clears the longest main-thread busy period (iOS only; starts the run loop observer on first call). */
   resetMainBusy(): void {

@@ -2,6 +2,7 @@
 
 #include "HybridShadewindSpec.hpp"
 #include "ThemeEngine.hpp"
+#include "ThemeTransition.hpp"
 #include <jsi/jsi.h>
 #include <atomic>
 #include <string>
@@ -40,7 +41,9 @@ private:
   // Hermes collects it (Fast Refresh creates a new one), so the state lives for the process and every instance shares it.
   struct State {
     ThemeEngine engine;
+    ThemeTransition transition{engine.hook()};
     std::weak_ptr<const ContextContainer> registeredContainer; // identifies the UIManager the hook is registered with
+    std::weak_ptr<const ContextContainer> transitionContainer; // the UIManager the mount hook is registered with (on first use)
     std::atomic<bool> prewarmScheduled{false};
   };
 
