@@ -1,97 +1,55 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# example-real
 
-# Getting Started
+A real-app-shaped test bed for Shadewind on top of free Uniwind 1.12.0: bottom tabs (Explore, Moment, Range, Notification, Account) and
+a native stack, both with `freezeOnBlur`, a feed of cards, a theme sheet, light and dark themes defined in `global.css`. It is
+what the freeze, mount and class-resolution checks in `docs/LOCAL_TESTING.md` (steps 3-6 and 9) run on.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Setup
 
-## Step 1: Start Metro
+Shadewind comes from `vendor/shadewind-0.1.0.tgz` (the compiled package, not the repository's `src/`), wired in as a Uniwind app
+would do it:
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- `metro.config.js`: `withShadewind(withUniwindConfig(config, { cssEntryFile: './global.css' }))`. `withShadewind` also builds the
+  native class resolver's table while Metro bundles.
+- `src/boot.ts`: `installUniwind()` from `shadewind/uniwind`.
 
-To start the Metro dev server, run the following command from the root of your React Native project:
-
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+After a change to the library (`cpp/` or `src/` at the repository root), rebuild and repack it, then reinstall:
 
 ```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+cd ..                                                   # repository root
+node .yarn/releases/yarn-4.11.0.cjs prepare             # bob build + nitrogen
+npm pack --pack-destination example-real/vendor
+cd example-real && rm -rf node_modules/shadewind && npm install && cd ios && bundle exec pod install && cd ..
 ```
 
-### iOS
+`npm install` (not `npm ci`: the lockfile is older than npm 10's resolution of one transitive package). Check that
+`node_modules/shadewind/metro-babel-transformer.cjs` exists: otherwise the app runs an old package.
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+## Arms
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+`scripts/arm.sh engine` (the committed state) or `scripts/arm.sh plain` writes `src/boot.ts`, `src/engineReport.ts`, `src/cn*.ts`
+and `src/aotImpl.ts` for that arm. The plain arm also needs plain Metro: `REAL_PLAIN=1` when bundling or starting Metro.
+
+## Run
 
 ```sh
-bundle install
+npx react-native run-ios --mode Release --simulator "iPhone 17 Pro"
+npx react-native run-android --mode release
 ```
 
-Then, and every time you update your native dependencies, run:
+## On-screen tools
+
+- The yellow probe (top right): tap it for `inspect()`: registered views, views in the tree, views in frozen screens, views whose
+  committed colour matches the theme, stale ones.
+- Launch arguments, iOS only (they are read through React Native's `Settings`, which Android does not have):
+
+| Argument | What it does |
+|---|---|
+| `-realBench 1` | 15 s after launch: mount of 30 feed cards in four variants, then idle and stall of 12 theme switches |
+| `-resolveBench 1` | 5 s after launch: where the class table came from, `getStyles` misses resolved natively vs by Uniwind, first feed layout, parity and per-resolution timing of the native resolver against Uniwind's own |
+| `-resolverOff 1` | Uniwind's own class resolution only (no table loaded or built), for A/B launches of one build |
+| `-realDebug 1` | records why each className was or was not handed to the engine (Account > Engine report) |
 
 ```sh
-bundle exec pod install
+xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -resolveBench 1
 ```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.

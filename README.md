@@ -62,10 +62,18 @@ const { withShadewind } = require('shadewind/metro');
 module.exports = withShadewind(withUniwindConfig(config, { cssEntryFile: './global.css' }));
 ```
 
-`View` and `Text` from Uniwind become engine-aware. Nothing in `node_modules` is patched and your `className` code does not
-change. Views the engine cannot take (state variants such as `active:`, scoped themes, inline colour overrides, themes that
-differ in other properties) keep Uniwind's own behaviour. More than 6 themes, or an unsupported Uniwind version, turns the
-engine off and leaves plain Uniwind.
+Nothing in `node_modules` is patched and your `className` code does not change. What the engine takes over, of Uniwind's 22
+components:
+
+| | Theme switch without re-render (engine) | Native class resolution |
+|---|---|---|
+| `View`, `Text`, `Pressable`, `TouchableOpacity` | yes, for `backgroundColor`, `borderColor`, `color` | yes |
+| your own components wrapped with `withUniwind(Component)` (no options; `className` / `*ClassName` passed down as `style`) | yes, same properties | yes |
+| the other 18 (`ScrollView`, `Image`, `ImageBackground`, `TextInput`, `FlatList`, `SectionList`, `VirtualizedList`, `SafeAreaView`, `KeyboardAvoidingView`, `Modal`, `Switch`, `ActivityIndicator`, `Button`, `RefreshControl`, `InputAccessoryView`, `TouchableHighlight`, `TouchableNativeFeedback`, `TouchableWithoutFeedback`), and `withUniwind` with options | no: Uniwind's own behaviour (they re-render on a theme change, as with plain Uniwind) | yes |
+
+Inside the four components, views the engine cannot take (state variants such as `active:`, scoped themes, inline colour
+overrides, themes that differ in other properties) keep Uniwind's own behaviour too. More than 6 themes, or an unsupported
+Uniwind version, turns the engine off and leaves plain Uniwind.
 
 Uniwind's class resolution (what runs when its style cache misses) also goes native, from a class table `withShadewind` builds
 while Metro bundles (so from the first screen on; `withShadewind(config, { prebuildStyleTable: false })` builds it on the device
