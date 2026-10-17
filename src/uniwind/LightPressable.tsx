@@ -3,12 +3,12 @@
 // This one runs the same Pressability state machine (press delay, retention, long press, cancel) and renders the host component.
 // Any prop it does not handle (aria-*, accessibilityState, android_ripple, unstable_pressDelay, testOnly_pressed, ...) renders
 // React Native's Pressable as before, so behaviour is the same.
-import { useState, type ComponentType } from 'react';
+import { use, useState, type ComponentType } from 'react';
 import { Pressable as RNPressable, type PressableProps } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import { useUniwindContext } from 'uniwind-internal/core/context';
 import { getInternals } from './install';
-import { NativeView } from './native';
+import { NativeView, TextAncestorContext } from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 
 type Props = PressableProps & { className?: string };
@@ -56,7 +56,8 @@ const isLight = (props: Record<string, unknown>) => {
 export const LightPressable: ComponentType<Props> = copyComponentProperties(
   RNPressable,
   (props: Props) => {
-    const light = isLight(props);
+    // inside a Text React Native's View renders differently: keep its Pressable there
+    const light = !use(TextAncestorContext) && isLight(props);
     const disabled = Boolean(props.disabled);
     const { style, themed, onRegisterFailed } = useShadewindStyle(
       props.className,
@@ -138,8 +139,12 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
         ref={ref}
         style={resolve(state)}
         accessible={props.accessible !== false}
-        focusable={props.focusable !== false && !disabled}
-        accessibilityState={disabled ? { disabled: true } : undefined}
+        focusable={props.focusable !== false}
+        accessibilityState={
+          props.disabled != null ? { disabled: Boolean(props.disabled) } : undefined
+        }
+        // a Pressable has to stay a native view: without this the view can be flattened away and nothing receives the touch
+        collapsable={false}
       >
         {typeof props.children === 'function'
           ? props.children(state)
