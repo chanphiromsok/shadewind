@@ -21,8 +21,10 @@ docker build -f cpp/harness/Dockerfile -t shadewind-harness .
 docker run --rm shadewind-harness
 ```
 
-Pass: `[  PASSED  ] 18 tests` (the engine, `ClassMerge`, and `StyleResolver.MatchesUniwind`: the native class resolver against
-137,790 results of Uniwind's own `resolveStyles`, with the device's table and the one Metro prebuilds), and in the benchmark the `current` column has `0` stale views in a reveal
+Pass: `[  PASSED  ] 18 tests` four times: the generic build, then the Android build (React Native's renderer built as on Android,
+checked against what Android's mounting layer would send each Java view) in each of its three props modes. The 18 are the engine,
+`ClassMerge`, and `StyleResolver.MatchesUniwind` (the native class resolver against 137,790 results of Uniwind's own
+`resolveStyles`, with the device's table and the one Metro prebuilds), and in the benchmark the `current` column has `0` stale views in a reveal
 commit. Paste the two benchmark tables into the report. See `cpp/harness/README.md` for what they measure.
 
 ## 2. JS checks
@@ -168,9 +170,19 @@ xcrun simctl launch --terminate-running-process booted uniwindshadow.example -be
 
 ## 9. Android (optional, emulator)
 
-`example`: `npx react-native run-android --mode release`, then `adb shell am start -a android.intent.action.VIEW -d
-"uwbench://theme?strategy=hook"`. Android commits on the JS thread and prewarms on a background thread now (it was on the JS
-thread). Report with a same-run plain Uniwind number only; the emulator's absolute numbers are not comparable across sessions.
+Nothing of this branch has run on Android yet: the harness's Android build (step 1) covers the renderer and the engine as Android
+builds them, not the NDK compile, JNI or Java. First check that it builds and works:
+
+1. `example-real` (engine arm): `npx react-native run-android --mode release`. Report any native build error in full (the library's
+   C++ is compiled for Android here for the first time on this branch).
+2. Freeze sequences 1 and 2 of step 4 on the emulator, with a screen recording (`adb shell screenrecord /sdcard/out.mp4`): no wrong
+   colour after a reveal. The yellow probe works on Android too (no `viewOK` / UIKit column).
+3. example-real's benches (`-realBench`, `-resolveBench`, `-resolverOff`) read launch arguments through React Native's
+   `Settings`, which is iOS-only (on Android `Settings.get` warns and returns null): they do not run on Android, and the resolver
+   cannot be switched off there without a code change. Note in the report that they were not run.
+4. `example`: `adb shell am start -a android.intent.action.VIEW -d "uwbench://theme?strategy=hook"`. Android commits on the JS
+   thread and prewarms on a background thread now (it was on the JS thread). Report with a same-run plain Uniwind number only; the
+   emulator's absolute numbers are not comparable across sessions.
 
 ## What to send back
 

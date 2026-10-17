@@ -5,3 +5,4 @@
 !cpp/harness
 cpp/harness/.deps
 cpp/harness/build
+cpp/harness/build-*

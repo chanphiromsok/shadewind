@@ -5,7 +5,45 @@
 
 #include <gtest/gtest.h>
 
+#ifdef RN_SERIALIZABLE_STATE
+#include <react/featureflags/ReactNativeFeatureFlagsDefaults.h>
+
+#include <cstdlib>
+#include <string>
+#endif
+
 using namespace harness;
+
+#ifdef RN_SERIALIZABLE_STATE
+namespace {
+
+// Android build (HARNESS_ANDROID_STATE): HARNESS_ANDROID_PROPS picks how React Native's mounting layer sends props to the Java
+// views (App::sentToJava): unset = 0.86's defaults (each update's rawProps), `accumulated` (the rawProps diff), `reconciliation`
+// (the typed props diff of View)
+struct AndroidPropsFlags : facebook::react::ReactNativeFeatureFlagsDefaults {
+  std::string mode;
+
+  explicit AndroidPropsFlags(std::string m) : mode(std::move(m)) {}
+
+  bool enableAccumulatedUpdatesInRawPropsAndroid() override {
+    return mode == "accumulated";
+  }
+
+  bool enablePropsUpdateReconciliationAndroid() override {
+    return mode == "reconciliation";
+  }
+};
+
+const bool kAndroidFlags = [] {
+  if (const char* mode = std::getenv("HARNESS_ANDROID_PROPS")) {
+    facebook::react::ReactNativeFeatureFlags::override(std::make_unique<AndroidPropsFlags>(mode));
+  }
+
+  return true;
+}();
+
+} // namespace
+#endif
 
 namespace {
 

@@ -9,6 +9,11 @@
 #include <react/renderer/components/text/ParagraphState.h>
 #include <react/renderer/core/ConcreteState.h>
 #include <react/renderer/graphics/PlatformColorParser.h>
+#ifdef RN_SERIALIZABLE_STATE
+#include <react/featureflags/ReactNativeFeatureFlags.h>
+#include <react/renderer/core/DynamicPropsUtilities.h>
+#include <react/renderer/mounting/Differentiator.h>
+#endif
 
 #include <unordered_map>
 
@@ -51,6 +56,9 @@ public:
     react_.addHook(engine_.hook());
     engine_.configure(themes_);
     engine_.setTheme(theme_); // configure() pushes the initial theme
+#ifdef RN_SERIALIZABLE_STATE
+    mountedRoot_ = react_.committed();
+#endif
   }
 
   FakeReact& react() {
@@ -208,6 +216,9 @@ public:
   Check check() const {
     Check result;
 
+#ifdef RN_SERIALIZABLE_STATE
+    mountOnAndroid();
+#endif
     walk(*react_.committed(), result);
 
     return result;
@@ -311,6 +322,10 @@ private:
         }
       } else {
         ok = props->backgroundColor == expected(*binding->style, "backgroundColor");
+#ifdef RN_SERIALIZABLE_STATE
+        // and on Android, the colour the Java view holds after the mount instructions it was sent
+        ok = ok && androidColour(node.getTag()) == expected(*binding->style, "backgroundColor");
+#endif
       }
 
       if (!ok) {
@@ -322,6 +337,72 @@ private:
       walk(*child, result);
     }
   }
+
+#ifdef RN_SERIALIZABLE_STATE
+  // Android's side of the mount (React Native 0.86, FabricMountingManager.cpp): the mounting layer diffs the last mounted tree
+  // against the committed one and sends each created or updated view the props getProps() picks, which the Java view applies on
+  // top of what it holds. With the default flags that is the new props' `rawProps`: a typed-only change never reaches the view.
+  static folly::dynamic sentToJava(const Props* oldProps, const ShadowView& view) {
+    const Props* newProps = view.props.get();
+
+    if (ReactNativeFeatureFlags::enablePropsUpdateReconciliationAndroid() &&
+        std::strcmp(view.componentName, newProps->getDiffPropsImplementationTarget()) == 0) {
+      return newProps->getDiffProps(oldProps);
+    }
+
+    if (ReactNativeFeatureFlags::enableAccumulatedUpdatesInRawPropsAndroid() && oldProps != nullptr) {
+      return diffDynamicProps(oldProps->rawProps, newProps->rawProps);
+    }
+
+    return newProps->rawProps;
+  }
+
+  void mountOnAndroid() const {
+    const auto root = react_.committed();
+
+    if (root == mountedRoot_) {
+      return;
+    }
+
+    for (const auto& mutation : calculateShadowViewMutations(*mountedRoot_, *root)) {
+      const auto& view = mutation.newChildShadowView;
+
+      if (mutation.type == ShadowViewMutation::Create) {
+        javaViews_[view.tag] = sentToJava(nullptr, view);
+      } else if (mutation.type == ShadowViewMutation::Update) {
+        auto& held = javaViews_[view.tag];
+        const auto sent = sentToJava(mutation.oldChildShadowView.props.get(), view);
+
+        if (!held.isObject()) {
+          held = folly::dynamic::object();
+        }
+
+        for (const auto& [key, value] : sent.items()) {
+          held[key] = value;
+        }
+      } else if (mutation.type == ShadowViewMutation::Delete) {
+        javaViews_.erase(mutation.oldChildShadowView.tag);
+      }
+    }
+
+    mountedRoot_ = root;
+  }
+
+  SharedColor androidColour(Tag tag) const {
+    SharedColor colour;
+
+    if (const auto it = javaViews_.find(tag); it != javaViews_.end() && it->second.isObject()) {
+      if (const auto* value = it->second.get_ptr("backgroundColor"); value && !value->isNull()) {
+        fromRawValue(*react_.context(), react_.surface(), RawValue(*value), colour);
+      }
+    }
+
+    return colour;
+  }
+
+  mutable RootShadowNode::Shared mountedRoot_;
+  mutable std::unordered_map<Tag, folly::dynamic> javaViews_;
+#endif
 
   Engine& engine_;
   FakeReact react_;

@@ -1,7 +1,7 @@
 # The native harness in a container: React Native 0.86's C++ renderer (cxx platform) + the engine, tests and benchmark.
 #
 #   docker build -f cpp/harness/Dockerfile -t shadewind-harness .     (from the repository root)
-#   docker run --rm shadewind-harness                                  (tests, then the benchmark)
+#   docker run --rm shadewind-harness                                  (tests, Android build included, then the benchmark)
 #   docker run --rm shadewind-harness build/harness_bench --runs 30    (benchmark only)
 #   docker build --build-arg RN_VERSION=0.88.0 ...                     (another React Native release)
 #
@@ -12,7 +12,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential clang cmake ninja-build git curl ca-certificates nodejs npm \
+      build-essential clang cmake ninja-build git curl ca-certificates nodejs npm unzip openjdk-21-jdk-headless \
       libgoogle-glog-dev libdouble-conversion-dev libboost-dev libgflags-dev libgtest-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,4 +31,9 @@ RUN rm -rf .deps build && RN_VERSION=${RN_VERSION} ./fetch-deps.sh
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
     && cmake --build build
 
-CMD ["sh", "-c", "build/harness_tests && build/harness_bench"]
+# the renderer and the engine as Android builds them (see run.sh)
+RUN cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
+      -DHARNESS_ANDROID_STATE=ON \
+    && cmake --build build-android --target harness_tests
+
+CMD ["./run.sh"]

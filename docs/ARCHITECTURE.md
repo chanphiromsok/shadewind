@@ -731,3 +731,22 @@ turns it off.
   natively at install, on the startup path (`-resolveBench 1` reports the load ms).
 
 The theme switch is not affected: the engine re-themes registered views natively without resolving classes again.
+
+## 20. Android: what the engine relies on, and what is checked (2026-10-17)
+
+React Native 0.86's Android mounting layer does not send a view's typed props to Java. `FabricMountingManager::getProps` sends,
+for each created or updated view, by default the new props' `rawProps` dynamic (`enableAccumulatedUpdatesInRawPropsAndroid`: the
+diff of the old and new `rawProps`; `enablePropsUpdateReconciliationAndroid`: the typed diff, View only), and the Java view
+applies it on top of what it holds. A clone that changes only typed fields never reaches the screen there. So under
+`RN_SERIALIZABLE_STATE` (Android's build) the hook also writes the themed values into the clone's `rawProps`, on top of what React
+last sent (`ThemeHook::applyRawFields`).
+
+Checked in `cpp/harness` (`-DHARNESS_ANDROID_STATE=ON`, part of `docker run --rm shadewind-harness`): React Native's renderer and
+the engine built as on Android (`RN_SERIALIZABLE_STATE`, `ANDROID`, Android's platform code for colours, views and text), and
+`App::check()` replays the mount instructions Android would get (`calculateShadowViewMutations`, then what `getProps` sends) and
+requires the colour each Java view holds to be the theme's. All 18 tests pass in each of the three props modes; with
+`applyRawFields` disabled, 5 of the 12 engine tests fail.
+
+Not checked: the NDK compile of this version, JNI, Java, a device or emulator (`docs/LOCAL_TESTING.md` step 9). The class resolver's
+Android bundle is built and compiled by `hermesc` (section 19), not run. example-real's launch-argument benches use `Settings`,
+which is iOS-only.

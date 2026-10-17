@@ -1,8 +1,8 @@
 # Native harness
 
 The engine (`cpp/ThemeHook.hpp`, `cpp/ThemeEngine.hpp`) running inside React Native 0.86.2's own C++ renderer: real `ShadowTree`
-commits with the commit hook, Yoga layout, props parsing and Paragraph state, on the "cxx" platform, without an app, a simulator,
-JSI or Hermes. A small stand-in for React's Fabric renderer (`FakeReact.hpp`) creates and clones nodes the way `UIManager` does,
+commits with the commit hook, Yoga layout, props parsing and Paragraph state, on the "cxx" platform and built as on Android,
+without an app, a simulator, JSI or Hermes. A small stand-in for React's Fabric renderer (`FakeReact.hpp`) creates and clones nodes the way `UIManager` does,
 keeps React's node handles the way `UIManagerBinding` does, and hides / reveals subtrees the way Suspense and Activity do
 (`freezeOnBlur`).
 
@@ -15,19 +15,22 @@ Docker (any machine):
 
 ```sh
 docker build -f cpp/harness/Dockerfile -t shadewind-harness .    # from the repository root, about 2 minutes
-docker run --rm shadewind-harness                                 # tests, then the benchmark
+docker run --rm shadewind-harness                                 # tests (run.sh: both builds), then the benchmark
 docker run --rm shadewind-harness build/harness_bench --runs 30   # benchmark only
 ```
 
-Linux without Docker (Ubuntu 24.04: `clang cmake ninja-build libgoogle-glog-dev libdouble-conversion-dev libboost-dev
-libgflags-dev libgtest-dev`):
+Linux without Docker (Ubuntu 24.04: `clang cmake ninja-build unzip openjdk-21-jdk-headless libgoogle-glog-dev
+libdouble-conversion-dev libboost-dev libgflags-dev libgtest-dev`):
 
 ```sh
 cd cpp/harness
-./fetch-deps.sh          # React Native from npm, folly / fmt / fast_float at the versions RN 0.86 pins
+./fetch-deps.sh          # React Native from npm, folly / fmt / fast_float at the versions RN 0.86 pins, fbjni's headers
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
 cmake --build build
-build/harness_tests && build/harness_bench
+cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
+  -DHARNESS_ANDROID_STATE=ON
+cmake --build build-android --target harness_tests
+./run.sh                 # tests (both builds, Android in each props mode), then the benchmark
 ```
 
 On macOS use Docker: folly and glog from Homebrew do not match the versions React Native pins.
@@ -40,6 +43,8 @@ On macOS use Docker: folly and glog from Homebrew do not match the versions Reac
 | `Engines.hpp` | the engine as JS drives it, three arms: `none` (plain React Native), `baseline` (44eb043 and its JS ref policy, kept in `baseline/`), `current` (this branch) |
 | `App.hpp` | themed views rendered with the current theme, refs attached after a commit and detached on hide, the JS microtask after each commit, and `check()`: every visible bound view must hold the current theme (props, and for text the drawn attributed string) |
 | `tests.cpp` | correctness: mount, switches, freeze / reveal (sync and async switch), rapid toggles while frozen, React commits after a switch, pressed views, late registration, unmount clean-up |
+| `run.sh` | every test run (the generic build, then the Android build in each of React Native's props modes), then the benchmark |
+| `android_stubs.cpp` | the Android build's JNI ends (state and props handed to Java), never reached: the harness does not run Java |
 | `class_merge_tests.cpp` | `css::ClassMerge` byte-for-byte against tailwind-merge 3.7.0 (`fixtures/classmerge`, regenerate with `generate.mjs`) |
 | `style_resolver_tests.cpp` | `css::StyleResolver` against Uniwind 1.12's own `resolveStyles` (`fixtures/resolver`: 137,790 cases from Uniwind's bundler and store), with the device's table and the one Metro prebuilds (`table.prebuilt.json`); regenerate with `generate.mjs`, see below |
 | `bench.cpp` | native cost per arm, each arm in its own process: mount (commit, registrations), theme switch (sync and async), the React commits after a switch, frozen tabs and their reveal |
@@ -58,6 +63,18 @@ npm install --legacy-peer-deps uniwind@1.12.0 tailwindcss@4.3.3 esbuild@0.25.10 
 node <repo>/cpp/harness/fixtures/resolver/generate.mjs <repo>     # writes table.json, cases.jsonl, summary.json
 node <repo>/cpp/harness/fixtures/resolver/seam-check.mjs <repo>   # src/uniwind/nativeResolver.ts in front of the real store
 ```
+
+## The Android build
+
+`-DHARNESS_ANDROID_STATE=ON` builds React Native's renderer and the engine the way an Android app does: `RN_SERIALIZABLE_STATE`
+and `ANDROID` defined, Android's platform code for colours (an int32), views and text (`ParagraphState` serialized to a
+MapBuffer), fbjni's headers. Text layout stays generic (Android's measures in Java). On Android the mounting layer does not read
+the typed props: `FabricMountingManager::getProps` sends each created or updated view, by default, the new props' `rawProps`
+dynamic, which the Java view applies on top of what it holds. `App::check()` models exactly that (`sentToJava`, `mountOnAndroid`)
+and requires the colour each Java view would hold to be the theme's. `HARNESS_ANDROID_PROPS=accumulated|reconciliation` runs the
+same tests with React Native's two other props modes (the rawProps diff, the typed diff of View). Without the engine's
+`rawProps` sync (`ThemeHook::applyRawFields`), 5 of the 12 engine tests fail in this build: that is the Android-only path, and it is
+what this build checks. It is not an Android device: no Java, no JNI, no NDK toolchain.
 
 ## Reading the benchmark
 

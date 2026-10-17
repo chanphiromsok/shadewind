@@ -145,7 +145,9 @@ Docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [RENDER_CORE](docs/RENDER_CORE.md), 
 - No state variants and no scoped themes on the fast path.
 - `freezeOnBlur` (Suspense / Activity hiding a screen) and rapid toggles are covered by the native harness (`cpp/harness`: React
   Native's renderer, no device): a revealed screen is themed inside the commit that shows it. On a device they were verified
-  manually on the iOS simulator (`docs/DESIGN.md`, `docs/LOCAL_TESTING.md`); Android is not verified for freeze.
+  manually on the iOS simulator (`docs/DESIGN.md`, `docs/LOCAL_TESTING.md`). Android: the harness also builds React Native's
+  renderer as on Android and checks what its mounting layer sends each Java view (`rawProps`, in all three props modes), but this
+  version has not been compiled with the NDK or run on an Android device or emulator.
 - Relies on a private React Native API (`getNodeFromInternalInstanceHandle`) to find a view's shadow node.
 
 ## Contributing

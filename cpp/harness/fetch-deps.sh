@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Fetches the C++ sources the harness builds into .deps/: React Native's ReactCommon (from the npm package) and the folly, fmt
-# and fast_float versions React Native 0.86 pins (packages/react-native/gradle/libs.versions.toml). glog, boost and
-# double-conversion come from the OS (see Dockerfile). Re-running skips what is already there.
+# Fetches the C++ sources the harness builds into .deps/: React Native's ReactCommon (from the npm package), the folly, fmt
+# and fast_float versions React Native 0.86 pins (packages/react-native/gradle/libs.versions.toml), and fbjni's headers for the
+# Android build. glog, boost and double-conversion come from the OS (see Dockerfile). Re-running skips what is already there.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -32,6 +32,20 @@ clone() {
     git -c advice.detachedHead=false clone -q --depth 1 --branch "${tag}" "${url}" ".deps/${dir}"
   fi
 }
+
+# fbjni's headers, for the Android build of the harness (HARNESS_ANDROID_STATE): React Native's Android headers include them.
+# The version React Native pins, from Maven Central; only the headers are used (no JNI call is made).
+if [ ! -d .deps/fbjni/include ]; then
+  FBJNI_VERSION="$(sed -n 's/^fbjni = "\(.*\)"/\1/p' .deps/react-native/gradle/libs.versions.toml)"
+  echo "fbjni ${FBJNI_VERSION}"
+  tmp="$(mktemp -d)"
+  curl -fsSL "https://repo.maven.apache.org/maven2/com/facebook/fbjni/fbjni/${FBJNI_VERSION}/fbjni-${FBJNI_VERSION}.aar" -o "${tmp}/fbjni.aar"
+  (cd "${tmp}" && unzip -q fbjni.aar 'prefab/modules/fbjni/include/*')
+  rm -rf .deps/fbjni
+  mkdir -p .deps/fbjni
+  mv "${tmp}/prefab/modules/fbjni/include" .deps/fbjni/include
+  rm -rf "${tmp}"
+fi
 
 clone folly https://github.com/facebook/folly "${FOLLY_TAG}"
 clone fmt https://github.com/fmtlib/fmt "${FMT_TAG}"
