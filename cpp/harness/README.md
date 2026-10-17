@@ -41,17 +41,20 @@ On macOS use Docker: folly and glog from Homebrew do not match the versions Reac
 | `App.hpp` | themed views rendered with the current theme, refs attached after a commit and detached on hide, the JS microtask after each commit, and `check()`: every visible bound view must hold the current theme (props, and for text the drawn attributed string) |
 | `tests.cpp` | correctness: mount, switches, freeze / reveal (sync and async switch), rapid toggles while frozen, React commits after a switch, pressed views, late registration, unmount clean-up |
 | `class_merge_tests.cpp` | `css::ClassMerge` byte-for-byte against tailwind-merge 3.7.0 (`fixtures/classmerge`, regenerate with `generate.mjs`) |
-| `style_resolver_tests.cpp` | `css::StyleResolver` against Uniwind 1.12's own `resolveStyles` (`fixtures/resolver`: 136,260 cases from Uniwind's bundler and store; regenerate with `generate.mjs`, see below) |
+| `style_resolver_tests.cpp` | `css::StyleResolver` against Uniwind 1.12's own `resolveStyles` (`fixtures/resolver`: 137,790 cases from Uniwind's bundler and store), with the device's table and the one Metro prebuilds (`table.prebuilt.json`); regenerate with `generate.mjs`, see below |
 | `bench.cpp` | native cost per arm, each arm in its own process: mount (commit, registrations), theme switch (sync and async), the React commits after a switch, frozen tabs and their reveal |
 
 ## Regenerating the resolver fixture
 
 `fixtures/resolver/generate.mjs` compiles example-real's CSS with Uniwind's own bundler and records Uniwind's own results, so it
-needs Uniwind, Tailwind and esbuild at the versions the fixture was made with, in a directory of its own:
+needs Uniwind, Tailwind, esbuild and Metro (the bundle's table goes through Uniwind's real Metro transformer and `withShadewind`) at
+the versions the fixture was made with, in a directory of its own, and the package built (`bob build`: the Metro transformer loads
+`lib/module`):
 
 ```sh
 mkdir resolvergen && cd resolvergen && npm init -y
-npm install --legacy-peer-deps uniwind@1.12.0 tailwindcss@4.3.3 esbuild@0.25.10
+npm install --legacy-peer-deps uniwind@1.12.0 tailwindcss@4.3.3 esbuild@0.25.10 metro@0.84.6 metro-config@0.84.6 \
+  metro-transform-worker@0.84.6 @react-native/metro-config@0.86.2 @react-native/metro-babel-transformer@0.86.2
 node <repo>/cpp/harness/fixtures/resolver/generate.mjs <repo>     # writes table.json, cases.jsonl, summary.json
 node <repo>/cpp/harness/fixtures/resolver/seam-check.mjs <repo>   # src/uniwind/nativeResolver.ts in front of the real store
 ```

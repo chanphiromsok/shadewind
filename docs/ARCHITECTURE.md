@@ -671,8 +671,8 @@ function of the theme's CSS variables). Misses happen on the first render of a c
 theme, a new screen width, and in Shadewind's adapter once per theme for every themed className (it needs every theme's props
 for the engine). That is what now runs natively when it can.
 
-- **Table** (`src/uniwind/styleTable.ts`, JS, once per session when the JS thread is first idle): every value of the stylesheet
-  evaluated for every theme. Each evaluation records every variable it reads (a Proxy over the variables) and every read of the
+- **Table** (`src/uniwind/styleTable.ts`): every value of the stylesheet evaluated for every theme, at bundle time (see "Built by
+  Metro" below) or on the device when the JS thread is first idle. Each evaluation records every variable it reads (a Proxy over the variables) and every read of the
   runtime's changing fields (screen, insets, font scale, orientation, rtl, colour scheme: accessors installed on Uniwind's runtime
   object for the build and removed after). Inline variables a class sets (`--tw-leading`, `--uniwind-em`, ...) are definitions: a
   value that reads one is evaluated once per definition and once with none, and the resolver picks the definition that wins in
@@ -692,16 +692,37 @@ Verified:
 
 - `cpp/harness/fixtures/resolver`: the table and Uniwind's own `resolveStyles` results come from Uniwind 1.12's bundler and store
   in Node (example-real's CSS plus a third theme and the variants the app does not use: responsive, theme, state, important,
-  relative line heights, em letter spacing, fallback classes). 1506 classNames (app literals, every ordered pair of classes that
-  set the same property, random combinations) x 3 themes x 5 widths (the breakpoints exactly and below) x 6 states: 136,260
-  cases, 112,950 resolved natively, all equal in keys, order, values, dependencies and sum; the rest fall back exactly where a
-  class is not in the table. 25 hand-made mutants of the resolver (precedence, conditions, order, post-processing) all fail it.
-- `seam-check.mjs`: the seam in front of the real store, with a stand-in native function (13 checks; removing a guard fails it).
+  relative line heights, em letter spacing, pixel ratio / hairline values, fallback classes). 1531 classNames (app literals, every
+  ordered pair of classes that set the same property, random combinations) x 3 themes x 5 widths (the breakpoints exactly and
+  below) x 6 states: 137,790 cases, 114,930 resolved natively, all equal in keys, order, values, dependencies and sum; the rest
+  fall back exactly where a class is not in the table. 25 hand-made mutants of the resolver (precedence, conditions, order,
+  post-processing) all fail it.
+- `seam-check.mjs`: the seam in front of the real store, with a stand-in native function (20 checks; removing a guard fails it).
 - On a device: `-resolveBench 1` in example-real compares both on every case (parity count) and times them
   (`docs/LOCAL_TESTING.md` step 6). No device numbers yet.
 
-Not covered: the first screen. The table is built after install, when the JS thread is first idle, so the first mount resolves
-with Uniwind's JS (building the table costs more JS than resolving one screen). Building it at Metro time inside `withShadewind`
-(the generator's path: `generateArtifacts`, `compileCSS`, evaluate per theme, with `pixelRatio` and `hairlineWidth` treated as
-changing) would cover the first mount too: not done. The theme switch is not affected: the engine re-themes registered views
-natively without resolving classes again.
+Built by Metro (so the first screen is covered): `withShadewind` wraps the project's Babel transformer with
+`metro-babel-transformer.cjs`. Uniwind's Metro transformer turns the CSS entry into a module
+(`Uniwind.__reinit(rt => <stylesheet>, <themes>, <fingerprint>)`) and hands it to Babel; on iOS and Android, ours evaluates that
+stylesheet in Node the way Uniwind's store does on the device (Uniwind's own runtime helpers, the platform's variables, each
+theme's on a clone), builds the table with the same `styleTable.ts` (from `lib/module`), treating `pixelRatio` and
+`hairlineWidth` as unknown, and appends one guarded statement: `try { require('shadewind/uniwind').registerPrebuiltStyleTable(json,
+meta) } catch (e) {}`. It runs right after Uniwind loaded the stylesheet; install loads the table natively (a parse, no JS
+evaluation) if the store still holds that stylesheet, those variables and that variables revision, on that platform (not TV) and
+Uniwind version. Classes that read the pixel ratio or hairline width fall back in it; if there are any, the device rebuilds the
+table when idle and adds them. Another Uniwind version, a stylesheet that reads the runtime while it is created, or any error:
+the module is left unchanged and the device builds the table as before. `withShadewind(config, { prebuildStyleTable: false })`
+turns it off.
+
+- `generate.mjs` builds the bundle's table through the app's own path: `getDefaultConfig` -> `withUniwindConfig` ->
+  `withShadewind`, then Uniwind's Metro transformer on the CSS entry, with React Native 0.86's Babel transformer behind ours. The
+  output depends on `shadewind/uniwind`, registers the table when evaluated, and the table equals the device's class for class
+  except exactly the two pixel-ratio / hairline classes of the fixture; the parity test checks it on every case
+  (`table.prebuilt.json`). `seam-check.mjs` covers install with it (used, no device build), with device-dependent classes (idle
+  rebuild), a variables change before install (not used), the resolver off (nothing loaded), a CSS reload after install.
+- Not tested: Expo's transform worker (same Babel hook, not run), and any device: `-resolveBench 1` reports where the table came
+  from and how many `getStyles` misses since launch went native; `-resolverOff 1` is the A/B switch for cold launches
+  (`docs/LOCAL_TESTING.md` step 6).
+- Cost: the table is in the bundle (example-real: 56 KB of JSON) and parsed natively at install, on the startup path.
+
+The theme switch is not affected: the engine re-themes registered views natively without resolving classes again.

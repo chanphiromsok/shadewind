@@ -65,9 +65,10 @@ change. Views the engine cannot take (state variants such as `active:`, scoped t
 differ in other properties) keep Uniwind's own behaviour. More than 6 themes, or an unsupported Uniwind version, turns the
 engine off and leaves plain Uniwind.
 
-Uniwind's class resolution (what runs when its style cache misses) also goes native once a class table is built, when the app is
-first idle: same results as Uniwind's JS (checked on 136,260 cases), and every className with a class the table cannot hold
-(shadows, transforms, safe-area and screen units, data / rtl variants) is still resolved by Uniwind. `nativeResolver` from
+Uniwind's class resolution (what runs when its style cache misses) also goes native, from a class table `withShadewind` builds
+while Metro bundles (so from the first screen on; `withShadewind(config, { prebuildStyleTable: false })` builds it on the device
+when idle instead): same results as Uniwind's JS (checked on 137,790 cases), and every className with a class the table cannot
+hold (shadows, transforms, safe-area and screen units, data / rtl variants) is still resolved by Uniwind. `nativeResolver` from
 `shadewind/uniwind` reports its status and turns it off (`setEnabled(false)`).
 
 ## API
@@ -114,7 +115,7 @@ JS THREAD                    NATIVE (C++, Nitro raw JSI)  [shipped]
 | AOT `className` resolver | design | `docs/ARCHITECTURE.md` section 10 |
 | SIMD family index | experiment, 2-4x per lookup on large trees, not wired in | `cpp/experiments` |
 | Native CSS colour parser, native `cn` merge, `shadewind-cn-table` | shipped (iOS verified, Android build not run) | `cpp/css`, `bin/cn-table.mjs`, `docs/ARCHITECTURE.md` section 14 |
-| Native Uniwind class resolution (`resolveStyles` from a per-theme table) | parity-tested against Uniwind in the native harness, not yet built or measured on a device | `cpp/css/StyleResolver.hpp`, `src/uniwind/nativeResolver.ts`, `docs/ARCHITECTURE.md` section 19 |
+| Native Uniwind class resolution (`resolveStyles` from a per-theme table, prebuilt by Metro) | parity-tested against Uniwind in the native harness and through Uniwind's real Metro transformer, not yet built or measured on a device | `cpp/css/StyleResolver.hpp`, `src/uniwind/nativeResolver.ts`, `metro-babel-transformer.cjs`, `docs/ARCHITECTURE.md` section 19 |
 
 Rules the design holds to:
 
