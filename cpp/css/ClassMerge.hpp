@@ -16,10 +16,16 @@ namespace margelo::nitro::shadewind::css {
 
 class ClassMerge {
 public:
-  /** Loads the generated table (lines: `G\t<count>`, `K\t<group>\t<g,g,...>`, `T\t<base>\t<group>`, `U\t<base>`). */
+  /**
+   * Loads the generated table (lines: `G\t<count>`, `K\t<group>\t<g,g,...>`, `T\t<base>\t<group>`, `U\t<base>`,
+   * `S\t<modifier,modifier,...>`: the oracle's order-sensitive modifiers).
+   */
   bool load(std::string_view text) {
     std::vector<std::pair<std::string, int>> items;
     kills_.clear();
+    // a table from before `S` lines existed: tailwind-merge 3.x's list (3.7.0, the version the generator was used with)
+    orderSensitive_ = {"*", "**", "after", "backdrop", "before", "details-content", "file", "first-letter", "first-line", "marker",
+                       "placeholder", "selection"};
     size_t pos = 0;
 
     while (pos < text.size()) {
@@ -72,6 +78,25 @@ public:
         items.emplace_back(std::string(f[1]), static_cast<int>(toInt(f[2])));
       } else if (line[0] == 'U' && nf >= 2) {
         items.emplace_back(std::string(f[1]), -1);
+      } else if (line[0] == 'S') {
+        orderSensitive_.clear();
+
+        const std::string_view list = nf > 1 ? f[1] : std::string_view();
+        size_t p = 0;
+
+        while (p < list.size()) {
+          size_t c = list.find(',', p);
+
+          if (c == std::string_view::npos) {
+            c = list.size();
+          }
+
+          if (c > p) {
+            orderSensitive_.emplace_back(list.substr(p, c - p));
+          }
+
+          p = c + 1;
+        }
       }
     }
 
@@ -259,7 +284,22 @@ private:
     }
   }
 
-  // modifiers sorted like tailwind-merge (arbitrary variants stay in place as barriers), important marker either side
+  // a modifier tailwind-merge does not reorder across: an arbitrary variant, or one of its order-sensitive modifiers (before:, ...)
+  bool isBarrier(std::string_view modifier) const {
+    if (!modifier.empty() && modifier.front() == '[') {
+      return true;
+    }
+
+    for (const auto& name : orderSensitive_) {
+      if (name == modifier) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // modifiers sorted like tailwind-merge (barriers stay in place, see isBarrier), important marker either side
   bool parse(const char* p, size_t n, Tok& out) const {
     if (!std::memchr(p, ':', n) && p[0] != '!' && p[n - 1] != '!') {
       const int g0 = find(p, n);
@@ -312,7 +352,7 @@ private:
     int run = 0;
 
     for (int i = 0; i <= np; i++) {
-      if (i == np || (!parts[i].empty() && parts[i].front() == '[')) {
+      if (i == np || isBarrier(parts[i])) {
         std::sort(parts + run, parts + i);
         run = i + 1;
       }
@@ -343,6 +383,7 @@ private:
   std::vector<Slot> slots_;
   size_t mask_ = 0;
   std::vector<std::vector<int>> kills_;
+  std::vector<std::string> orderSensitive_;
 };
 
 } // namespace margelo::nitro::shadewind::css

@@ -95,8 +95,9 @@ add_library(harness_support INTERFACE)
 target_include_directories(harness_support INTERFACE "${ENGINE}" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(harness_support INTERFACE rn_renderer)
 
-add_executable(harness_tests tests.cpp)
+add_executable(harness_tests tests.cpp class_merge_tests.cpp)
 target_link_libraries(harness_tests PRIVATE harness_support GTest::gtest_main)
+target_compile_definitions(harness_tests PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 add_executable(harness_bench bench.cpp)
 target_link_libraries(harness_bench PRIVATE harness_support)

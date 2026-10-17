@@ -18,7 +18,7 @@ if (!srcDir) {
 }
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
-const { twMerge } = require('tailwind-merge');
+const { twMerge, getDefaultConfig } = require('tailwind-merge');
 
 // 1. candidate tokens: every whitespace separated token of every string literal in the sources
 const tokens = new Set();
@@ -77,7 +77,9 @@ const kills = reps.map(() => []);
 for (let g1 = 0; g1 < reps.length; g1++) {
   for (let g2 = 0; g2 < reps.length; g2++) if (twMerge(`${reps[g2]} ${reps[g1]}`) === reps[g1]) kills[g1].push(g2);
 }
-const lines = [`G\t${reps.length}`];
+// modifiers the oracle does not reorder across (tailwind-merge 3: before:, after:, placeholder:, ...); none in 2.x
+const orderSensitive = getDefaultConfig?.().orderSensitiveModifiers ?? [];
+const lines = [`G\t${reps.length}`, `S\t${orderSensitive.join(',')}`];
 kills.forEach((k, g) => lines.push(`K\t${g}\t${k.join(',')}`));
 for (const b of known) lines.push(`T\t${b}\t${groupOf.get(b)}`);
 for (const b of unknown) lines.push(`U\t${b}`);
