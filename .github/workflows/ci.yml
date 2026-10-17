@@ -160,3 +160,19 @@ jobs:
         run: |
           yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
+
+  native-harness:
+    # The engine and the class resolver inside React Native's C++ renderer, generic and built as on Android
+    # (cpp/harness/README.md): every test, then a short benchmark run
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Build the harness image
+        run: docker build -f cpp/harness/Dockerfile -t shadewind-harness .
+
+      - name: Tests (generic and Android builds), benchmark
+        run: docker run --rm shadewind-harness ./run.sh --runs 3
