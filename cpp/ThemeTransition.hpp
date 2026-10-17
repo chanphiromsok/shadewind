@@ -28,12 +28,15 @@ public:
   void begin(ThemeTransitionPreset preset, double durationMs) {
     _hook.watchMounts();
 
+    // Read before taking _mutex: ThemeHook's lock is held for a whole commit walk, and the mount hook (main thread) takes _mutex.
+    // Only setTheme on this thread changes the epoch, so the value is the same.
+    const uint64_t epoch = _hook.epoch();
     uint64_t id = 0;
 
     {
       std::lock_guard<std::mutex> lock(_mutex);
       id = ++_lastId;
-      _epoch = _hook.epoch();
+      _epoch = epoch;
       _armed.store(true, std::memory_order_release);
     }
 

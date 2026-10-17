@@ -62,7 +62,7 @@ object ThemeTransitionOverlay {
   @DoNotStrip
   fun run(id: Long) {
     if (Looper.myLooper() == Looper.getMainLooper()) {
-      fadeOut(id) // the mount hook: the views are updated, nothing was drawn yet
+      fadeOut(id) // the mount hook: FabricUIManager posts it at the front of the queue once the frame that mounted the views ran
     } else {
       main.post { fadeOut(id) }
     }

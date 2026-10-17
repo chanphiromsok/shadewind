@@ -23,7 +23,8 @@ std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::r
 // Animated theme change (ThemeTransition.hpp drives these; iOS: ios/ShadewindNative.mm, Android: ThemeTransitionOverlay.kt through JNI,
 // elsewhere they do nothing). Both are callable from any thread and return at once; the work happens on the main / UI thread.
 // A transition is a snapshot of the window laid over the app, which fades out once the new theme is mounted.
-// Keep the numbers in step with ThemeTransitionPreset in src/internal.tsx and PRESET_* in ThemeTransitionOverlay.kt.
+// JS sends the preset by name (ThemeTransitionPreset in src/internal.tsx, mapped in HybridShadewind::setTheme); keep these numbers
+// in step with PRESET_* in ThemeTransitionOverlay.kt.
 enum class ThemeTransitionPreset : int { Fade = 0 };
 
 // Queues the snapshot on the main thread. Call BEFORE the commit that themes the views: the mount is queued on the main thread after

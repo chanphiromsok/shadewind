@@ -162,6 +162,9 @@ export function configure(options: ConfigureOptions): void {
     );
   }
 
+  // throws on a bad preset here: as the default it would make every later switch throw before it applies
+  nativeTransition(transition);
+
   if (config) {
     const same =
       config.themes.length === themes.length &&

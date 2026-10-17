@@ -148,7 +148,9 @@ void themeTransitionRun(uint64_t id) {
   };
 
   if ([NSThread isMainThread]) {
-    run(); // the mount hook: same run loop turn as the mount, so the first frame with the new theme already starts the fade
+    // the mount hook: RCTSurfacePresenter reports the mount from a main-queue block queued right after the views were updated,
+    // so at most one frame shows the new theme under the still opaque snapshot before the fade starts
+    run();
   } else {
     dispatch_async(dispatch_get_main_queue(), run);
   }
