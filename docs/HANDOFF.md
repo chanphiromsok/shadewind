@@ -43,6 +43,20 @@ analysed per frame with ffmpeg; one run each, 30 fps cannot resolve less than 33
 - example-real freeze sequences 1-3 (LOCAL_TESTING step 4) on the iOS simulator, Release: `STALE` empty, `treeOK == inTree`, no wrong
   colour in the reveal frames. Sequence 4 (pressed card + second finger) and the baseline comparison at `44eb043` were not done.
 
+Performance of `hookDeferred` vs `hookAsync` on the Uniwind path (example-real, iOS simulator Release, 473 views, the Account "Measure 12 theme
+switches" meter, 3 runs each, same native code, only install.ts's strategy differs; simulator, one session, noisy):
+
+| | `hookAsync` (before) | `hookDeferred` (after) |
+|---|---|---|
+| JS time inside `setTheme` | 0.48-0.51 ms | 6.3-7.4 ms |
+| idle (until the JS thread is free) | 18.5-19.4 ms | 15.0-15.4 ms |
+| stall median / worst | 18.5-19.5 / 21.9-22.7 ms | 17.6 / 17.7-18.4 ms |
+| tree check | 473/473 | 473/473 |
+
+The engine commit now costs the JS thread (about 6 ms for 473 views; tovtam registers 26-108, so roughly 1-2 ms, an estimate), but the
+screen settles about 3.8 ms sooner and the worst stall drops about 4 ms (the guess, untested: one commit and one mount instead of two
+competing ones). Android has no meter: not measured.
+
 Not verified / open:
 
 - **Physical devices** (none tested; the Release build to the owner's iPhone failed at signing: no provisioning profile for
