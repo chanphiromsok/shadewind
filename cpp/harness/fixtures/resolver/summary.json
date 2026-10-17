@@ -1,0 +1,18 @@
+{
+  "uniwind": "1.12.0",
+  "app": "example-real",
+  "themes": [
+    "light",
+    "dark",
+    "ocean"
+  ],
+  "stylesheetClasses": 256,
+  "tableClasses": 231,
+  "fallbackClasses": 25,
+  "appLiterals": 270,
+  "classNames": 1514,
+  "fallbackClassNames": 259,
+  "cases": 136260,
+  "resolvableCases": 112950,
+  "tableBuildMsNode": 4.37
+}
