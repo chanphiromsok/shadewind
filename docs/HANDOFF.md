@@ -6,8 +6,74 @@ State of the `engine/freeze-and-mount` work, merged into `main`. Read this first
 
 - `main` = `engine/freeze-and-mount` (fast-forwarded, no merge commits). Baseline for every A/B: commit `44eb043` (the code
   before this work): `git worktree add ../shadewind-baseline 44eb043`.
-- Everything below is verified off-device only (Linux, Docker, Node). Nothing of this work has run on an iOS simulator, a device
-  or Android yet.
+- The sections "What was done" and "What is NOT proven" below were written when everything was verified off-device only (Linux, Docker,
+  Node). Since then it ran on the iOS simulator and an Android emulator: read "Update, later on 2026-10-17" first.
+
+## Update, later on 2026-10-17: tovtam, iOS and Android devices
+
+Branch `fix/android-colours-deferred-theme-mount` (two commits on top of `main`): the engine fix and the repacked `example-real`
+tarball. Not merged, not pushed. Tovtam (`~/Desktop/tovtam`, branch `feat/trip-plan-figma-v2`) is NOT committed: its working tree has
+the integration (`metro.config.js`, `package.json` + `yarn.lock` for `shadewind`, `vendor/shadewind-0.1.0.tgz`,
+`src/components/sheet/SheetChrome.tsx`, `DynamicBottomSheet.tsx`) next to the owner's own `@legendapp/list` bump; stage by hunk.
+
+What changed (all in the branch above):
+
+1. **Android colours** (`cpp/ThemeEngine.hpp`): CSS-string colours are stored as signed int32 under `RN_SERIALIZABLE_STATE`. Java reads a
+   colour prop as a `Double` and narrows it with `toInt()`, which saturated every unsigned ARGB to `0x7FFFFFFF` (white at 50% alpha):
+   every re-themed view on Android turned into a 50% white layer after the first switch (a bottom sheet looked see-through). Found by
+   an on-device A/B (signed vs unsigned), confirmed in RN's `ReadableNativeMap.cpp` and `ColorPropConverter.kt`.
+2. **`hookDeferred`** (new `setTheme` strategy, `cpp/HybridShadewind.cpp`, `src/internal.tsx`, `applyUniwindTheme` in `src/index.tsx`,
+   used by `src/uniwind/install.ts`): the commit runs on the JS thread but is mounted with `mountSynchronously = false`, i.e. queued on the
+   RuntimeScheduler with React's own commit of the same task. Engine-bound views and views React re-renders (LinearGradient colours)
+   then change in the same frame. It is applied on iOS and Android. The public `setTheme` default is still `hookAsync`.
+3. **Podspec / package.json**: `cpp/harness`, `cpp/tests`, `cpp/experiments` are no longer compiled into the app (the gtest files broke
+   the first iOS app build) nor packed.
+4. **Harness**: Android mode feeds signed colours and decodes them as Java does; new test `AndroidColours.CssStringsSurviveJavaDoubleToInt`.
+   **Not run: there was no Docker on the machine.** Run `docker build -f cpp/harness/Dockerfile -t shadewind-harness . && docker run --rm shadewind-harness`
+   first thing; the harness never covered `mountSynchronously = false` under `HARNESS_ANDROID_STATE` either (add a test).
+
+Verified on devices (tovtam, Release builds, simulator iPhone 17 Pro and emulator Pixel_8_Pro arm64, 30 fps screen recordings
+analysed per frame with ffmpeg; one run each, 30 fps cannot resolve less than 33 ms):
+
+- iOS and Android: switching in the Account theme sheet flips the page, the banner `LinearGradient`, the icon gradients and the sheet in
+  the same frame, both directions (before: Android gradients were 4-8 frames = 133-267 ms late; the first `hookDeferred` build only
+  deferred on iOS, Android ignored it until `commitTick(*ui, !deferred)` was made unconditional).
+- Both: switching while Explore is hidden (freezeOnBlur), then revealing it, shows no stale frame.
+- Android sheet is solid in both themes (255 / 17) after the colour fix. The Android NDK compile of this branch succeeds (`libshadewind.so`).
+- example-real freeze sequences 1-3 (LOCAL_TESTING step 4) on the iOS simulator, Release: `STALE` empty, `treeOK == inTree`, no wrong
+  colour in the reveal frames. Sequence 4 (pressed card + second finger) and the baseline comparison at `44eb043` were not done.
+
+Not verified / open:
+
+- **Physical devices** (none tested; the Release build to the owner's iPhone failed at signing: no provisioning profile for
+  `com.angkor.tovtam.dev`; it needs `-allowProvisioningUpdates` or signing in Xcode, which touches the Apple account, so it was left).
+- **System appearance changes** after the latest changes (Opus recorded it before: no stale frames on iOS; Android hides differences because the
+  system redraws on a config change).
+- **One unexplained crash** (iOS Debug, tovtam): `ShadowTree::commit` asserted `attempts < 1024` after the Range tab froze for ~20 s;
+  only the JS thread was inside a commit when it aborted. Not reproduced in 3 tries with Shadewind on. Release builds compile the assert out
+  (a livelock would be a hang there).
+- **`hidden` reads 0** in every `inspect()` state, including on a pushed PostDetail (tabs frozen). If frozen screens are not marked
+  hidden in the committed tree, every switch clones every tab (performance only; colours are right). ARCHITECTURE section 18 says hidden
+  subtrees are skipped: check on device whether that holds.
+- **Probe numbers explained (Opus, partly inferred):** `notInTree` counts registered views whose family is still alive but not in the
+  committed tree (unmounted views are never unregistered by design; a memory-warning GC took it to 0), `viewOK` only counts views attached to
+  a window (inactive tabs read -1). Neither causes a wrong colour. Suggested probe change: report off-window views separately and count `viewOK` only
+  over in-window views with a background delta.
+- Remaining cosmetic items in tovtam: the theme-sheet row dims and the check mark moves 1-3 frames late (press feedback of `TouchableOpacity`),
+  other sheets still use `useBottomSheetTheme` style props (`MomentCommentSheet`, `ExploreDetailCommentSheet`, `UseMapBottomSheet`,
+  `FullOverlay*`, `DateRangePickerBottomSheet`); the Explore search bar background comes from `useBoxShadow` and `MMKV`, not from Uniwind, so a
+  `Uniwind.setTheme` alone (without the app's `setSelectedTheme`) leaves it stale.
+- Optional performance work: make gradient `colors` engine-bound (Uniwind's `withUniwind` option map cannot carry an array and
+  `LinearGradient` gives no ref to its native view, so it needs a `ThemedLinearGradient` using `useThemedProps` / `registerRaw`);
+  measure the real cost of `hookDeferred` (the engine commit now runs on the JS thread; harness 4.6 ms for 2003 views, tovtam registers 26-108 views).
+
+How to reproduce the checks: build tovtam with `shadewind` from the tarball (`node .yarn/releases/yarn-4.11.0.cjs prepare`, `npm pack --pack-destination
+<app>/vendor`, then in the app `rm -rf node_modules/shadewind && yarn install`, `pod install` or Gradle `app:assembleRelease
+-PreactNativeArchitectures=arm64-v8a` with the debug keystore passed by `-PMYAPP_RELEASE_*`), record the Account > Theme sheet switch with the argent
+screen recorder (`trimStatic: false`) and compare the frame where each region changes (`ffmpeg ... signalstats`). Recordings are
+in `.argent/recordings` (git-ignored). Environment: `ASDF_RUBY_VERSION=3.2.0` for `pod` in `example-real/ios`; example-real needs
+`bash scripts/arm.sh engine` (writes git-ignored `src/aotImpl.ts` etc.); the emulator was nearly full (use `adb shell pm uninstall -k <app>`
+then `adb install` to keep app data).
 
 ## What was done
 
@@ -54,8 +120,8 @@ No speed numbers from a device exist yet. Do not quote "faster than Uniwind Pro"
 
 ## Known risks / open points
 
-- Android: C++ never compiled with the NDK on this branch (folly json used by `StyleResolver` is in React Native's
-  `folly_runtime`, by reading, not by build). JNI / Java paths untested.
+- Android: the C++ now compiles with the NDK (arm64-v8a, tovtam Release) and runs on an emulator; only the tovtam theme sheet flow was
+  exercised (see the update above). example-real on Android, other ABIs and physical devices were not tried.
 - Expo: the Babel-transformer hook is the same mechanism but Expo's transform worker was never run.
 - The device-side table build (when no prebuilt table) is one unchunked JS task; cost in Hermes unknown.
 - The JSI glue of the resolver (`resolveClasses` / `__swResolve` in `cpp/HybridShadewind.cpp`) has only been compiled
