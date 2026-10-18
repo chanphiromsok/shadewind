@@ -136,7 +136,7 @@ public:
       deltas.emplace_back(name, toTypedDelta(container, surface, values));
     }
 
-    auto style = _hook->makeStyle(deltas);
+    auto style = _hook->makeStyle(deltas, styleId);
 
     if (styleId >= 0) {
       std::lock_guard<std::mutex> lock(_mutex);

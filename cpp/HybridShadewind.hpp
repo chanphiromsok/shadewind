@@ -33,6 +33,8 @@ public:
   jsi::Value loadStyleTable(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value resolveStyleClasses(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value setTheme(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
+  jsi::Value setDiagnostics(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
+  jsi::Value drainDiagnostics(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
 
   void loadHybridMethods() override;
 

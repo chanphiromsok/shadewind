@@ -15,6 +15,11 @@
       "types": "./lib/typescript/src/internal.d.ts",
       "default": "./lib/module/internal.js"
     },
+    "./diagnostics": {
+      "shadewind-source": "./src/diagnostics.ts",
+      "types": "./lib/typescript/src/diagnostics.d.ts",
+      "default": "./lib/module/diagnostics.js"
+    },
     "./package.json": "./package.json",
     "./uniwind": {
       "shadewind-source": "./src/uniwind/index.ts",

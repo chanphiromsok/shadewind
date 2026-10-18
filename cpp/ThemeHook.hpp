@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Diagnostics.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <array>
@@ -46,6 +48,7 @@ inline constexpr ThemeId kNoTheme = 0xFF;
 // so registering a view copies one pointer instead of a delta per theme.
 struct ThemeStyle {
   std::array<std::shared_ptr<const TypedDelta>, kMaxThemes> byTheme;
+  int64_t id = -1; // the styleId JS tagged it with (diagnostics name it by that)
 };
 
 // `yogaNode_` is protected in YogaLayoutableShadowNode; naming it through a derived class is the one legal way to reach it.
@@ -180,7 +183,8 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
     const ShadowNode& node,
     const Props::Shared& props,
     const ShadowNode::SharedListOfShared& children,
-    const TypedDelta& delta) {
+    const TypedDelta& delta,
+    bool* textWithoutLayout = nullptr) {
   RecoloredParagraph recolored;
 
   if (delta.text) {
@@ -201,6 +205,10 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
     } else {
       ++gRecolorSkipState;
     }
+  }
+
+  if (textWithoutLayout != nullptr) {
+    *textWithoutLayout = recolored.keepClean;
   }
 
   if (recolored.keepClean) {
@@ -283,9 +291,13 @@ public:
   }
 
   // One style's deltas by theme name -> the shared per-theme table. Names past kMaxThemes are dropped.
-  std::shared_ptr<const ThemeStyle> makeStyle(const std::vector<std::pair<std::string, std::shared_ptr<const TypedDelta>>>& byName) {
+  std::shared_ptr<const ThemeStyle> makeStyle(
+      const std::vector<std::pair<std::string, std::shared_ptr<const TypedDelta>>>& byName,
+      int64_t id = -1) {
     std::lock_guard<std::mutex> lock(_mutex);
     auto style = std::make_shared<ThemeStyle>();
+
+    style->id = id;
 
     for (const auto& [name, delta] : byName) {
       if (const auto id = internTheme(name); id != kNoTheme) {
@@ -304,6 +316,12 @@ public:
       SurfaceId surface,
       bool renderedWithCurrentTheme = false) {
     std::lock_guard<std::mutex> lock(_mutex);
+    const uint32_t diagnostics = _log.flags();
+
+    // before the insert: a new view can take the address of a released one, whose unmount would then never be reported
+    if (diagnostics & (diagnostics::kMounts | diagnostics::kUnmounts)) {
+      collectExpired(diagnostics);
+    }
 
     // unmounted views leave expired entries behind; drop them as the map grows, not only every 128 commits
     if (_entries.size() >= _purgeAt) {
@@ -318,7 +336,17 @@ public:
     entry.style = std::move(style);
     entry.base = std::move(base);
     entry.componentName = componentName;
+    entry.tag = family->getTag();
     entry.surface = surface;
+
+    if (diagnostics & diagnostics::kMounts) {
+      _log.push({
+          .kind = DiagnosticEvent::Kind::Registered,
+          .tag = entry.tag,
+          .component = componentName,
+          .styleId = entry.style ? entry.style->id : -1,
+          .live = _entries.size()});
+    }
 
     // React already rendered this view with the current theme's values (its props are `base`): nothing to apply until the
     // theme changes or React replaces the props. Without this every mounted view is cloned once right after mount, and the
@@ -338,7 +366,29 @@ public:
 
   void remove(const ShadowNodeFamily* family) {
     std::lock_guard<std::mutex> lock(_mutex);
-    _entries.erase(family);
+    const auto it = _entries.find(family);
+
+    if (it == _entries.end()) {
+      return;
+    }
+
+    const Entry removed = std::move(it->second);
+
+    _entries.erase(it);
+
+    if ((_log.flags() & diagnostics::kUnmounts) && !removed.family.expired()) {
+      _log.push({
+          .kind = DiagnosticEvent::Kind::Unbound,
+          .tag = removed.tag,
+          .component = removed.componentName,
+          .styleId = removed.style ? removed.style->id : -1,
+          .live = _entries.size()});
+    }
+  }
+
+  // Development diagnostics (shadewind/diagnostics): which events are recorded, and the recorded events.
+  DiagnosticLog& diagnostics() {
+    return _log;
   }
 
   void setTheme(const std::string& theme) {
@@ -517,6 +567,12 @@ public:
 
     // One pass over the new tree, under one lock hold: decide per registered view, clone it and record what was applied.
     std::unique_lock<std::mutex> lock(_mutex);
+    const uint32_t diagnostics = _log.flags();
+
+    // diagnostics: released views are dropped (and reported) at every commit, so the registered count is the live one
+    if (diagnostics & (diagnostics::kMounts | diagnostics::kUnmounts)) {
+      collectExpired(diagnostics);
+    }
 
     if (_theme == kNoTheme || _entries.empty()) {
       // nothing registered can be wrong in it: the next commit may skip what it shares with this tree
@@ -535,6 +591,7 @@ public:
 
     walk.theme = _theme;
     walk.epoch = _epoch;
+    walk.recordUpdates = (diagnostics & diagnostics::kUpdates) != 0;
 
     // The previous tree proves its unchanged subtrees right only if this hook produced it for the current theme and no view
     // registered late since. A commit that failed after the hook ran never becomes a previous tree, so it proves nothing.
@@ -564,6 +621,25 @@ public:
     _stats.skipped = walk.skipped;
     _stats.hidden = walk.hidden;
 
+    if (walk.recordUpdates && walk.applied > 0) {
+      bool themeChanged = false;
+
+      for (const auto& update : walk.updates) {
+        themeChanged = themeChanged || update.themeChange;
+      }
+
+      _log.push({
+          .kind = DiagnosticEvent::Kind::Commit,
+          .live = _entries.size(),
+          .theme = _themeNames[walk.theme],
+          .themeChanged = themeChanged,
+          .reused = walk.reused,
+          .skipped = walk.skipped,
+          .hidden = walk.hidden,
+          .ms = elapsed,
+          .updates = std::move(walk.updates)});
+    }
+
     return result;
   }
 
@@ -577,6 +653,7 @@ private:
     std::shared_ptr<const ThemeStyle> style;
     Props::Shared base; // the props React last gave the view (what produced[] is built from)
     const char* componentName = nullptr;
+    Tag tag = 0; // kept for diagnostics: an unmount is noticed once the family is gone
     SurfaceId surface = 0;
     std::array<Props::Shared, kMaxThemes> produced; // props built per theme, reused while the node holds one of ours
   };
@@ -600,6 +677,8 @@ private:
     int hidden = 0;
     int missNotOurs = 0, missChildren = 0;
     int64_t propsNs = 0;
+    bool recordUpdates = false; // diagnostics: record every view cloned
+    std::vector<DiagnosticUpdate> updates;
   };
 
   // Caller holds _mutex. Returns kNoTheme when more than kMaxThemes distinct themes exist.
@@ -631,6 +710,35 @@ private:
 
     for (const auto* key : expired) {
       _entries.erase(key);
+    }
+  }
+
+  // Caller holds _mutex. Diagnostics: drops the entries of released views, reporting each one when unmounts are reported.
+  void collectExpired(uint32_t diagnostics) {
+    std::vector<const ShadowNodeFamily*> expired;
+
+    for (const auto& [key, entry] : _entries) {
+      if (entry.family.expired()) {
+        expired.push_back(key);
+      }
+    }
+
+    for (const auto* key : expired) {
+      const auto it = _entries.find(key);
+      const Tag tag = it->second.tag;
+      const char* component = it->second.componentName;
+      const int64_t styleId = it->second.style ? it->second.style->id : -1;
+
+      _entries.erase(it);
+
+      if (diagnostics & diagnostics::kUnmounts) {
+        _log.push({
+            .kind = DiagnosticEvent::Kind::Unregistered,
+            .tag = tag,
+            .component = component,
+            .styleId = styleId,
+            .live = _entries.size()});
+      }
     }
   }
 
@@ -776,6 +884,8 @@ private:
     std::shared_ptr<ShadowNode> result;
     const Props* applied = nullptr;
     auto& target = entry->produced[walk.theme];
+    bool recolored = false;
+    bool* textWithoutLayout = walk.recordUpdates ? &recolored : nullptr;
 
     if (ours && target) {
       ++walk.reused;
@@ -784,7 +894,7 @@ private:
         ++walk.missChildren;
       }
 
-      result = cloneThemed(node, target, newChildren, *delta);
+      result = cloneThemed(node, target, newChildren, *delta, textWithoutLayout);
       applied = target.get();
     } else {
       ++walk.missNotOurs;
@@ -794,7 +904,7 @@ private:
 
       walk.propsNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - p0).count();
 
-      result = cloneThemed(node, props, newChildren, *delta);
+      result = cloneThemed(node, props, newChildren, *delta, textWithoutLayout);
       applied = props.get();
 
       // React changed the props: they are the new source of truth. Everything built from the old ones is stale; the next
@@ -812,6 +922,16 @@ private:
     }
 
     ++walk.applied;
+
+    if (walk.recordUpdates) {
+      walk.updates.push_back({
+          .tag = node.getTag(),
+          .component = node.getComponentName(),
+          .styleId = entry->style->id,
+          .props = delta->raw,
+          .themeChange = entry->appliedEpoch != walk.epoch,
+          .textWithoutLayout = recolored});
+    }
 
     entry->appliedProps = applied;
     entry->appliedEpoch = walk.epoch;
@@ -950,6 +1070,7 @@ private:
   size_t _purgeAt = 1024;
   HookStats _stats;
   std::shared_ptr<const ContextContainer> _contextContainer;
+  DiagnosticLog _log; // lock order: _mutex, then the log's own
 };
 
 } // namespace margelo::nitro::shadewind

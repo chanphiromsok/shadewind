@@ -4,6 +4,7 @@
     "paths": {
       "shadewind": ["./src/index"],
       "shadewind/internal": ["./src/internal"],
+      "shadewind/diagnostics": ["./src/diagnostics"],
       "shadewind/uniwind": ["./src/uniwind/index"]
     },
     "allowUnreachableCode": false,

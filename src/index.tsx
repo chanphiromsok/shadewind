@@ -478,6 +478,7 @@ const nativeFor = (key: string, styles: ThemedStyles) => {
         toNativeProps(style as ThemedStyle),
       ])
     );
+    ShadewindEngine.label(native, `useThemed: ${key}`);
     nativeByKey.set(key, native);
   }
 
@@ -632,16 +633,18 @@ export function useThemedProps<T extends Record<string, unknown>>(
   const key = JSON.stringify([valuesByTheme, options.colorKeys]);
   const stable = useMemo(() => valuesByTheme, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const colorKeys = options.colorKeys ?? [];
-  const native = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(stable).map(([name, values]) => [
-          name,
-          toNativePropsWith(values as Record<string, unknown>, colorKeys),
-        ])
-      ),
-    [stable] // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  const native = useMemo(() => {
+    const converted = Object.fromEntries(
+      Object.entries(stable).map(([name, values]) => [
+        name,
+        toNativePropsWith(values as Record<string, unknown>, colorKeys),
+      ])
+    );
+
+    ShadewindEngine.label(converted, `useThemedProps: ${key}`);
+
+    return converted;
+  }, [stable]); // eslint-disable-line react-hooks/exhaustive-deps
   // no cleanup: the binding outlives a Suspense/Activity hide (see useThemed)
   const ref = useCallback<RefCallback<unknown>>(
     (node) => {

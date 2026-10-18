@@ -123,6 +123,8 @@ target_link_libraries(rn_renderer PUBLIC yoga folly_runtime glog atomic)
 
 add_library(harness_support INTERFACE)
 target_include_directories(harness_support INTERFACE "${ENGINE}" "${CMAKE_CURRENT_SOURCE_DIR}")
+# the development diagnostics recorder, as the app's Debug builds compile it (cpp/Diagnostics.hpp)
+target_compile_definitions(harness_support INTERFACE SHADEWIND_DIAGNOSTICS=1)
 target_link_libraries(harness_support INTERFACE rn_renderer)
 
 add_executable(harness_tests tests.cpp class_merge_tests.cpp style_resolver_tests.cpp)

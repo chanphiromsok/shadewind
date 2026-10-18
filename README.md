@@ -100,6 +100,7 @@ hold (shadows, transforms, safe-area and screen units, data / rtl variants) is s
 | `configureCn({ table, fallback })`, `cn(...)` | native `twMerge(clsx(...))`, byte-identical for every token in the table (generate it with `npx shadewind-cn-table <srcDir>`); about 21x faster than clsx+twMerge on Hermes (see `docs/ARCHITECTURE.md` section 13) |
 | `shadewind/uniwind` | `installUniwind()`, adapter `View` / `Text` / `Pressable` / `TouchableOpacity`, `withUniwind` |
 | `shadewind/metro` | `withShadewind(config)` |
+| `shadewind/diagnostics` | `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })`: logs what the commit hook registers, drops and themes (development only, see below) |
 | `shadewind/internal` | diagnostics and benchmark strategies, no semver guarantee |
 
 Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIWIND_INTEGRATION.md](docs/UNIWIND_INTEGRATION.md).
@@ -112,6 +113,34 @@ then fades it (Android below 12: plain fade). A snapshot of the window is laid o
 switched underneath, and the snapshot fades out once Fabric reports the new theme mounted. The overlay takes no touches. It is
 skipped (instant switch) with reduce motion on, with the app in the background or without a window, and when the picture cannot
 be taken. Android's snapshot does not include `SurfaceView` / `TextureView` content (maps, video). Without the option nothing runs.
+
+### Diagnostics (development only)
+
+```tsx
+import { enableDiagnostics } from 'shadewind/diagnostics';
+
+enableDiagnostics({ reportMounts: true, reportUnmounts: true, reportUpdates: true });
+```
+
+```
+Shadewind (5): 🟢 ShadowNodeRegistered for tag 42 (View) and className: "flex-1 bg-card"
+Shadewind (4): 🟡 ShadowNodeUnregistered for tag 42
+Shadewind 🌳 Performed shadow tree update for 198 nodes (theme 'dark', 1.84 ms)
+  🔥 C++ updates (198):
+    View (42) { backgroundColor: "#1C1C1E" }
+    Paragraph (43) { color: "#F2F2F7" } · text without layout
+    // ... and 178 more nodes
+```
+
+The count in parentheses is the number of views bound to the engine. 🟡: a bound view was unmounted and released (reported at a
+later commit, once React Native and the JS garbage collector let go of it); 🟠: a mounted view was unbound and left to React
+(pressed, or its style no longer suits the engine). Screens that stay mounted (inactive tabs, frozen screens, suspended content) keep
+their views, so leaving a tab does not lower the count. An update line notes `React replaced its props` when the hook re-themed a
+view React re-rendered, and `text without layout` when a text colour changed without a layout pass.
+
+Development only, on both sides: the functions do nothing outside `__DEV__`, and the native recorder is compiled into Debug builds
+only (`SHADEWIND_DIAGNOSTICS`, set by the podspec for the Debug configuration and by `build.gradle` for the debug build type).
+Compiled in but not enabled, it costs one atomic load per commit.
 
 ## Benchmarks
 

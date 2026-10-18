@@ -180,6 +180,8 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("loadStyleTable", 1, &HybridShadewind::loadStyleTable);
     prototype.registerRawHybridMethod("resolveClasses", 6, &HybridShadewind::resolveStyleClasses);
     prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
+    prototype.registerRawHybridMethod("setDiagnostics", 1, &HybridShadewind::setDiagnostics);
+    prototype.registerRawHybridMethod("drainDiagnostics", 0, &HybridShadewind::drainDiagnostics);
   });
 }
 
@@ -873,6 +875,84 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   const double elapsed = ms(t0, Clock::now());
 
   return timingsOf(rt, _engine.hook().stats(), elapsed, elapsed);
+}
+
+// setDiagnostics(flags): which events the hook records (Diagnostics.hpp: 1 mounts, 2 unmounts, 4 updates); 0 turns it off.
+// Returns false when this build has no recorder (a release build).
+jsi::Value HybridShadewind::setDiagnostics(jsi::Runtime&, const jsi::Value&, const jsi::Value* args, size_t count) {
+  const double flags = count > 0 && args[0].isNumber() ? args[0].asNumber() : 0;
+
+  _engine.hook().diagnostics().setFlags(static_cast<uint32_t>(flags));
+
+  return jsi::Value(DiagnosticLog::available());
+}
+
+// drainDiagnostics(): { dropped, events: [...] }, everything recorded since the last call (`NativeDiagnostics` in src/internal.tsx).
+jsi::Value HybridShadewind::drainDiagnostics(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
+  auto [events, dropped] = _engine.hook().diagnostics().drain();
+  auto list = jsi::Array(rt, events.size());
+
+  for (size_t i = 0; i < events.size(); i++) {
+    const auto& event = events[i];
+    auto item = jsi::Object(rt);
+    const char* kind = "registered";
+
+    switch (event.kind) {
+      case DiagnosticEvent::Kind::Registered:
+        kind = "registered";
+        break;
+      case DiagnosticEvent::Kind::Unregistered:
+        kind = "unregistered";
+        break;
+      case DiagnosticEvent::Kind::Unbound:
+        kind = "unbound";
+        break;
+      case DiagnosticEvent::Kind::Commit:
+        kind = "commit";
+        break;
+    }
+
+    item.setProperty(rt, "kind", kind);
+    item.setProperty(rt, "live", static_cast<double>(event.live));
+
+    if (event.kind == DiagnosticEvent::Kind::Commit) {
+      auto updates = jsi::Array(rt, event.updates.size());
+
+      for (size_t j = 0; j < event.updates.size(); j++) {
+        const auto& update = event.updates[j];
+        auto view = jsi::Object(rt);
+
+        view.setProperty(rt, "tag", static_cast<double>(update.tag));
+        view.setProperty(rt, "component", update.component != nullptr ? update.component : "");
+        view.setProperty(rt, "styleId", static_cast<double>(update.styleId));
+        view.setProperty(rt, "props", jsi::valueFromDynamic(rt, update.props));
+        view.setProperty(rt, "themeChange", update.themeChange);
+        view.setProperty(rt, "textWithoutLayout", update.textWithoutLayout);
+        updates.setValueAtIndex(rt, j, std::move(view));
+      }
+
+      item.setProperty(rt, "theme", event.theme);
+      item.setProperty(rt, "themeChanged", event.themeChanged);
+      item.setProperty(rt, "reused", event.reused);
+      item.setProperty(rt, "skipped", event.skipped);
+      item.setProperty(rt, "hidden", event.hidden);
+      item.setProperty(rt, "ms", event.ms);
+      item.setProperty(rt, "updates", std::move(updates));
+    } else {
+      item.setProperty(rt, "tag", static_cast<double>(event.tag));
+      item.setProperty(rt, "component", event.component != nullptr ? event.component : "");
+      item.setProperty(rt, "styleId", static_cast<double>(event.styleId));
+    }
+
+    list.setValueAtIndex(rt, i, std::move(item));
+  }
+
+  auto result = jsi::Object(rt);
+
+  result.setProperty(rt, "dropped", static_cast<double>(dropped));
+  result.setProperty(rt, "events", std::move(list));
+
+  return result;
 }
 
 } // namespace margelo::nitro::shadewind

@@ -23,6 +23,7 @@ path is an optimisation and never changes behaviour.**
 | `shadewind` | yes | `configure`, `setTheme`, `getTheme`, `subscribe`, `useTheme`, `followSystem`, `capabilities`, `useThemed`, `ThemedView`, `ThemedText`, `mergeRefs`, types, `ShadewindError` |
 | `shadewind/uniwind` | yes | `installUniwind`, `View`, `Text`, `useShadewindStyle`, `ThemeStyleSource` |
 | `shadewind/metro` | yes (CJS) | `withShadewind(config, { uniwind })` |
+| `shadewind/diagnostics` | yes, development only | `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })`, `disableDiagnostics`, `flushDiagnostics`; no-ops outside `__DEV__`, native recorder in Debug builds only (`cpp/Diagnostics.hpp`) |
 | `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending` |
 
 Benchmark strategies (`stock`, `fastAsync`, `direct`, `both`) move to the example app or a build flag. No `strategy` parameter on

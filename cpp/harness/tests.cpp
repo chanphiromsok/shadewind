@@ -6,6 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstring>
+#include <set>
+
 #ifdef RN_SERIALIZABLE_STATE
 #include <react/featureflags/ReactNativeFeatureFlagsDefaults.h>
 
@@ -317,6 +321,150 @@ TEST_F(Current, UnmountedViewsAndStylesAreDropped) {
   }
 
   EXPECT_LE(engine.engine().cachedStyles(), 150u) << "styles of unmounted views stayed cached";
+}
+
+// ---- development diagnostics (shadewind/diagnostics)
+
+namespace {
+
+using Kind = sw::DiagnosticEvent::Kind;
+
+std::vector<sw::DiagnosticEvent> drained(CurrentEngine& engine, uint64_t* dropped = nullptr) {
+  auto [events, lost] = engine.engine().hook().diagnostics().drain();
+
+  if (dropped != nullptr) {
+    *dropped = lost;
+  }
+
+  return std::move(events);
+}
+
+int countOf(const std::vector<sw::DiagnosticEvent>& events, Kind kind) {
+  return static_cast<int>(std::count_if(events.begin(), events.end(), [kind](const auto& e) { return e.kind == kind; }));
+}
+
+} // namespace
+
+TEST_F(Current, DiagnosticsRecordNothingWhileOff) {
+  App app(engine, kThemes, "light");
+
+  app.mount({screen(app, styles, 5)});
+  app.setTheme("dark");
+
+  EXPECT_TRUE(drained(engine).empty());
+}
+
+TEST_F(Current, DiagnosticsReportMountsWithTheLiveCount) {
+  App app(engine, kThemes, "light");
+
+  engine.engine().hook().diagnostics().setFlags(sw::diagnostics::kMounts);
+  app.mount({screen(app, styles, 5)});
+
+  const auto events = drained(engine);
+
+  ASSERT_EQ(countOf(events, Kind::Registered), 12); // header + its label, 5 cards with a label each
+  ASSERT_EQ(events.size(), 12u) << "only mounts were asked for";
+
+  std::set<facebook::react::Tag> tags;
+
+  for (size_t i = 0; i < events.size(); i++) {
+    EXPECT_EQ(events[i].live, i + 1);
+    EXPECT_GT(events[i].tag, 0);
+    EXPECT_TRUE(events[i].styleId >= 1 && events[i].styleId <= 3) << events[i].styleId;
+    EXPECT_TRUE(std::strcmp(events[i].component, "View") == 0 || std::strcmp(events[i].component, "Paragraph") == 0);
+    tags.insert(events[i].tag);
+  }
+
+  EXPECT_EQ(tags.size(), 12u);
+}
+
+TEST_F(Current, DiagnosticsReportAThemeSwitchPerView) {
+  App app(engine, kThemes, "light");
+
+  app.mount({screen(app, styles, 5)});
+  engine.engine().hook().diagnostics().setFlags(sw::diagnostics::kUpdates);
+  app.setTheme("dark");
+
+  const auto events = drained(engine);
+
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, Kind::Commit);
+  EXPECT_EQ(events[0].theme, "dark");
+  EXPECT_TRUE(events[0].themeChanged);
+  EXPECT_EQ(events[0].live, 12u);
+  ASSERT_EQ(events[0].updates.size(), 12u);
+
+  for (const auto& update : events[0].updates) {
+    EXPECT_TRUE(update.themeChange);
+
+    if (std::strcmp(update.component, "Paragraph") == 0) {
+      EXPECT_EQ(update.styleId, 2);
+      EXPECT_TRUE(update.props.count("color"));
+      EXPECT_TRUE(update.textWithoutLayout) << "a colour switch laid text out again";
+    } else {
+      EXPECT_TRUE(update.props.count("backgroundColor"));
+      EXPECT_FALSE(update.textWithoutLayout);
+    }
+  }
+
+  // a commit that themes nothing is not reported
+  app.react().commitTick();
+  EXPECT_TRUE(drained(engine).empty());
+}
+
+TEST_F(Current, DiagnosticsReportUnmountsOnceReleased) {
+  App app(engine, kThemes, "light");
+
+  engine.engine().hook().diagnostics().setFlags(sw::diagnostics::kMounts | sw::diagnostics::kUnmounts);
+  app.mount({screen(app, styles, 5)});
+  drained(engine);
+
+  app.mount({screen(app, styles, 2)}); // the first screen unmounts
+  app.collectGarbage();                // React and Hermes release it
+  app.react().commitTick();
+
+  const auto events = drained(engine);
+
+  EXPECT_EQ(countOf(events, Kind::Registered), 6);
+  EXPECT_EQ(countOf(events, Kind::Unregistered), 12);
+  ASSERT_FALSE(events.empty());
+  EXPECT_EQ(events.back().live, 6u) << "the count must drop to the views still mounted";
+  EXPECT_EQ(engine.engine().hook().size(), 6u);
+}
+
+TEST_F(Current, DiagnosticsReportAnUnbindApart) {
+  App app(engine, kThemes, "light");
+  auto* main = screen(app, styles, 3);
+
+  app.mount({main});
+  engine.engine().hook().diagnostics().setFlags(sw::diagnostics::kUnmounts);
+  app.press(*main->children[1], folly::dynamic::object("backgroundColor", argb(0xFF0000FF)));
+
+  const auto events = drained(engine);
+
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0].kind, Kind::Unbound);
+  EXPECT_EQ(events[0].tag, main->children[1]->node()->getTag());
+  EXPECT_EQ(events[0].live, 7u);
+}
+
+TEST_F(Current, DiagnosticsAreBoundedAndDropTheOldest) {
+  App app(engine, kThemes, "light");
+  auto& log = engine.engine().hook().diagnostics();
+
+  log.setFlags(sw::diagnostics::kMounts);
+  app.mount({screen(app, styles, 2100)}); // 4202 registrations, more than the log keeps
+
+  uint64_t dropped = 0;
+  const auto events = drained(engine, &dropped);
+
+  EXPECT_EQ(events.size(), sw::diagnostics::kCapacity);
+  EXPECT_EQ(dropped, 4202u - sw::diagnostics::kCapacity);
+  EXPECT_EQ(events.back().live, 4202u) << "the newest are kept";
+
+  app.setTheme("dark");
+  log.setFlags(0);
+  EXPECT_TRUE(drained(engine).empty()) << "turning diagnostics off drops what was not read";
 }
 
 // ---- the same scenarios on the 44eb043 engine: the harness reproduces what this branch fixes

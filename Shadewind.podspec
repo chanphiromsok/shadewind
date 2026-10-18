@@ -24,6 +24,12 @@ Pod::Spec.new do |s|
   s.dependency 'React-jsi'
   s.dependency 'React-callinvoker'
 
+  # shadewind/diagnostics: the native recorder exists in Debug builds only (cpp/Diagnostics.hpp). Set before the helpers below,
+  # which merge their settings into this hash.
+  s.pod_target_xcconfig = {
+    "GCC_PREPROCESSOR_DEFINITIONS[config=Debug]" => "$(inherited) SHADEWIND_DIAGNOSTICS=1",
+  }
+
   load 'nitrogen/generated/ios/Shadewind+autolinking.rb'
   add_nitrogen_files(s)
 
