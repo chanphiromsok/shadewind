@@ -437,6 +437,7 @@ TEST_F(Current, TransitionFadesOnlyForTheMountThatShowsTheNewTheme) {
   auto& hook = engine.engine().hook();
   sw::ThemeTransition transition(hook);
 
+  hook.watchMounts(); // begin() does it too; here the earlier tree must be on record with its older epoch
   app.mount({screen(app, styles, 5)});
   sw::transitionLog().clear();
 
@@ -448,6 +449,8 @@ TEST_F(Current, TransitionFadesOnlyForTheMountThatShowsTheNewTheme) {
   const auto before = app.react().committed(); // the tree React Native still has mounted
 
   transition.shadowTreeDidMount(before, kNow()); // a mount report for an earlier commit
+
+  EXPECT_EQ(sw::transitionLog(), (std::vector<std::string>{"begin 1"})) << "faded for a tree that still has the old theme";
 
   app.react().commitTick();
 
