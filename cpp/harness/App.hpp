@@ -72,8 +72,8 @@ struct Check {
 
 class App {
 public:
-  App(Engine& engine, std::vector<std::string> themes, std::string initial)
-      : engine_(engine), themes_(std::move(themes)), theme_(std::move(initial)) {
+  App(Engine& engine, std::vector<std::string> themes, std::string initial, Screen screen = {})
+      : engine_(engine), react_(1, screen), themes_(std::move(themes)), theme_(std::move(initial)) {
     engine_.attach(react_.context());
     react_.addHook(engine_.hook());
     engine_.configure(themes_);
@@ -161,6 +161,13 @@ public:
     react_.rerender(instance, props);
     lastReactCommit_ = checked();
     afterCommit();
+  }
+
+  // A new child of a mounted instance, its refs attached after the commit
+  void append(Instance& parent, Instance* child) {
+    react_.append(parent, child);
+    lastReactCommit_ = checked();
+    attachRefs();
   }
 
   // A Pressable pressed: unbound, React renders the pressed colours itself

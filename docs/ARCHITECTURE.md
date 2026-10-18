@@ -823,3 +823,27 @@ hookDeferred (the Uniwind adapter) and Android commit on the JS thread, which ta
 `flushPending` still wait for a background walk. Tests: `SetThemeDoesNotWaitForABackgroundWalk` (fails with the lock put back:
 setTheme took 122 ms), `ViewRegisteredAfterAnUncommittedSwitchIsFiledUnderThatTheme` (fails if registration does not fold the
 published theme in). ThreadSanitizer over all tests: no race (a non-atomic mutant of the published word is reported).
+
+The React commit after a switch (same day). The switch commit clones every themed view with new props and their ancestors with new
+child lists; React Native's clone constructor drops Yoga's "configured" flag on such clones, and since the switch changes no layout
+Yoga does not run in that commit, so the committed tree kept about 2000 unconfigured nodes. The next React commit, whatever it
+changed, then ran `configureYogaTree` over them, cloning each one again (`cloneChildInPlace`; callgrind: about 2000
+`yogaNodeCloneCallbackConnector` calls per commit). The hook now copies the flag from the node it clones when that node was
+configured and not RTL-swapped (`keepYogaConfigured` in `ThemeHook.hpp`, which documents why the copy is in the state
+`configureYogaTree` would leave it in). 2003-view screen, 3 runs each:
+
+| | without | with |
+|---|---|---|
+| next React commit after a switch on the JS thread (`hook`; also `hookDeferred` and Android) | 4.15-4.96 ms | 1.32-1.44 ms |
+| switch itself | 3.2-6.1 ms | 4.3-5.2 ms (unchanged, noise) |
+| first / second React commit after an iOS `hookAsync` switch | 9.2-10.4 / 0.94-1.10 ms | 8.4-9.9 / 0.93-1.00 ms (unchanged) |
+
+`hookAsync` does not gain: its background clones are not React's handles, so the first React commit after it re-themes every view
+on the JS thread anyway (that cost is the other open item). RTL apps that swap left/right styles do not gain either, by design.
+
+The flag is private; an explicit template instantiation names it (legal C++, binding to React Native 0.86.2: a rename fails to
+compile, a change of meaning would not). Guarded by three harness tests that compare every node's layout with plain React Native
+(point scale 1, 2.625, and RTL at 3) through mounts, switches, React re-renders of themed views while a switch is uncommitted, and
+new children inserted then; mutants: copying from an unconfigured source fails the 2.625 test, copying from a swapped source fails
+the RTL test, removing the fix passes them and brings the 4.2-5.0 ms back (`cpp/harness/README.md`, "Layout tests and their
+mutants"). Compiled only by the harness's clang 18 so far, not by Apple clang or the NDK.

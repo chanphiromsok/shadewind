@@ -34,7 +34,7 @@ its signal. Rapid toggles: a new `begin` snapshots (including what is left of th
 - No attribution lines in commit messages. Commit on this branch only; never push to `main`; no PR unless the owner asks.
 - Report what you did not verify. No device result may be claimed without a recording.
 
-## What can be re-run without a device (all passed at `7b2969f`)
+## What can be re-run without a device (all passed at the head of this branch)
 
 ```sh
 # JS: typecheck (34 pre-existing errors in example/ and spikes/, none may be in src/), lint, format
@@ -47,10 +47,10 @@ node tools/theme-transition-js-check.cjs                                       #
 apt-get install -y libgoogle-glog-dev libdouble-conversion-dev libboost-dev libgflags-dev libgtest-dev
 cd cpp/harness && bash fetch-deps.sh                                           # needs network (npm registry, github, maven)
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
-cmake --build build --target harness_tests && ./build/harness_tests            # 24 tests
+cmake --build build --target harness_tests && ./build/harness_tests            # 37 tests
 cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DHARNESS_ANDROID_STATE=ON
 cmake --build build-android --target harness_tests
-for m in default accumulated reconciliation; do HARNESS_ANDROID_PROPS=$m ./build-android/harness_tests; done   # 25 tests each
+for m in default accumulated reconciliation; do HARNESS_ANDROID_PROPS=$m ./build-android/harness_tests; done   # 38 tests each
 ```
 
 First build is long (about 10 minutes per configuration on 4 cores). `.deps/`, `build/`, `build-android/` are git-ignored.

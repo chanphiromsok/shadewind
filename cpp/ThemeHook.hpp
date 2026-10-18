@@ -59,6 +59,63 @@ struct YogaAccess : YogaLayoutableShadowNode {
   }
 };
 
+// Yoga's "configured" flag survives a colour-only clone.
+//
+// Before a layout, YogaLayoutableShadowNode::configureYogaTree walks down from the root and gives every node that is not yet
+// marked configured its Yoga config (point scale, errata) and, in RTL apps, swaps its left/right styles; a child it does not own
+// is cloned for that (cloneChildInPlace). React Native's clone constructor keeps the flag only for a clone with neither new props
+// nor new children, so every node this hook clones (new props) and every ancestor it clones (new children) came out unconfigured.
+// A switch commit changes no layout, so Yoga does not run and those nodes stay unconfigured in the committed tree; the next React
+// commit then cloned and configured all of them again (about 2000 clones: 4.2-5.0 ms instead of 1.3-1.4 ms on the 2003-view
+// harness screen).
+//
+// The flag is copied only when the source was configured, so the copy is in the state configureYogaTree would leave it in:
+// - the clone constructor copies the Yoga config (point scale and errata, initializeYogaConfig) and the layout metrics;
+// - errata depend on props only for LayoutConformance nodes, whose mode this hook never changes;
+// - the RTL swap rewrites the props it is given, so a node that was swapped is left to React Native (RTL apps keep the old cost);
+// - a configured node's children are configured (configureYogaTree recurses), and an ancestor clone only swaps children for this
+//   hook's clones of them, which carry their source's flag.
+// configureYogaTree also re-checks each child's point scale, swap and errata before skipping it.
+//
+// The flag is private. An explicit instantiation may name a private member ([temp.spec.general]), which is how this reaches it.
+// It binds to React Native 0.86.2: a rename fails to compile, a change of meaning would not. On any React Native upgrade re-read
+// the clone constructor, configureYogaTree and initializeYogaConfig in YogaLayoutableShadowNode.cpp and run the harness Layout
+// tests with their mutants (cpp/harness/README.md). Only HybridShadewind.cpp includes this header in the library; the unnamed
+// namespace keeps the instantiation local to each harness translation unit.
+namespace {
+
+template <auto Member, typename Tag>
+struct PrivateMember {
+  friend constexpr auto memberPointer(Tag) {
+    return Member;
+  }
+};
+
+struct YogaConfiguredTag {
+  friend constexpr auto memberPointer(YogaConfiguredTag);
+};
+
+template struct PrivateMember<&YogaLayoutableShadowNode::yogaTreeHasBeenConfigured_, YogaConfiguredTag>;
+
+// `clone` is a fresh clone of `source`, not yet shared with anyone
+inline void keepYogaConfigured(const ShadowNode& source, const ShadowNode& clone) {
+  // ViewKind means "inherits ConcreteViewShadowNode" (ShadowNodeTraits.h; React Native casts on it the same way), so the node is a
+  // YogaLayoutableShadowNode.
+  // No dynamic_cast: across React Native's shared libraries it fails for types that are in fact identical (see recolorParagraph).
+  if (!source.getTraits().check(ShadowNodeTraits::Trait::ViewKind)) {
+    return;
+  }
+
+  constexpr auto configured = memberPointer(YogaConfiguredTag{});
+  const auto& from = static_cast<const YogaLayoutableShadowNode&>(source);
+
+  if (from.*configured && !from.getLayoutMetrics().wasLeftAndRightSwapped) {
+    const_cast<YogaLayoutableShadowNode&>(static_cast<const YogaLayoutableShadowNode&>(clone)).*configured = true;
+  }
+}
+
+} // namespace
+
 // Text colour without a layout pass.
 //
 // Cloning a Paragraph with new props always dirties its Yoga node (ParagraphShadowNode::shouldNewRevisionDirtyMeasurement), and
@@ -199,6 +256,7 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
   }
 
   auto result = node.clone({.props = props, .children = children, .state = recolored.state});
+  keepYogaConfigured(node, *result);
 
 #if SHADEWIND_DEV_TOOLS
   if (delta.text && std::strcmp(node.getComponentName(), ParagraphComponentName) == 0) {
@@ -935,7 +993,9 @@ private:
         return nullptr;
       }
 
-      return node.clone({.children = newChildren});
+      auto clone = node.clone({.children = newChildren});
+      keepYogaConfigured(node, *clone);
+      return clone;
     }
 
     // the node still holds a props object we made (or the props the cached ones derive from)

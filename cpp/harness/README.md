@@ -42,7 +42,7 @@ On macOS use Docker: folly and glog from Homebrew do not match the versions Reac
 | `FakeReact.hpp` | React's side: createNode / cloneNode, child sets from React's handles, `cloneHiddenInstance` (`display: none`), reveal, `completeRoot`, commits from the JS thread and from another thread |
 | `Engines.hpp` | the engine as JS drives it, three arms: `none` (plain React Native), `baseline` (44eb043 and its JS ref policy, kept in `baseline/`), `current` (this branch) |
 | `App.hpp` | themed views rendered with the current theme, refs attached after a commit and detached on hide, the JS microtask after each commit, and `check()`: every visible bound view must hold the current theme (props, and for text the drawn attributed string) |
-| `tests.cpp` | correctness: mount, switches, freeze / reveal (sync and async switch), rapid toggles while frozen, React commits after a switch, pressed views, late registration, unmount clean-up |
+| `tests.cpp` | correctness: mount, switches, freeze / reveal (sync and async switch), rapid toggles while frozen, React commits after a switch, pressed views, late registration, unmount clean-up, layout equal to plain React Native |
 | `run.sh` | every test run (the generic build, then the Android build in each of React Native's props modes), then the benchmark |
 | `android_stubs.cpp` | the Android build's JNI ends (state and props handed to Java), never reached: the harness does not run Java |
 | `class_merge_tests.cpp` | `css::ClassMerge` byte-for-byte against tailwind-merge 3.7.0 (`fixtures/classmerge`, regenerate with `generate.mjs`) |
@@ -114,6 +114,19 @@ same tests with React Native's two other props modes (the rawProps diff, the typ
 `rawProps` sync (`ThemeHook::applyRawFields`), 5 of the 12 engine tests fail in this build: that is the Android-only path, and it is
 what this build checks. It is not an Android device: no Java, no JNI, no NDK toolchain.
 
+## Layout tests and their mutants
+
+`Layout.ThemeSwitchesLeaveTheLayoutOfPlainReactNative*` run the same React operations with no engine and with the current engine
+and compare every node's `LayoutMetrics`: at point scale 1, at 2.625 and in RTL at 3 with `swapLeftAndRightInRTL`
+(`Screen` in `FakeReact.hpp`). They exist for `keepYogaConfigured` in `ThemeHook.hpp`, which writes a private React Native flag;
+re-run these mutants after any React Native upgrade or change there (edit, rebuild, run `--gtest_filter='Layout.*'`, restore):
+
+| mutant in `keepYogaConfigured` | expected |
+|---|---|
+| copy the flag even when the source is not configured (drop `from.*configured`) | the 2.625 test fails (a new child keeps point scale 1) |
+| copy it from an RTL-swapped source too (drop `!wasLeftAndRightSwapped`) | the RTL test fails |
+| remove both calls | all tests pass; the benchmark's `next React commit` goes back from about 1.4 ms to about 4.5 ms |
+
 ## Reading the benchmark
 
 - Only native work is measured. React's render, the adapter hooks and Uniwind's style resolution run in JS and are not here; the
@@ -134,7 +147,9 @@ what this build checks. It is not an Android device: no Java, no JNI, no NDK too
 - `ShadowTree::tryCommit` stores the root the commit hooks return as the committed root, which is what lets the hook recognise
   the previous tree and skip subtrees React did not change.
 - A clone with new props or children loses Yoga's "configured" flag, and the next layout clones it again when its new parent does
-  not own it (`configureYogaTree` -> `cloneChildInPlace`). That is the extra cost of the first React commit after a switch
-  (`next React commit` row). Forcing layout in the switch commit would avoid it but costs far more with frozen tabs: Yoga's
+  not own it (`configureYogaTree` -> `cloneChildInPlace`). That was most of the extra cost of the first React commit after a
+  switch (`next React commit` row); the hook now keeps the flag of a configured source on its clones (`keepYogaConfigured` in
+  `ThemeHook.hpp`, guarded by the `Layout.*` tests below). Forcing layout in the switch commit would avoid it but costs far more
+  with frozen tabs: Yoga's
   `zeroOutLayoutRecursively` clones every node of every `display: none` subtree on any root layout (that is also why an unrelated
   React commit costs about 8-11 ms with no engine at all in the tabs scenario).

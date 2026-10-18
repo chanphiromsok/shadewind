@@ -352,6 +352,94 @@ TEST_F(Current, ViewRegisteredAfterAnUncommittedSwitchIsFiledUnderThatTheme) {
   EXPECT_EQ(app.lastThemeCommit().stale, 0) << "dark props were filed as the light theme's";
 }
 
+namespace {
+
+// Every node's layout metrics, depth first: what the mounting layer would get.
+void collectLayout(const ShadowNode& node, std::vector<facebook::react::LayoutMetrics>& out) {
+  if (const auto* layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(&node)) {
+    out.push_back(layoutable->getLayoutMetrics());
+  }
+
+  for (const auto& child : node.getChildren()) {
+    collectLayout(*child, out);
+  }
+}
+
+// The same React operations with or without the engine: theme switches between them, layout changes outside and inside re-themed
+// views, views mounted after a switch, and a React re-render of a themed view while a switch is not committed yet (the hook then
+// themes a node React has just cloned, which Yoga has not configured). Fractional sizes and left/right styles make the result
+// depend on the pixel density and the RTL swap.
+std::vector<facebook::react::LayoutMetrics> layoutAfterSwitches(Engine& engine, Screen display) {
+  Styles styles;
+  App app(engine, kThemes, "light", display);
+  auto* leaf = app.plainView({}, folly::dynamic::object("height", 1.3)("marginLeft", 4.7));
+  auto* main = screen(app, styles, 20);
+  auto sides = [](double left) { return folly::dynamic::object("paddingLeft", left)("marginRight", 2.35)("borderLeftWidth", 1.5); };
+
+  app.mount({main, leaf});
+  app.rerender(*main->children[2], sides(6.1));
+  app.setTheme("dark");
+  app.rerender(*leaf, folly::dynamic::object("height", 5.45)("marginLeft", 3.2)); // a layout change elsewhere
+  app.rerender(*main->children[1], sides(13.3));                                  // and inside a re-themed card
+  app.setTheme("light");
+  app.mount({main, screen(app, styles, 5), leaf}); // new themed views after the switches
+  app.engine().setTheme("dark");                   // a switch React commits before the engine does (hookAsync)
+  app.assumeTheme("dark");
+  app.rerender(*main->children[2], sides(9.7));
+  app.append(*main, app.plainView({app.plainView({}, folly::dynamic::object("height", 3.3))}, folly::dynamic::object("padding", 1.7)));
+  app.engine().setTheme("light");
+  app.assumeTheme("light");
+  app.append(*main->children[3], app.plainView({}, folly::dynamic::object("height", 2.9)("marginLeft", 0.7)));
+  app.rerender(*main->children[3], sides(2.2));
+  app.setTheme("dark");
+  app.rerender(*leaf, folly::dynamic::object("height", 9.15)("marginLeft", 1.1));
+
+  std::vector<facebook::react::LayoutMetrics> layout;
+
+  collectLayout(*app.react().committed(), layout);
+
+  return layout;
+}
+
+void expectSameLayout(Screen display) {
+  NoEngine none;
+  CurrentEngine current;
+  const auto expected = layoutAfterSwitches(none, display);
+  const auto actual = layoutAfterSwitches(current, display);
+
+  ASSERT_EQ(actual.size(), expected.size());
+
+  int differences = 0;
+
+  for (size_t i = 0; i < expected.size(); i++) {
+    if (!(actual[i] == expected[i]) && ++differences <= 5) {
+      ADD_FAILURE() << "node " << i << ": frame " << actual[i].frame.origin.x << "," << actual[i].frame.origin.y << " "
+                    << actual[i].frame.size.width << "x" << actual[i].frame.size.height << ", expected "
+                    << expected[i].frame.origin.x << "," << expected[i].frame.origin.y << " " << expected[i].frame.size.width
+                    << "x" << expected[i].frame.size.height;
+    }
+  }
+
+  EXPECT_EQ(differences, 0);
+  EXPECT_GT(expected.size(), 100u);
+}
+
+} // namespace
+
+// Colour-only clones keep Yoga's "configured" flag of the node they copy (keepYogaConfigured in ThemeHook.hpp), so the next
+// layout does not clone and configure them again. The layout must still be exactly what React Native computes without the engine.
+TEST(Layout, ThemeSwitchesLeaveTheLayoutOfPlainReactNative) {
+  expectSameLayout({});
+}
+
+TEST(Layout, ThemeSwitchesLeaveTheLayoutOfPlainReactNativeAtAFractionalPixelDensity) {
+  expectSameLayout({.pointScaleFactor = 2.625});
+}
+
+TEST(Layout, ThemeSwitchesLeaveTheLayoutOfPlainReactNativeInRtl) {
+  expectSameLayout({.pointScaleFactor = 3, .rtl = true});
+}
+
 TEST_F(Current, UnrelatedReactCommitSkipsUnchangedSubtrees) {
   App app(engine, kThemes, "light");
   auto* leaf = app.plainView({}, folly::dynamic::object("height", 1));
