@@ -292,7 +292,7 @@ ThemeHook::Registration HybridShadewind::registrationOf(
     }
   }
 
-  // the theme React rendered it with is the current one: nothing to apply until the theme changes (ThemeEngine::registerView)
+  // the theme React rendered it with (known on a node's first attach) is the current one: nothing to apply until the theme changes
   const bool renderedWithCurrent =
       renderThemeValue.isString() && !currentTheme.empty() && renderThemeValue.asString(rt).utf8(rt) == currentTheme;
 

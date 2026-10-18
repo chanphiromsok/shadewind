@@ -886,7 +886,7 @@ What the engine adds to a mount, found with the harness and Hermes:
   purge threshold: they are now moved aside and freed by the next prewarm, off the JS thread on both platforms (`_graveyard`; the
   every-128-commits purge frees whatever is left, as a backstop). The rest: one lock per view (now one per batch, `addMany`), a
   locked style-cache lookup per view (a 4-entry memo of the batch: a mount cycles through a handful of styles), resetting and
-  move-assigning a fresh entry (`try_emplace`), the prewarm queue regrowing every mount (keeps its capacity), and a 128 KB batch
+  move-assigning a fresh entry (`try_emplace`), the prewarm queue regrowing every mount (prewarm hands its capacity back), and a 128 KB batch
   vector allocated per call (kept). The table is `F14FastMap`, which falls back to `std::unordered_map` with `FOLLY_MOBILE=1` (as
   React Native builds folly on iOS and Android): one node allocation per view remains.
 - The JS of registration (`src/internal.tsx`, `src/uniwind/useShadewindStyle.ts`), measured with a micro-benchmark on Hermes
@@ -899,5 +899,5 @@ What the engine adds to a mount, found with the harness and Hermes:
   the adapter's components that plain Uniwind also has (hooks, `getStyles`).
 
 Not verified on a device: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
-arms with the same protocol: plain Uniwind, shadewind with the engine off (adapter only: no refs, no registration), shadewind with
-the engine on.
+arms with the same protocol (`docs/LOCAL_TESTING.md` step 7): plain Uniwind, shadewind with `__SHADEWIND_ENGINE_OFF__` (the adapter
+alone; arm 3 minus arm 2 is then everything the engine adds, not only the registration), shadewind with the engine on.

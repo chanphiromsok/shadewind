@@ -190,21 +190,6 @@ public:
     return style;
   }
 
-  // `renderTheme`: the theme JS rendered the view with, when its props are known to be that render's (first attach). Equal to
-  // the current theme, the view needs nothing until the theme changes.
-  void registerView(const ShadowNode& node, std::shared_ptr<const ThemeStyle> style, const std::string* renderTheme) {
-    bool renderedWithCurrent = false;
-
-    if (renderTheme != nullptr) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      renderedWithCurrent = !_theme.empty() && *renderTheme == _theme;
-    }
-
-    _hook->add(
-        node.getFamilyShared(), std::move(style), node.getProps(), node.getComponentName(), node.getFamily().getSurfaceId(),
-        renderedWithCurrent);
-  }
-
   void unregisterView(const ShadowNode& node) {
     _hook->remove(&node.getFamily());
   }

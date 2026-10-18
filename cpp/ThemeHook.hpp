@@ -405,7 +405,6 @@ public:
     std::lock_guard<std::mutex> lock(_mutex);
     syncTheme();
     beforeAdding(batch.size());
-    _prewarmQueue.reserve(_prewarmQueue.size() + batch.size());
 
     for (auto& r : batch) {
       addLocked(r.family, std::move(r.style), std::move(r.base), r.componentName, r.surface, r.renderedWithCurrentTheme);
