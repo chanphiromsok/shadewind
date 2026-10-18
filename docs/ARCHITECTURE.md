@@ -847,3 +847,24 @@ compile, a change of meaning would not). Guarded by three harness tests that com
 new children inserted then; mutants: copying from an unconfigured source fails the 2.625 test, copying from a swapped source fails
 the RTL test, removing the fix passes them and brings the 4.2-5.0 ms back (`cpp/harness/README.md`, "Layout tests and their
 mutants"). Compiled only by the harness's clang 18 so far, not by Apple clang or the NDK.
+
+`hookDeferred` rides React's commit (same day). It used to commit on the JS thread and queue the mount on the RuntimeScheduler, so the
+mount landed with React's commit only when React rendered in the same task: a SyncLane render (a press handler) does. A switch from
+anywhere else (Uniwind's adaptive themes following the system appearance, an effect, a timer, after an `await`, the example-real
+meter) gives React's re-render the Default lane, which React schedules as a Normal-priority RuntimeScheduler task: the engine's views
+were mounted at the end of the switch's task, the colours React renders (`useResolveClassNames`, `useCSSVariable`, gradients) a task
+or more later. Now `hookDeferred` only publishes the theme; the hook applies it in the next commit, which is that React commit, so
+both change in one mount. A Low-priority task then commits each surface whose committed root does not carry the theme
+(`commitUnlessThemed`, which asks `ThemeHook::carriesTheme`: the committed root is a tree the hook returned for the latest epoch with
+no registration since; a commit that failed never becomes the committed root, so no counter can go wrong). Why Low is late enough,
+from the sources: React maps Default and Transition lanes to Normal priority, Continuous to UserBlocking, Idle to Idle
+(`ReactFabric-prod.js`, `scheduleTaskForRootDuringMicrotask`); `RuntimeScheduler_Modern` orders tasks by expiration time, Normal
+timing out after 5 s and Low after 10 s (`SchedulerPriorityUtils.h`), so a React render scheduled within 5 s of the switch, and every
+slice of one React splits, runs first. An Idle-lane render comes after the fallback (the fallback commits then, as before). Costs:
+the engine's views now wait for React's re-render (a slow subscriber render delays the whole switch); with nothing to re-render the
+switch waits for one scheduler turn. Any other commit made in between (Reanimated or the animation backend committing from the UI
+thread, the flush of a view registered meanwhile) carries the theme first, and the gap is back for that switch. Harness tests `Deferred*` (the switch makes no commit, the React commit shows every view
+themed and its root passes the transition's mount gate, the fallback is a no-op after it and commits when React did not, rapid
+toggles); mutants of `carriesTheme` (always true, always false, epoch ignored) each fail two or three of them. Not run on a device;
+`HybridShadewind.cpp` is syntax-checked with clang 18 only. The public `setTheme` without Uniwind keeps `hookAsync` on iOS: its
+background commit and the React render of `useTheme` subscribers can also land in different frames; not changed here.

@@ -54,7 +54,9 @@ the public `setTheme`; the native side picks by capability.
 
 - `setTheme(name): void`, queued, idempotent, last call wins. No mounted promise in 1.0 (Android has no background executor or
   mount hook yet; a future `whenApplied()` is a minor release). With the Uniwind adapter active it calls `Uniwind.setTheme` (one source
-  of truth), whose listener applies the engine with `hookDeferred` and the call's transition; Uniwind's subscribers re-render.
+  of truth), whose listener applies the engine with `hookDeferred` and the call's transition; Uniwind's subscribers re-render, and
+  their React commit carries the engine's switch (no separate engine commit, so colours React renders change together with the
+  engine's; a low-priority task commits if React does not).
 - `subscribe` / `useTheme()` (`useSyncExternalStore`) for UI the engine does not update (status bar, navigation theme).
 - `followSystem({ map })` on top of `Appearance`, returns unsubscribe; an explicit `setTheme` stops following.
 - No persistence: the app passes the stored value as `initialTheme`.

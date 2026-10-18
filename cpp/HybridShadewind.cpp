@@ -9,6 +9,8 @@
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/mounting/ShadowTree.h>
 #include <react/renderer/mounting/ShadowTreeRegistry.h>
+#include <react/renderer/runtimescheduler/RuntimeScheduler.h>
+#include <react/renderer/runtimescheduler/RuntimeSchedulerBinding.h>
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/primitives.h>
@@ -138,13 +140,10 @@ struct SwitchClock {
 #endif
 };
 
-// An (almost) empty commit: the commit hook does the real work on it. Same trick as RN's animation backend.
+// An (almost) empty commit of every surface: the commit hook does the real work on it (commitThroughHook, ThemeEngine.hpp).
 void commitTick(UIManager& ui, bool mountSynchronously = true) {
-  ui.getShadowTreeRegistry().enumerate([mountSynchronously](const ShadowTree& shadowTree, bool&) {
-    shadowTree.commit(
-        [](const RootShadowNode& oldRoot) { return std::static_pointer_cast<RootShadowNode>(oldRoot.ShadowNode::clone({})); },
-        {.mountSynchronously = mountSynchronously});
-  });
+  ui.getShadowTreeRegistry().enumerate(
+      [mountSynchronously](const ShadowTree& shadowTree, bool&) { commitThroughHook(shadowTree, mountSynchronously); });
 }
 
 #if SHADEWIND_DEV_TOOLS
@@ -667,8 +666,9 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
   const auto name = args[0].asString(rt).utf8(rt);
   bool async = true;
-  // 'hookDeferred': the commit runs here, on the JS thread, but its mount is queued on the RuntimeScheduler (the same queue
-  // React's own commit of this task uses), so both reach the screen in one update.
+  // 'hookDeferred': no commit here. The next commit carries the theme, normally React's for the re-render this switch causes
+  // (Uniwind's subscribers), so React-rendered colours and bound views change in the same mount; a low-priority task commits
+  // afterwards if nothing did (commitUnlessThemed).
   bool deferred = false;
 
   if (count > 1 && args[1].isString()) {
@@ -727,6 +727,40 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     _state.transition.begin(preset, transitionMs);
   }
 
+  if (deferred) {
+    // React's renders are Normal (or UserBlocking) priority tasks of this scheduler, ordered by expiration: one scheduled within
+    // 5 s of this call runs before this Low one, and so does each slice of a render React splits. A SyncLane render (a press
+    // handler) commits in this very task. A render at React's Idle priority comes after; this commits first then.
+    const auto scheduler = RuntimeSchedulerBinding::getBinding(rt);
+
+    if (scheduler) {
+      std::weak_ptr<UIManagerBinding> weakBinding = UIManagerBinding::getBinding(rt);
+      std::weak_ptr<ThemeHook> weakHook = _engine.hookShared();
+
+      scheduler->getRuntimeScheduler()->scheduleTask(SchedulerPriority::LowPriority, [weakBinding, weakHook](jsi::Runtime&) {
+        const auto binding = weakBinding.lock();
+        const auto hook = weakHook.lock();
+
+        if (!binding || !hook) {
+          return;
+        }
+
+        // inside a task on the JS thread: `mountSynchronously = false` queues the mount for the end of this task, as React does
+        binding->getUIManager().getShadowTreeRegistry().enumerate(
+            [&hook](const ShadowTree& shadowTree, bool&) { commitUnlessThemed(*hook, shadowTree, false); });
+      });
+
+#if SHADEWIND_DEV_TOOLS
+      const double elapsed = ms(clock.start, Clock::now());
+
+      return timingsOf(rt, _engine.hook().stats(), 0, elapsed);
+#else
+      return jsi::Value::undefined();
+#endif
+    }
+    // no RuntimeScheduler (not expected in a Fabric app): commit now, below
+  }
+
 #if defined(__APPLE__)
   if (async) {
     // The commit (walk + clone + mount hand-off) runs off the JS thread. The hook keeps working for every commit.
@@ -773,10 +807,10 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   (void)async; // Android commits on the JS thread for now
 #endif
 
-  // `mountSynchronously = false` queues the mount with RuntimeScheduler::scheduleRenderingUpdate (Scheduler.cpp), which only the JS
-  // thread may call, inside a task: this runs in the JS thread's setTheme call, which is one. Same on both platforms: React Native's
-  // Scheduler decides this, not the platform. Without it Android mounted the engine's commit on its own, ahead of React's commit
-  // (views React re-renders, e.g. LinearGradient colours, changed 4-8 frames after the engine-bound ones).
+  // `mountSynchronously = false` (hookDeferred without a scheduler) queues the mount with RuntimeScheduler::scheduleRenderingUpdate
+  // (Scheduler.cpp), which only the JS thread may call, inside a task. Mounted at once instead, Android showed LinearGradient colours
+  // 4-8 frames after the bound views. Mounted at the end of this task, it still came before React's commit of a render React did
+  // not do in this task (colours read with useResolveClassNames / useCSSVariable): that is why hookDeferred no longer commits here.
   commitTick(*ui, !deferred);
 
 #if SHADEWIND_DEV_TOOLS

@@ -39,10 +39,17 @@ from `shadewind`.
    theme is visible: if you see the old theme fade into the old theme, the mount signal fired too early.
 5. **Reduce motion.** iOS Settings > Accessibility > Motion > Reduce Motion; Android `settings put global animator_duration_scale 0`.
    Instant switch, no overlay. Restore both afterwards.
-6. **No option, no cost.** Launch without `-themeTransition`: the Account "Measure 12 theme switches" numbers must match the
-   baseline (sync 6.3-7.4 ms, idle about 15 ms, stall median about 17.6 ms). No hook is registered and the commit does not record
-   mounts until the first transition is requested.
+6. **No option, no cost.** Launch without `-themeTransition`: the Account "Measure 12 theme switches" numbers must match a
+   build without the transition code of the same `hookDeferred` (the old baseline, sync 6.3-7.4 ms, idle about 15 ms, stall median
+   about 17.6 ms, was measured before `hookDeferred` stopped committing on its own: `sync` is now expected near 0 and the engine's
+   work moves into React's commit, inside `idle`). No hook is registered and the commit does not record mounts until the first
+   transition is requested.
 7. **Hidden tab.** Switch while a frozen tab is hidden, reveal it: no stale frame (HANDOFF "freeze sequences").
+8. **Colours React renders change with the engine's views** (no transition). A screen with a colour read through
+   `useResolveClassNames('text-primary')` or `useCSSVariable('--color-primary')` next to engine-bound views. Switch three ways:
+   a press handler, a `setTimeout(() => Uniwind.setTheme(...), 0)` and the system appearance (Uniwind's adaptive themes). In each
+   recording the first frame with the new theme must have both changed. Before the change only the press handler did (React
+   rendered the other two in a later task, after the engine had mounted its own commit).
 
 ## Blur preset (`type: 'blur'`, example-real `-themeTransitionType blur`)
 

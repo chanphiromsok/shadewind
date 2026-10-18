@@ -161,9 +161,10 @@ export type ThemeTimings = {
  * - 'hookAsync' (default): the commit runs on a background thread, the JS thread is free right away. On Android it is synchronous
  *   for now.
  * - 'hook': the commit runs synchronously on the JS thread and is mounted at once.
- * - 'hookDeferred': the commit runs synchronously on the JS thread but its mount is queued on the RuntimeScheduler, so it lands
- *   with the React commit made in the same task (a Uniwind setTheme in a press handler): views the engine handles and views
- *   React re-renders change in the same frame. Only valid inside a JS task.
+ * - 'hookDeferred': no commit of its own. The next commit carries the theme, normally React's for the re-render the switch causes
+ *   (Uniwind's subscribers: useResolveClassNames, useCSSVariable, components that read the theme), so views the engine handles
+ *   and colours React renders change in the same commit, whatever React's priority for that render. A low-priority
+ *   RuntimeScheduler task commits afterwards if no commit carried it. JS thread only.
  * Either way the theme is applied inside a commit hook, so every later commit (React's too) keeps it.
  */
 export type ThemeStrategy = 'hook' | 'hookAsync' | 'hookDeferred';

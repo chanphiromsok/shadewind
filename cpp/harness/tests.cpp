@@ -912,3 +912,81 @@ TEST_F(Current, AnotherHookThatClonesTheRootDefeatsTheMountSignal) {
 
   EXPECT_FALSE(hook.rootCarries(mountedRoot(app).get(), hook.epoch()));
 }
+
+// ---- 'hookDeferred': the switch rides the React commit it causes (sw::commitUnlessThemed is its low-priority fallback) ----
+//
+// A colour React renders (useResolveClassNames, useCSSVariable) changes in the React commit of the re-render Uniwind's subscribers
+// cause. The bound views must change in that same commit, not in one of the engine's own before it.
+
+TEST_F(Current, DeferredSwitchRidesTheNextReactCommit) {
+  App app(engine, kThemes, "light");
+  auto* leaf = app.plainView({}, folly::dynamic::object("height", 1));
+
+  app.mount({screen(app, styles, 10), leaf});
+
+  const int before = revision(app);
+
+  app.setThemeDeferred("dark");
+  EXPECT_EQ(revision(app), before) << "the switch must not commit on its own";
+
+  app.rerender(*leaf, folly::dynamic::object("height", 2)); // the re-render a theme subscriber makes
+  EXPECT_EQ(app.lastReactCommit().stale, 0) << "the React commit itself must show the new theme";
+  EXPECT_EQ(app.lastReactCommit().visible, 22);
+
+  const int afterReact = revision(app);
+
+  EXPECT_FALSE(sw::commitUnlessThemed(engine.engine().hook(), app.react().tree(), true));
+  EXPECT_EQ(revision(app), afterReact) << "the fallback committed although React's commit carried the theme";
+}
+
+TEST_F(Current, DeferredSwitchCommitsWhenReactDoesNot) {
+  App app(engine, kThemes, "light");
+
+  app.mount({screen(app, styles, 10)});
+  app.setThemeDeferred("dark");
+  EXPECT_GT(app.check().stale, 0);
+
+  EXPECT_TRUE(sw::commitUnlessThemed(engine.engine().hook(), app.react().tree(), true));
+  EXPECT_EQ(app.check().stale, 0);
+  EXPECT_FALSE(sw::commitUnlessThemed(engine.engine().hook(), app.react().tree(), true));
+}
+
+TEST_F(Current, DeferredRapidTogglesEndInTheLastTheme) {
+  App app(engine, kThemes, "light");
+  auto* leaf = app.plainView({}, folly::dynamic::object("height", 1));
+
+  app.mount({screen(app, styles, 10), leaf});
+  app.setThemeDeferred("dark");
+  app.setThemeDeferred("light");
+  app.setThemeDeferred("dark");
+  app.rerender(*leaf, folly::dynamic::object("height", 2));
+  EXPECT_EQ(app.lastReactCommit().stale, 0);
+
+  // a fallback per switch, all after React's commit: none commits
+  for (int i = 0; i < 3; i++) {
+    EXPECT_FALSE(sw::commitUnlessThemed(engine.engine().hook(), app.react().tree(), true));
+  }
+
+  // and one that React's commit did not carry (a switch after it) does
+  app.setThemeDeferred("light");
+  EXPECT_TRUE(sw::commitUnlessThemed(engine.engine().hook(), app.react().tree(), true));
+  EXPECT_EQ(app.check().stale, 0);
+}
+
+TEST_F(Current, DeferredSwitchFadesWhenTheReactCommitIsMounted) {
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+  sw::ThemeTransition transition(hook);
+  auto* leaf = app.plainView({}, folly::dynamic::object("height", 1));
+
+  app.mount({screen(app, styles, 5), leaf});
+  mountedRoot(app);
+  sw::transitionLog().clear();
+
+  app.setThemeDeferred("dark");
+  transition.begin(sw::ThemeTransitionPreset::Fade, 250);
+  app.rerender(*leaf, folly::dynamic::object("height", 2));
+  transition.shadowTreeDidMount(mountedRoot(app), kNow());
+
+  EXPECT_EQ(sw::transitionLog(), (std::vector<std::string>{"begin 1", "run 1"}));
+}

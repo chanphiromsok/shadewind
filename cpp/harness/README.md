@@ -42,7 +42,7 @@ On macOS use Docker: folly and glog from Homebrew do not match the versions Reac
 | `FakeReact.hpp` | React's side: createNode / cloneNode, child sets from React's handles, `cloneHiddenInstance` (`display: none`), reveal, `completeRoot`, commits from the JS thread and from another thread |
 | `Engines.hpp` | the engine as JS drives it, three arms: `none` (plain React Native), `baseline` (44eb043 and its JS ref policy, kept in `baseline/`), `current` (this branch) |
 | `App.hpp` | themed views rendered with the current theme, refs attached after a commit and detached on hide, the JS microtask after each commit, and `check()`: every visible bound view must hold the current theme (props, and for text the drawn attributed string) |
-| `tests.cpp` | correctness: mount, switches, freeze / reveal (sync and async switch), rapid toggles while frozen, React commits after a switch, pressed views, late registration, unmount clean-up, layout equal to plain React Native |
+| `tests.cpp` | correctness: mount, switches, freeze / reveal (sync and async switch), rapid toggles while frozen, React commits after a switch, pressed views, late registration, unmount clean-up, layout equal to plain React Native, a deferred switch riding the React commit |
 | `run.sh` | every test run (the generic build, then the Android build in each of React Native's props modes), then the benchmark |
 | `android_stubs.cpp` | the Android build's JNI ends (state and props handed to Java), never reached: the harness does not run Java |
 | `class_merge_tests.cpp` | `css::ClassMerge` byte-for-byte against tailwind-merge 3.7.0 (`fixtures/classmerge`, regenerate with `generate.mjs`) |

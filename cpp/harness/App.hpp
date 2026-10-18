@@ -198,6 +198,13 @@ public:
     lastThemeCommit_ = checked();
   }
 
+  // 'hookDeferred' (the Uniwind adapter): the engine only publishes the theme. The next commit carries it, normally React's for the
+  // re-render the switch causes; sw::commitUnlessThemed stands for the low-priority task that commits if none did.
+  void setThemeDeferred(const std::string& name) {
+    theme_ = name;
+    engine_.setTheme(name);
+  }
+
   // 'hookAsync' (the iOS default): the engine's commit on a background thread
   void setThemeAsync(const std::string& name) {
     theme_ = name;

@@ -511,6 +511,14 @@ public:
     return false;
   }
 
+  // True when `root`, a committed root, already shows the current theme: this hook returned it for the latest setTheme and no view
+  // registered since. A deferred switch ('hookDeferred') asks this to tell whether a React commit carried the theme.
+  bool carriesTheme(const RootShadowNode::Shared& root) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    syncTheme();
+    return _theme == kNoTheme || provenTree(root);
+  }
+
   // A view registered with another theme's props since the last commit: the caller commits once so it is themed now.
   bool hasStale() {
     std::lock_guard<std::mutex> lock(_mutex);

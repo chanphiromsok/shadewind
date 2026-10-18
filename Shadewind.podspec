@@ -23,6 +23,7 @@ Pod::Spec.new do |s|
 
   s.dependency 'React-jsi'
   s.dependency 'React-callinvoker'
+  s.dependency 'React-runtimescheduler' # hookDeferred schedules its fallback commit there (HybridShadewind::setTheme)
 
   # Debug builds only: the diagnostics recorder (cpp/Diagnostics.hpp) and the dev tools, i.e. inspect, setTheme timings, the
   # main-thread busy probe (cpp/DevTools.hpp). A release build that is used to measure opts in to the dev tools with

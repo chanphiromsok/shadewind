@@ -205,4 +205,23 @@ private:
   std::string _theme;
 };
 
+// An (almost) empty commit of `tree`: the commit hook does the real work on it. Same trick as RN's animation backend.
+inline void commitThroughHook(const ShadowTree& tree, bool mountSynchronously) {
+  tree.commit(
+      [](const RootShadowNode& oldRoot) { return std::static_pointer_cast<RootShadowNode>(oldRoot.ShadowNode::clone({})); },
+      {.mountSynchronously = mountSynchronously});
+}
+
+// The end of a deferred switch ('hookDeferred'): setTheme only published the theme, so the first commit after it (normally React's,
+// for the re-render the switch caused) carries it to every bound view in the same mount as React's own changes. This runs after
+// that, as a low-priority task, and commits `tree` only if no commit has carried the theme yet. Returns whether it committed.
+inline bool commitUnlessThemed(ThemeHook& hook, const ShadowTree& tree, bool mountSynchronously) {
+  if (hook.carriesTheme(tree.getCurrentRevision().rootShadowNode)) {
+    return false;
+  }
+
+  commitThroughHook(tree, mountSynchronously);
+  return true;
+}
+
 } // namespace margelo::nitro::shadewind

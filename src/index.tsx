@@ -330,8 +330,8 @@ export function setThemeDriver(driver: ((name: string) => void) | null): void {
 }
 
 /**
- * For shadewind/uniwind: a Uniwind theme change, applied so the native commit is mounted together with the React commit that
- * Uniwind's own subscribers trigger in the same task (see ThemeStrategy 'hookDeferred'). Not part of the public API.
+ * For shadewind/uniwind: a Uniwind theme change, applied by the React commit that Uniwind's own subscribers trigger (see
+ * ThemeStrategy 'hookDeferred'), so the engine's views and React's change together. Not part of the public API.
  * @internal
  */
 export function applyUniwindTheme(name: ThemeName): void {
