@@ -742,8 +742,8 @@ TEST_F(Current, RapidTogglesFadeOnlyTheLastTransition) {
 
 TEST_F(Current, AnotherHookThatClonesTheRootDefeatsTheMountSignal) {
   // Documents the known limit: the pointer identity breaks, so the native 1 s failsafe is what ends the fade.
+  RootCloner cloner; // before the app: its last commit (the fake React's teardown) still runs every hook
   App app(engine, kThemes, "light");
-  RootCloner cloner;
 
   app.react().addHook(cloner);
 

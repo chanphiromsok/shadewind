@@ -800,3 +800,17 @@ Release gating (same day): everything that exists to inspect or measure is now c
 the frozen baseline engine); the hook runs 215.96 M instructions against 216.14 M with the tools in (the timers and counters were
 cheap, the point is that they do not ship). `HybridShadewind.cpp` and `ShadewindNative.cpp` compile with `-Wall` in both settings.
 Not measurable here: the iOS main-thread hop per hookAsync switch that only measured `visualMs`, now gone from release.
+
+Memory profile (valgrind massif, x86 VM, same day):
+
+- Growth: 900 cycles of mount / prewarm / two switches / unmount (102 themed views): the heap swings 1.3-5.2 MB inside each cycle;
+  the floor after unmount is 1.30 MB in the middle third and 1.33 MB in the last (purge thresholds settling), the peaks 4.8-5.2 MB
+  throughout. No growth. Test: `MemoryStaysFlatAcrossMountSwitchUnmountCycles`.
+- Peak of the 2003-view screen (33.9 MB, `BENCH_PROFILE=1`): the engine holds 6.7 MB of prewarmed props (3.6 MB Paragraph, 3.1 MB
+  View: one copy per view for the theme not on screen, about 3.1-3.6 KB each: a React Native props object is large) and 0.77 MB of
+  registry entries; React Native's own nodes and props of the screen about 10 MB. The prewarm cache is what makes a switch a cache
+  hit; its cost grows with the number of themes (one copy per view per other theme: about 16 KB per view with six themes). Building
+  lazily on the first switch, or only for the next likely theme, would trade switch time for this memory; not done.
+- Leak checks: valgrind --leak-check=full over harness_tests and hermes_glue: 0 bytes lost; AddressSanitizer + LeakSanitizer + UBSan
+  (`-DHARNESS_SANITIZE=ON`) over all harness tests and the current engine's bench: clean, after fixing a test that destroyed a commit
+  hook before the fake React's last commit (stack-use-after-scope in test code, not in the engine).
