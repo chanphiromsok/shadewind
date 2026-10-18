@@ -1,6 +1,7 @@
 import { Settings } from 'react-native';
 import { setDefaultTransition } from 'shadewind';
 import { installUniwind, nativeResolver } from 'shadewind/uniwind';
+import { TRANSITION } from './transitionConfig';
 
 // -realDebug 1 collects why each className was or was not handed to the engine (Account > Engine report)
 if (Settings.get('realDebug')) {
@@ -12,12 +13,9 @@ if (Settings.get('resolverOff')) {
   nativeResolver.setEnabled(false);
 }
 
-// -themeTransition 250: Uniwind.setTheme animates over 250 ms (the default of the Uniwind adapter); -themeTransitionType blur
-// blurs the old screen first (default fade)
-const transitionMs = Number(Settings.get('themeTransition'));
-
-if (transitionMs > 0) {
-  setDefaultTransition({ type: Settings.get('themeTransitionType') === 'blur' ? 'blur' : 'fade', durationMs: transitionMs });
+// the theme transition for Uniwind.setTheme, if one is asked for (src/transitionConfig.ts): the adapter's default
+if (TRANSITION) {
+  setDefaultTransition(TRANSITION);
 }
 
 installUniwind();

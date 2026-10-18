@@ -14,9 +14,11 @@ returned for the new epoch (`ThemeTransition::shadowTreeDidMount` -> `themeTrans
 
 ## Build
 
-Follow the task's section 5 (`prepare`, `npm pack`, install). example-real: `bash scripts/arm.sh engine`, launch with
-`-themeTransition 250` (iOS launch argument; it sets the Uniwind default and shows the "Theme transition (test)" row on
-Account: Fade (Uniwind) = `hookDeferred`, Fade (engine) = `hookAsync`, Toggle x3). Without the argument nothing changes.
+Follow the task's section 5 (`prepare`, `npm pack`, install; `example-real/README.md` has the lockfile step). example-real:
+`bash scripts/arm.sh engine`, then on iOS launch with `-themeTransition 250` (add `-themeTransitionType blur` for blur); on Android
+arm with `SHADEWIND_TRANSITION=blur:250 bash scripts/arm.sh engine` (or `fade:250`) and rebuild. That sets the Uniwind default and
+shows the "Theme transition (test)" row on Account: `hookDeferred` (Uniwind.setTheme), `hookAsync` (the engine alone; Uniwind is
+not told) and `Toggle ×3`. Without it nothing changes.
 
 tovtam calls `Uniwind.setTheme` with no options, so it is instant by default. To see the fade there without editing its
 source, set the default once at startup (your call, in your own branch): `setDefaultTransition({ type: 'fade', durationMs: 250 })`
@@ -33,7 +35,7 @@ from `shadewind`.
 3. **Rapid toggles.** "Toggle x3" (switches at 0, 70 and 140 ms). Afterwards: `native-find-views` (iOS) / `uiautomator dump`
    (Android) show no snapshot view left on the window (iOS: no `_UIReplicantView`/snapshot subview of the key window; Android: no
    `ImageView` that is a direct child of the DecorView), and the app is in the last theme. Also repeat after a cold start.
-4. **Both strategies.** Fade (Uniwind) = `hookDeferred`; Fade (engine) = `hookAsync`. Both must start the fade only after the new
+4. **Both strategies.** The `hookDeferred` and `hookAsync` buttons. Both must start the fade only after the new
    theme is visible: if you see the old theme fade into the old theme, the mount signal fired too early.
 5. **Reduce motion.** iOS Settings > Accessibility > Motion > Reduce Motion; Android `settings put global animator_duration_scale 0`.
    Instant switch, no overlay. Restore both afterwards.

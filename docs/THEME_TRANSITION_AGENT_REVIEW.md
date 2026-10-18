@@ -116,6 +116,8 @@ Prove the check can fail by introducing a typo in a copy.
   blur only if it fails (blur hides detail; keep fade at full size).
 - iOS: real device, same scenario. Instruments Animation Hitches with an `os_signpost` around the snapshot; VM Tracker under rapid
   toggles. Pass: hitch ratio < 5 ms/s, snapshot < 2 ms.
+- example-real is set up for this: `example-real/README.md` "Theme transition" (iOS launch arguments, Android
+  `SHADEWIND_TRANSITION` at arm time). Bundles for both platforms build and compile with Hermes (checked in the cloud session).
 - Then run the numbered checks in `docs/THEME_TRANSITION_TESTS.md` (30 fps recordings, per-frame `signalstats` YAVG, view hierarchy
   check for orphan overlays, reduce motion on and off, restore any simulator/emulator setting you change).
 

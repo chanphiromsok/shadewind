@@ -1,19 +1,19 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Settings, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Uniwind } from 'uniwind';
-import { getTheme, setTheme as setEngineTheme } from 'shadewind';
+import { ShadewindEngine } from 'shadewind/internal';
 import { decisions, renders, status } from '../engineReport';
 import type { RootStackParamList } from '../navigation/types';
 import { Row } from '../components/ui';
 import { runStall, type StallResult } from '../bench/stall';
 import { cn } from '../cn';
 import { ThemeSwitchMeter } from '../bench/ThemeSwitchMeter';
+// the transition test row exists only when a transition is asked for, so the default screen, and the view count the
+// theme-switch meter is compared with, stay as they were
+import { TRANSITION } from '../transitionConfig';
 
-// the transition test row exists only with `-themeTransition <ms>` (iOS launch argument), so the default screen, and the
-// view count the theme-switch meter is compared with, stay as they were
-const TRANSITION_TEST = Number(Settings.get('themeTransition')) > 0;
 
 export default function Account() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -42,23 +42,27 @@ export default function Account() {
         ))}
       </View>
 
-      {TRANSITION_TEST && (
+      {TRANSITION && (
         <>
-        <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Theme transition (test)</Text>
+        <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Theme transition (test): {TRANSITION.type} {TRANSITION.durationMs} ms</Text>
         <View className="mx-3 flex-row overflow-hidden rounded-2xl bg-card">
           <Pressable
-            testID="fade-uniwind"
+            testID="transition-uniwind"
             onPress={() => Uniwind.setTheme(Uniwind.currentTheme === 'dark' ? 'light' : 'dark')}
             className="flex-1 items-center py-4 active:opacity-70"
           >
-            <Text className="text-sm font-semibold text-primary">Fade (Uniwind)</Text>
+            <Text className="text-sm font-semibold text-primary">hookDeferred</Text>
           </Pressable>
           <Pressable
-            testID="fade-engine"
-            onPress={() => setEngineTheme(getTheme() === 'dark' ? 'light' : 'dark', { transition: { type: Settings.get('themeTransitionType') === 'blur' ? 'blur' : 'fade', durationMs: 250 } })}
+            testID="transition-engine"
+            onPress={() =>
+              // 'hookAsync' on purpose (the commit off the JS thread): the public setTheme goes through Uniwind (hookDeferred).
+              // Engine only: Uniwind is not told, so the next Uniwind switch puts the two back in step.
+              ShadewindEngine.setTheme(ShadewindEngine.getTheme() === 'dark' ? 'light' : 'dark', 'hookAsync', TRANSITION ?? undefined)
+            }
             className="flex-1 items-center py-4 active:opacity-70"
           >
-            <Text className="text-sm font-semibold text-primary">Fade (engine)</Text>
+            <Text className="text-sm font-semibold text-primary">hookAsync</Text>
           </Pressable>
           <Pressable
             testID="toggle-x3"
