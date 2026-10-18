@@ -49,6 +49,24 @@ On macOS use Docker: folly and glog from Homebrew do not match the versions Reac
 | `style_resolver_tests.cpp` | `css::StyleResolver` against Uniwind 1.12's own `resolveStyles` (`fixtures/resolver`: 137,790 cases from Uniwind's bundler and store), with the device's table and the one Metro prebuilds (`table.prebuilt.json`); regenerate with `generate.mjs`, see below |
 | `bench.cpp` | native cost per arm, each arm in its own process: mount (commit, registrations), theme switch (sync and async), the React commits after a switch, frozen tabs and their reveal |
 
+## Release configuration and the Hermes glue check
+
+`-DHARNESS_RELEASE_CONFIG=ON` builds the engine as a release app does (`SHADEWIND_DIAGNOSTICS=0`, `SHADEWIND_DEV_TOOLS=0`):
+the tests that read the hook's stats or the diagnostics recorder skip themselves by name, the rest must pass.
+
+`hermes_glue` runs the class resolver's JSI glue (`cpp/ResolveGlue.hpp`, what `__swResolve` runs) in a real Hermes runtime: parity
+of the returned JS objects with Uniwind on every fixture case, the property-name cache against the glue without it, a table
+reload, a second runtime created and destroyed, and a bench. It needs the Hermes React Native pins
+(`node_modules/react-native/sdks/.hermesv1version`):
+
+```sh
+git clone --depth 1 --branch hermes-v250829098.0.16 https://github.com/facebook/hermes <dir>/hermes   # apt: libicu-dev
+cmake -S <dir>/hermes -B <dir>/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHERMES_ENABLE_INTL=OFF -DHERMES_ENABLE_TEST_SUITE=OFF
+ninja -C <dir>/build hermesvm
+cmake -S . -B build -DHERMES_DIR=<dir>/hermes -DHERMES_BUILD=<dir>/build && cmake --build build --target hermes_glue
+build/hermes_glue                                    # GLUE_QUICK=1 for a short run, e.g. under valgrind
+```
+
 ## Regenerating the resolver fixture
 
 `fixtures/resolver/generate.mjs` compiles example-real's CSS with Uniwind's own bundler and records Uniwind's own results, so it

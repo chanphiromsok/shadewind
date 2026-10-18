@@ -60,6 +60,7 @@ public:
   /** Loads a table (version 2). On false the resolver is empty and resolve always returns false. */
   bool load(std::string_view json, std::string* error = nullptr) {
     clear();
+    ++generation_;
 
     if (!read(json, error)) {
       clear();
@@ -93,6 +94,9 @@ public:
   /** Classes of the table this resolver could not read (they fall back like the table's own fallback list): 0 for a sound table. */
   size_t unsupportedCount() const { return unsupported_; }
   const std::string& propertyName(uint32_t property) const { return properties_[property]; }
+  size_t propertyCount() const { return properties_.size(); }
+  /** Changes with every load: what was derived from the property ids (the JSI glue's names) must be rebuilt. */
+  uint64_t generation() const { return generation_; }
 
   int themeIndex(std::string_view name) const {
     for (size_t i = 0; i < themes_.size(); i++) {
@@ -602,6 +606,7 @@ private:
   folly::F14FastMap<std::string, uint32_t> propertyIds_; // style properties and inline variables share one id space
   std::vector<std::string> properties_;
   size_t unsupported_ = 0;
+  uint64_t generation_ = 0;
 
   uint32_t lineHeight_ = 0, fontSize_ = 0, visibility_ = 0, display_ = 0;
   uint32_t borderStyle_ = 0, borderColor_ = 0, outlineStyle_ = 0, outlineColor_ = 0;

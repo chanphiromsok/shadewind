@@ -782,9 +782,16 @@ Profiled and left alone:
   in `YogaLayoutableShadowNode::updateYogaProps` (every clone with new props compares the whole Yoga style) and
   `updateYogaChildren` for the ancestors cloned with new child lists. The engine's walk is about 5 %, `cloneThemed` under 1 %.
 - **Registration**: about 4 M instructions per mount, mostly freeing the entries of the previous mount (fewer props objects now).
-- **Candidate, not done (cannot be measured here):** the resolver's JSI glue creates a `jsi::PropNameID` from a C string for every
-  key of every result (`setProperty(rt, const char*, ...)`). Caching them per runtime is the usual JSI practice, but the cache must
-  die with the runtime (reload) or it crashes; measure `__swResolve` calls per second in a Hermes release build first.
+- **Done after Hermes was built here (same day):** the resolver's JSI glue created a `jsi::PropNameID` from a C string for every
+  key of every result. It now takes them from a per-runtime cache kept as JSI runtime data (`cpp/ResolveGlue.hpp`), which the
+  runtime releases when it is destroyed (Hermes does that first in its destructor, while the heap exists), rebuilt when another
+  table is loaded (`StyleResolver::generation`). Measured with `cpp/harness/hermes/glue.cpp` on the Hermes React Native 0.86.2 pins
+  (hermes-v250829098.0.16, Release, x86 VM), 3831 resolvable calls x 40 x 7 rounds: 952-1118 ns per call without the cache,
+  586-654 ns with it (-38 to -41 % over three runs; the C++ resolve itself is about 155 ns). Same program: first end-to-end run of
+  the glue's JS objects, 137,790 cases, 0 mismatches with Uniwind (a mutant of the glue makes all 114,930 resolved cases mismatch);
+  the cached glue returns the same objects as the uncached one on every call, also after a table reload; a second runtime created
+  and destroyed meanwhile; valgrind memcheck over a short run including both runtimes' teardown: 0 errors. JavaScriptCore was not
+  tried (the cache relies on JSI runtime data, which every JSI runtime implements).
 
 Release gating (same day): everything that exists to inspect or measure is now compiled only with `SHADEWIND_DEV_TOOLS`
 (`cpp/DevTools.hpp`; on in Debug, opt-in for measuring release builds). Checked in the harness: a release-configuration build

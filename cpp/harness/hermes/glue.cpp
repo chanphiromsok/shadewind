@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -144,29 +145,11 @@ bool matches(const folly::dynamic& native, const folly::dynamic& expected) {
       native["sum"].asDouble() == expected["sum"].asDouble() && native["data"].asBool() == expected["data"].asBool();
 }
 
-// The candidate: resolveClassesWith with every property name created once for the runtime instead of from a C string per call.
-struct Names {
-  std::vector<jsi::PropNameID> properties;
-  jsi::PropNameID styles, dependencies, dependencySum, hasDataAttributes;
-
-  Names(jsi::Runtime& rt, const StyleResolver& resolver, size_t count)
-      : styles(jsi::PropNameID::forAscii(rt, "styles")),
-        dependencies(jsi::PropNameID::forAscii(rt, "dependencies")),
-        dependencySum(jsi::PropNameID::forAscii(rt, "dependencySum")),
-        hasDataAttributes(jsi::PropNameID::forAscii(rt, "hasDataAttributes")) {
-    properties.reserve(count);
-
-    for (uint32_t i = 0; i < count; i++) {
-      properties.push_back(jsi::PropNameID::forUtf8(rt, resolver.propertyName(i)));
-    }
-  }
-};
-
-jsi::Value resolveCached(
+// The glue as it was before the property-name cache (keys from C strings at every call): the reference of the bench.
+jsi::Value resolveUncached(
     jsi::Runtime& rt,
     StyleResolver& resolver,
     StyleResolver::Result& resolved,
-    const Names& names,
     const jsi::Value* args,
     size_t count) {
   MergeInput in;
@@ -185,7 +168,7 @@ jsi::Value resolveCached(
   jsi::Object styles(rt);
 
   for (const auto& item : resolved.styles) {
-    styles.setProperty(rt, names.properties[item.property], styleValue(rt, item));
+    styles.setProperty(rt, resolver.propertyName(item.property).c_str(), styleValue(rt, item));
   }
 
   jsi::Array dependencies(rt, resolved.dependencies.size());
@@ -196,10 +179,10 @@ jsi::Value resolveCached(
 
   jsi::Object result(rt);
 
-  result.setProperty(rt, names.styles, std::move(styles));
-  result.setProperty(rt, names.dependencies, std::move(dependencies));
-  result.setProperty(rt, names.dependencySum, static_cast<double>(resolved.dependencySum));
-  result.setProperty(rt, names.hasDataAttributes, false);
+  result.setProperty(rt, "styles", std::move(styles));
+  result.setProperty(rt, "dependencies", std::move(dependencies));
+  result.setProperty(rt, "dependencySum", static_cast<double>(resolved.dependencySum));
+  result.setProperty(rt, "hasDataAttributes", false);
 
   return result;
 }
@@ -207,6 +190,8 @@ jsi::Value resolveCached(
 } // namespace
 
 int main() {
+  // GLUE_QUICK=1: the first 300 classNames and a single bench round, for running under valgrind
+  const bool quick = std::getenv("GLUE_QUICK") != nullptr;
   auto runtime = facebook::hermes::makeHermesRuntime();
   jsi::Runtime& rt = *runtime;
   int failures = 0;
@@ -229,16 +214,17 @@ int main() {
 
     const folly::dynamic header = folly::parseJson(line);
     int64_t cases = 0, resolvedCases = 0, mismatches = 0, candidateMismatches = 0;
-    size_t propertyCount = 0;
     std::vector<std::string> classNames;
 
-    // the candidate needs every property id the table has: ask the resolver for names until it runs out is not possible, so
-    // collect the ids seen while checking parity first, then build Names over the highest id
     std::vector<std::vector<jsi::Value>> benchArgs;
 
     while (std::getline(lines, line)) {
       if (line.empty()) {
         continue;
+      }
+
+      if (quick && classNames.size() >= 300) {
+        break;
       }
 
       const folly::dynamic c = folly::parseJson(line);
@@ -277,10 +263,6 @@ int main() {
 
             ++resolvedCases;
 
-            for (const auto& item : resolved.styles) {
-              propertyCount = std::max<size_t>(propertyCount, item.property + 1);
-            }
-
             const folly::dynamic native = encodeResult(rt, value.getObject(rt));
             const folly::dynamic& expected = c["u"][c["i"][index].asInt()];
 
@@ -297,7 +279,7 @@ int main() {
                 static_cast<long long>(cases), static_cast<long long>(resolvedCases), static_cast<long long>(mismatches),
                 static_cast<long long>(summary["cases"].asInt()), static_cast<long long>(summary["resolvableCases"].asInt()));
 
-    failures += mismatches != 0 || cases != summary["cases"].asInt() || resolvedCases != summary["resolvableCases"].asInt();
+    failures += mismatches != 0 || (!quick && (cases != summary["cases"].asInt() || resolvedCases != summary["resolvableCases"].asInt()));
 
     // bench: every className of the fixture that resolves, both themes, width 390, no interaction state
     for (const auto& className : classNames) {
@@ -315,35 +297,36 @@ int main() {
     }
 
     {
-      const Names names(rt, resolver, propertyCount);
+      int64_t differs = 0;
 
-      // the candidate returns the same objects
+      // the shipped glue (cached names) returns what the glue without the cache returned
       for (auto& args : benchArgs) {
         const auto a = resolveClassesWith(rt, resolver, resolved, args.data(), args.size());
-        const auto b = resolveCached(rt, resolver, resolved, names, args.data(), args.size());
+        const auto b = resolveUncached(rt, resolver, resolved, args.data(), args.size());
 
         if (folly::toJson(encodeResult(rt, a.getObject(rt))) != folly::toJson(encodeResult(rt, b.getObject(rt)))) {
-          ++candidateMismatches;
+          ++differs;
         }
       }
 
-      std::printf("candidate (cached property names) differs from the shipped glue on %lld of %zu calls\n",
-                  static_cast<long long>(candidateMismatches), benchArgs.size());
-      failures += candidateMismatches != 0;
+      std::printf("shipped glue (cached names) differs from the uncached glue on %lld of %zu calls\n",
+                  static_cast<long long>(differs), benchArgs.size());
+      failures += differs != 0;
 
       using Clock = std::chrono::steady_clock;
-      const int reps = 40;
-      std::vector<double> shipped, cached;
+      const int reps = quick ? 1 : 40;
+      const int rounds = quick ? 1 : 7;
+      std::vector<double> shipped, uncached;
       double sink = 0;
 
-      for (int round = 0; round < 7; round++) {
+      for (int round = 0; round < rounds; round++) {
         for (int arm = 0; arm < 2; arm++) {
           const auto t0 = Clock::now();
 
           for (int r = 0; r < reps; r++) {
             for (auto& args : benchArgs) {
               const auto value = arm == 0 ? resolveClassesWith(rt, resolver, resolved, args.data(), args.size())
-                                          : resolveCached(rt, resolver, resolved, names, args.data(), args.size());
+                                          : resolveUncached(rt, resolver, resolved, args.data(), args.size());
 
               sink += value.isObject();
             }
@@ -351,17 +334,69 @@ int main() {
 
           const double ns = std::chrono::duration<double, std::nano>(Clock::now() - t0).count() / (reps * benchArgs.size());
 
-          (arm == 0 ? shipped : cached).push_back(ns);
+          (arm == 0 ? shipped : uncached).push_back(ns);
         }
       }
 
       std::sort(shipped.begin(), shipped.end());
-      std::sort(cached.begin(), cached.end());
-      std::printf("bench (%zu calls x %d reps x 7 rounds, ns per call): shipped median %.0f [%.0f-%.0f], cached names median %.0f [%.0f-%.0f]%s\n",
-                  benchArgs.size(), reps, shipped[3], shipped.front(), shipped.back(), cached[3], cached.front(), cached.back(),
+      std::sort(uncached.begin(), uncached.end());
+      std::printf("bench (%zu calls x %d reps x %d rounds, ns per call): shipped (cached names) median %.0f [%.0f-%.0f], uncached median %.0f [%.0f-%.0f]%s\n",
+                  benchArgs.size(), reps, rounds, shipped[shipped.size() / 2], shipped.front(), shipped.back(), uncached[uncached.size() / 2],
+                  uncached.front(), uncached.back(),
                   sink > 0 ? "" : " (no result?)");
     }
+
+    // another table (a reload of the same one gives new property ids as far as the cache knows): the names are rebuilt
+    {
+      const uint64_t before = resolver.generation();
+
+      resolver.load(slurp(std::string(FIXTURES_DIR) + "/resolver/table.prebuilt.json"));
+
+      int64_t differs = 0;
+
+      for (auto& args : benchArgs) {
+        const auto a = resolveClassesWith(rt, resolver, resolved, args.data(), args.size());
+        const auto b = resolveUncached(rt, resolver, resolved, args.data(), args.size());
+
+        if (a.isObject() != b.isObject() ||
+            (a.isObject() && folly::toJson(encodeResult(rt, a.getObject(rt))) != folly::toJson(encodeResult(rt, b.getObject(rt))))) {
+          ++differs;
+        }
+      }
+
+      std::printf("after loading another table (generation %llu -> %llu): shipped differs from uncached on %lld calls\n",
+                  static_cast<unsigned long long>(before), static_cast<unsigned long long>(resolver.generation()),
+                  static_cast<long long>(differs));
+      failures += differs != 0 || resolver.generation() == before;
+    }
+
+    // a second runtime (what a reload creates) gets its own names, and destroying it while the first one lives must not touch
+    // the first one's names
+    {
+      auto second = facebook::hermes::makeHermesRuntime();
+      bool ok = false;
+
+      {
+        // values of a runtime must die before it
+        jsi::Value args[] = {jsi::String::createFromUtf8(*second, "text-primary bg-card p-4"),
+                             jsi::String::createFromUtf8(*second, "light"), jsi::Value(390.0)};
+
+        ok = resolveClassesWith(*second, resolver, resolved, args, 3).isObject();
+      }
+
+      second.reset();
+
+      jsi::Value again[] = {jsi::String::createFromUtf8(rt, "text-primary bg-card p-4"), jsi::String::createFromUtf8(rt, "light"),
+                            jsi::Value(390.0)};
+      const bool stillOk = resolveClassesWith(rt, resolver, resolved, again, 3).isObject();
+
+      std::printf("second runtime: resolved %s, destroyed; first runtime still resolves: %s\n", ok ? "yes" : "no", stillOk ? "yes" : "no");
+      failures += !ok || !stillOk;
+    }
   }
+
+  runtime.reset(); // releases the first runtime's names with it
+  std::printf("runtimes destroyed with their cached names: ok\n");
 
   return failures == 0 ? 0 : 1;
 }

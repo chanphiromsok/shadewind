@@ -8,6 +8,8 @@
 #include <jsi/JSIDynamic.h>
 #include <jsi/jsi.h>
 #include <cstring>
+#include <memory>
+#include <vector>
 #include <string_view>
 
 namespace margelo::nitro::shadewind {
@@ -110,6 +112,42 @@ inline jsi::Value styleValue(jsi::Runtime& rt, const css::StyleResolver::Item& i
   }
 }
 
+// The keys of the result object, created once per runtime instead of from a C string at every call (measured on Hermes in
+// cpp/harness/hermes/glue.cpp: 1118 -> 654 ns per call). Kept as the runtime's own data, so the runtime releases them when it is
+// destroyed (Hermes does that first thing in its destructor, while its heap still exists): they never outlive it, also across a
+// reload. Rebuilt when another table is loaded (the property ids change).
+struct ResolveNames {
+  uint64_t generation = 0;
+  std::vector<jsi::PropNameID> properties;
+  jsi::PropNameID styles, dependencies, dependencySum, hasDataAttributes;
+
+  ResolveNames(jsi::Runtime& rt, const css::StyleResolver& resolver)
+      : generation(resolver.generation()),
+        styles(jsi::PropNameID::forAscii(rt, "styles")),
+        dependencies(jsi::PropNameID::forAscii(rt, "dependencies")),
+        dependencySum(jsi::PropNameID::forAscii(rt, "dependencySum")),
+        hasDataAttributes(jsi::PropNameID::forAscii(rt, "hasDataAttributes")) {
+    properties.reserve(resolver.propertyCount());
+
+    for (uint32_t i = 0; i < resolver.propertyCount(); i++) {
+      properties.push_back(jsi::PropNameID::forUtf8(rt, resolver.propertyName(i)));
+    }
+  }
+};
+
+// JS thread only, like the resolver.
+inline const ResolveNames& resolveNames(jsi::Runtime& rt, const css::StyleResolver& resolver) {
+  static constexpr jsi::UUID kKey{0x5d3a91c4, 0x2b7e, 0x4f10, 0x8a6c, 0x1e9f04b27d35};
+  auto names = std::static_pointer_cast<ResolveNames>(rt.getRuntimeData(kKey));
+
+  if (!names || names->generation != resolver.generation()) {
+    names = std::make_shared<ResolveNames>(rt, resolver);
+    rt.setRuntimeData(kKey, names);
+  }
+
+  return *names; // the runtime holds it
+}
+
 // (className, theme, screenWidth, isPressed, isFocused, isDisabled) -> Uniwind's resolveStyles result
 // ({ styles, dependencies, dependencySum, hasDataAttributes }), or undefined: resolve it with Uniwind's JS
 inline jsi::Value resolveClassesWith(
@@ -131,10 +169,11 @@ inline jsi::Value resolveClassesWith(
     return jsi::Value::undefined();
   }
 
+  const ResolveNames& names = resolveNames(rt, resolver);
   jsi::Object styles(rt);
 
   for (const auto& item : resolved.styles) {
-    styles.setProperty(rt, resolver.propertyName(item.property).c_str(), styleValue(rt, item));
+    styles.setProperty(rt, names.properties[item.property], styleValue(rt, item));
   }
 
   jsi::Array dependencies(rt, resolved.dependencies.size());
@@ -145,10 +184,10 @@ inline jsi::Value resolveClassesWith(
 
   jsi::Object result(rt);
 
-  result.setProperty(rt, "styles", std::move(styles));
-  result.setProperty(rt, "dependencies", std::move(dependencies));
-  result.setProperty(rt, "dependencySum", static_cast<double>(resolved.dependencySum));
-  result.setProperty(rt, "hasDataAttributes", false);
+  result.setProperty(rt, names.styles, std::move(styles));
+  result.setProperty(rt, names.dependencies, std::move(dependencies));
+  result.setProperty(rt, names.dependencySum, static_cast<double>(resolved.dependencySum));
+  result.setProperty(rt, names.hasDataAttributes, false);
 
   return result;
 }
