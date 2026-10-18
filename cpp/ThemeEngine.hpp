@@ -10,6 +10,7 @@
 #include <react/renderer/core/RawValue.h>
 #include <react/renderer/graphics/Color.h>
 #include <react/renderer/graphics/PlatformColorParser.h>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -122,6 +123,40 @@ public:
     const auto it = _styles.find(key(styleId, surface));
 
     return it != _styles.end() ? it->second.lock() : nullptr;
+  }
+
+  // The styles the last few views of a batch used: a mount registers a handful of styles over and over in a short cycle (a
+  // card's View, its Text, ...), so most lookups are found here, without the lock and the map.
+  struct StyleMemo {
+    struct Slot {
+      int64_t id = -1;
+      SurfaceId surface = 0;
+      std::shared_ptr<const ThemeStyle> style;
+    };
+
+    std::array<Slot, 4> slots;
+    size_t next = 0;
+
+    void remember(int64_t id, SurfaceId surface, std::shared_ptr<const ThemeStyle> style) {
+      slots[next] = {id, surface, std::move(style)};
+      next = (next + 1) % slots.size();
+    }
+  };
+
+  std::shared_ptr<const ThemeStyle> cachedStyle(int64_t styleId, SurfaceId surface, StyleMemo& memo) {
+    for (const auto& slot : memo.slots) {
+      if (slot.style && slot.id == styleId && slot.surface == surface) {
+        return slot.style;
+      }
+    }
+
+    auto style = cachedStyle(styleId, surface);
+
+    if (style) {
+      memo.remember(styleId, surface, style);
+    }
+
+    return style;
   }
 
   // Parses one style. Kept (weakly) under `styleId` while views use it: once they are gone the entry expires, so a long session

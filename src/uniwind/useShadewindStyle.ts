@@ -317,9 +317,11 @@ export const useShadewindStyle = (
   };
 };
 
+// `pause` / `resume` exist only on a pausable ref (a Pressable's): adding properties to a function object is slow on Hermes (about
+// 0.7 us per view on a desktop VM, a third of a mount's registration work), so the other components get the plain function.
 type EngineRef = ((node: unknown) => void) & {
-  pause(): void;
-  resume(): void;
+  pause?(): void;
+  resume?(): void;
 };
 
 type RefHolder = {
@@ -333,7 +335,8 @@ type RefHolder = {
 const makeHolder = (
   themed: ThemedStyles,
   user: Ref<unknown> | undefined,
-  onRegisterFailed: (() => void) | undefined
+  onRegisterFailed: (() => void) | undefined,
+  pausable: boolean
 ): RefHolder => {
   let registered: unknown = null;
   let attached: unknown = null;
@@ -374,6 +377,12 @@ const makeHolder = (
     }
   };
 
+  if (!pausable) {
+    holder.ref = ref;
+
+    return holder;
+  }
+
   holder.ref = Object.assign(ref, {
     // a Pressable unbinds the view while it is pressed (React draws the pressed style) and binds it again on release
     pause() {
@@ -395,12 +404,13 @@ const makeHolder = (
 
 /**
  * The ref for an engine view: registers on attach and forwards to the user's ref. A view that is not bound gets the user's own
- * ref back unchanged, so React attaches nothing for it. The ref also carries `pause()` / `resume()` (Pressable).
+ * ref back unchanged, so React attaches nothing for it. With `pausable` the ref also carries `pause()` / `resume()` (Pressable).
  */
 export const useEngineRef = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
-  onRegisterFailed?: () => void
+  onRegisterFailed?: () => void,
+  pausable = false
 ): any => {
   const holder = useRef<RefHolder | null>(null);
 
@@ -420,7 +430,12 @@ export const useEngineRef = (
       h.superseded = true;
     }
 
-    h = holder.current = makeHolder(themed, userRef, onRegisterFailed);
+    h = holder.current = makeHolder(
+      themed,
+      userRef,
+      onRegisterFailed,
+      pausable
+    );
   }
 
   return h.ref;

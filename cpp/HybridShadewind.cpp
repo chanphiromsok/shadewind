@@ -251,13 +251,15 @@ void HybridShadewind::schedulePrewarm() {
 // One registration: `props` is { light: { backgroundColor: 4294967295 }, dark: { ... } } (colours as processColor numbers or CSS
 // strings); `styleId` tags it so views of one style share the parsed form; `renderTheme` is the theme the view rendered with,
 // passed only on a node's first attach.
-void HybridShadewind::registerOne(
+ThemeHook::Registration HybridShadewind::registrationOf(
     jsi::Runtime& rt,
     UIManager& ui,
     const jsi::Value& nodeValue,
     const jsi::Value& propsValue,
     const jsi::Value& styleIdValue,
-    const jsi::Value& renderThemeValue) {
+    const jsi::Value& renderThemeValue,
+    const std::string& currentTheme,
+    ThemeEngine::StyleMemo& memo) {
   auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, nodeValue);
 
   if (!node) {
@@ -266,7 +268,7 @@ void HybridShadewind::registerOne(
 
   const SurfaceId surface = node->getFamily().getSurfaceId();
   const int64_t styleId = styleIdValue.isNumber() ? static_cast<int64_t>(styleIdValue.asNumber()) : -1;
-  auto style = _engine.cachedStyle(styleId, surface);
+  auto style = _engine.cachedStyle(styleId, surface, memo);
 
   if (!style) {
     if (!propsValue.isObject()) {
@@ -284,15 +286,17 @@ void HybridShadewind::registerOne(
     }
 
     style = _engine.buildStyle(styleId, surface, std::move(props), *ui.getContextContainer());
+
+    if (styleId >= 0) {
+      memo.remember(styleId, surface, style);
+    }
   }
 
-  if (renderThemeValue.isString()) {
-    const auto renderTheme = renderThemeValue.asString(rt).utf8(rt);
+  // the theme React rendered it with is the current one: nothing to apply until the theme changes (ThemeEngine::registerView)
+  const bool renderedWithCurrent =
+      renderThemeValue.isString() && !currentTheme.empty() && renderThemeValue.asString(rt).utf8(rt) == currentTheme;
 
-    _engine.registerView(*node, std::move(style), &renderTheme);
-  } else {
-    _engine.registerView(*node, std::move(style), nullptr);
-  }
+  return {node->getFamilyShared(), std::move(style), node->getProps(), node->getComponentName(), surface, renderedWithCurrent};
 }
 
 // register(shadowNode, propsByTheme, styleId?, renderTheme?)
@@ -304,7 +308,12 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
   if (auto* ui = attachedUIManager(rt)) {
     const jsi::Value undefined;
 
-    registerOne(rt, *ui, args[0], args[1], count > 2 ? args[2] : undefined, count > 3 ? args[3] : undefined);
+    std::vector<ThemeHook::Registration> batch;
+    ThemeEngine::StyleMemo memo;
+
+    batch.push_back(registrationOf(
+        rt, *ui, args[0], args[1], count > 2 ? args[2] : undefined, count > 3 ? args[3] : undefined, _engine.theme(), memo));
+    _engine.hook().addMany(batch);
     schedulePrewarm();
   }
 
@@ -329,10 +338,22 @@ jsi::Value HybridShadewind::registerMany(jsi::Runtime& rt, const jsi::Value&, co
   auto ids = args[2].asObject(rt).asArray(rt);
   auto themes = args[3].asObject(rt).asArray(rt);
   const size_t length = nodes.size(rt);
+  const std::string currentTheme = _engine.theme(); // the JS thread is the only one that sets it
+  auto& batch = _state.registrations; // kept between calls: a mount's batch is thousands of entries
+  ThemeEngine::StyleMemo memo;
+
+  batch.clear();
+  batch.reserve(length);
 
   for (size_t i = 0; i < length; i++) {
-    registerOne(rt, *ui, nodes.getValueAtIndex(rt, i), props.getValueAtIndex(rt, i), ids.getValueAtIndex(rt, i), themes.getValueAtIndex(rt, i));
+    batch.push_back(registrationOf(
+        rt, *ui, nodes.getValueAtIndex(rt, i), props.getValueAtIndex(rt, i), ids.getValueAtIndex(rt, i), themes.getValueAtIndex(rt, i),
+        currentTheme, memo));
   }
+
+  // one lock hold for the whole commit's views (a mount registers thousands)
+  _engine.hook().addMany(batch);
+  batch.clear(); // keeps the capacity, releases the nodes
 
   if (length > 0) {
     schedulePrewarm();

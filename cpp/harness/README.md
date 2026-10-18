@@ -67,6 +67,16 @@ cmake -S . -B build -DHERMES_DIR=<dir>/hermes -DHERMES_BUILD=<dir>/build && cmak
 build/hermes_glue                                    # GLUE_QUICK=1 for a short run, e.g. under valgrind
 ```
 
+## Profiling the mount
+
+- `BENCH_PROFILE=1 BENCH_MOUNT_ONLY=1 build/harness_bench --runs 3` runs the render scenario alone with the current engine;
+  `BENCH_PROFILE=none` runs the same React work with no engine, to subtract (e.g. under `valgrind --tool=callgrind
+  --toggle-collect='harness::FakeReact::commitReact()'` for the commit hook's share of the mount commit, or
+  `--toggle-collect='harness::CurrentEngine::drain()'` for the native registration).
+- `hermes/register-path.js` times the per-view JS of registration on Hermes (`bin/hermes -O`, from the Hermes build of the section
+  above): a model of the JS (logic copied, native stubbed), so keep it in step with `src/internal.tsx` and
+  `src/uniwind/useShadewindStyle.ts`.
+
 ## The scheduler order hookDeferred relies on
 
 With `HERMES_DIR` / `HERMES_BUILD` set (see above), `cmake --build build --target scheduler_order && ./build/scheduler_order` runs

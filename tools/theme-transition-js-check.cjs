@@ -66,4 +66,38 @@ ok('driver: engine already on the theme, Uniwind not: Uniwind is still asked', (
 ok('driver: setTheme through the driver does not stop a later applyUniwindTheme', () => { uniwind.setTheme('light'); assert.strictEqual(api.getTheme(), 'light'); });
 api.setThemeDriver(null);
 ok('driver removed: setTheme is engine-only again', () => { api.setTheme('dark'); assert.deepStrictEqual(last(), ['dark', undefined, undefined]); assert.strictEqual(uniwind.current, 'light'); });
+
+// src/uniwind/useShadewindStyle.ts's engine ref (useEngineRef), compiled the same way, against a fake engine: a plain ref for views,
+// pause() / resume() only on a pausable one, and the render theme claimed on a node's first attach only.
+const engineCalls = [];
+const refStubs = {
+  react: { useLayoutEffect() {}, useReducer: () => [0, () => {}], useRef: (v) => ({ current: v }) },
+  'react-native': { StyleSheet: { flatten: (s) => s } },
+  './install': { getInternals: () => null, installUniwind: () => ({ active: true }) },
+  'shadewind/internal': {
+    ShadewindEngine: {
+      register: (...a) => { engineCalls.push(['register', ...a]); return true; },
+      unregister: (...a) => { engineCalls.push(['unregister', ...a]); },
+      label() {},
+    },
+  },
+};
+const refSrc = fs.readFileSync(path.join(root, 'src', 'uniwind', 'useShadewindStyle.ts'), 'utf8');
+const refOut = ts.transpileModule(refSrc, { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText;
+const rm = new Module('useShadewindStyle'); rm.paths = [];
+rm.require = (name) => { if (name in refStubs) return refStubs[name]; throw new Error('unexpected import ' + name); };
+rm._compile(refOut.replace(/require\(/g, 'module.require('), 'useShadewindStyle.js');
+const { useEngineRef, renderThemeOf } = rm.exports;
+const themedA = { light: { backgroundColor: 1 }, dark: { backgroundColor: 2 } };
+const themedB = { light: { color: 1 }, dark: { color: 2 } };
+renderThemeOf.set(themedA, 'light');
+renderThemeOf.set(themedB, 'light');
+
+ok('engine ref: a view gets a plain function, without pause / resume', () => { const ref = useEngineRef(themedA, undefined, undefined); assert.strictEqual(typeof ref, 'function'); assert.strictEqual(ref.pause, undefined); assert.strictEqual(ref.resume, undefined); });
+ok('engine ref: attach registers once with the render theme', () => { engineCalls.length = 0; const node = {}; useEngineRef(themedA, undefined, undefined)(node); assert.deepStrictEqual(engineCalls, [['register', node, themedA, 'light']]); });
+ok('engine ref: another holder on an attached node claims no render theme (re-attach, styles changed)', () => { const node = {}; useEngineRef(themedA, undefined, undefined)(node); engineCalls.length = 0; useEngineRef(themedB, undefined, undefined)(node); assert.deepStrictEqual(engineCalls, [['register', node, themedB, undefined]]); });
+ok('engine ref: a pausable ref unbinds on pause and binds again on resume', () => { const ref = useEngineRef(themedA, undefined, undefined, true); const node = {}; ref(node); engineCalls.length = 0; ref.pause(); ref.resume(); assert.deepStrictEqual(engineCalls, [['unregister', node], ['register', node, themedA]]); });
+ok('engine ref: the user ref still receives the node', () => { const user = { current: null }; const node = {}; useEngineRef(themedA, user, undefined)(node); assert.strictEqual(user.current, node); });
+ok('engine ref: no themed styles, the user ref is returned unchanged', () => { const user = () => {}; assert.strictEqual(useEngineRef(null, user, undefined), user); });
+
 console.log(n + ' checks passed');

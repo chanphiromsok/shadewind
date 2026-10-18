@@ -874,3 +874,30 @@ run. Not run on a device. A commit hook that clones the root after the engine's 
 committed root, so the fallback then adds one full-walk commit per switch (time, not a visible change). The fallback's `carriesTheme`
 takes the hook's lock, so on iOS it can wait for a background (hookAsync) walk, once per switch, inside the Low task. The public `setTheme` without Uniwind keeps `hookAsync` on iOS: its
 background commit and the React render of `useTheme` subscribers can also land in different frames; not changed here.
+
+Mount cost (2026-10-18, reported: mounting the uniwind-benchmarks render scenario, 2003 views, took 64.44 ms with shadewind
+against 61.30 ms with plain Uniwind 1.12.0, median of 6 warm launches, iPhone 17 Pro simulator, iOS 26.5; measured by the owner).
+What the engine adds to a mount, found with the harness and Hermes:
+
+- The commit hook's walk inside the mount commit: React commits of the render scenario, 7 per run, 273.31 M instructions without
+  the engine, 274.70 M with it (about 0.2 M per mount, 0.5 %). Not the cost.
+- The native registration (`registerMany`, after the commit, on the JS thread): 21.24 M instructions for 5 mounts of 2003 views,
+  now 10.07 M (-53 %). A third of it was freeing the previous screen's entries (their prewarmed props) when the table crossed its
+  purge threshold: they are now moved aside and freed by the next prewarm, off the JS thread on both platforms (`_graveyard`; the
+  every-128-commits purge frees whatever is left, as a backstop). The rest: one lock per view (now one per batch, `addMany`), a
+  locked style-cache lookup per view (a 4-entry memo of the batch: a mount cycles through a handful of styles), resetting and
+  move-assigning a fresh entry (`try_emplace`), the prewarm queue regrowing every mount (keeps its capacity), and a 128 KB batch
+  vector allocated per call (kept). The table is `F14FastMap`, which falls back to `std::unordered_map` with `FOLLY_MOBILE=1` (as
+  React Native builds folly on iOS and Android): one node allocation per view remains.
+- The JS of registration (`src/internal.tsx`, `src/uniwind/useShadewindStyle.ts`), measured with a micro-benchmark on Hermes
+  (hermes-v250829098.0.16 CLI, `-O`, x86 VM; the logic copied, native and React stubbed): ref holders plus the register path cost
+  3.3-4.5 ms per 2003 views, of which 1.4-1.7 ms was `Object.assign(ref, { pause, resume })`, adding two methods to every ref
+  function (adding properties to a function object is slow on Hermes). Only a Pressable calls them; the other components now get
+  the plain function: 1.6-2.8 ms. The WeakMap bookkeeping (`registeredWith`, `attachedNodes`) stays: it is what keeps a re-attach
+  with other styles from claiming a render theme (the stale revealed tab of section 18).
+- Not measured here: React attaching a ref to each themed view (it creates the view's public instance), and the per-view work of
+  the adapter's components that plain Uniwind also has (hooks, `getStyles`).
+
+Not verified on a device: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
+arms with the same protocol: plain Uniwind, shadewind with the engine off (adapter only: no refs, no registration), shadewind with
+the engine on.

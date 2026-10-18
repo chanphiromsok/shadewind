@@ -543,6 +543,50 @@ size_t liveHeapBytes() {
 
 } // namespace
 
+TEST_F(Current, RemountLeavesTheOldScreenToPrewarm) {
+  // A remount registers right after the unmount: freeing the old screen's entries (and their prewarmed props) there was a third
+  // of the registration's cost on the JS thread. They wait for the next prewarm, which runs off the JS thread.
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+
+  app.mount({screen(app, styles, 300)}); // 602 views; with the next 602 the registration crosses the purge threshold (1024)
+  engine.prewarm();
+  app.mount({});
+  app.collectGarbage();
+  app.mount({screen(app, styles, 300)});
+
+  EXPECT_EQ(hook.pendingRelease(), 602u) << "the old screen was freed while registering";
+  EXPECT_EQ(hook.size(), 602u);
+  engine.prewarm();
+  EXPECT_EQ(hook.pendingRelease(), 0u);
+}
+
+TEST_F(Current, RemountsWhilePrewarmRunsOnAnotherThread) {
+  // iOS and Android prewarm off the JS thread: entries are freed there while the JS thread registers the next screen
+  // (ThreadSanitizer checks this in the TSan build).
+  App app(engine, kThemes, "light");
+  std::atomic<bool> stop{false};
+  std::thread prewarm([&] {
+    while (!stop) {
+      engine.prewarm();
+    }
+  });
+
+  for (int i = 0; i < 20; i++) {
+    app.mount({screen(app, styles, 300)});
+    app.mount({});
+    app.collectGarbage();
+  }
+
+  app.mount({screen(app, styles, 300)});
+  stop = true;
+  prewarm.join();
+
+  app.setTheme("dark");
+  EXPECT_EQ(app.check().stale, 0);
+  EXPECT_EQ(app.check().visible, 602);
+}
+
 TEST_F(Current, MemoryStaysFlatAcrossMountSwitchUnmountCycles) {
   // Smart pointers stop memory from being lost, not from piling up: a cache or a map that keeps what unmounted views left
   // behind is a leak too. Mount, prewarm, switch twice and unmount, over and over (with the mount recording of a transition on):

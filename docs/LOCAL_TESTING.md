@@ -152,6 +152,11 @@ scripts/bench/measure.py ios <udid> uniwind uniwind-shadewind                  #
 scripts/bench/measure.py ios <udid> uniwind uniwind-shadewind --scenario theme # theme scenario
 ```
 
+Mount cost, three arms (render scenario, median of 6 warm launches each, first cold launch discarded, same simulator and build
+type): plain `uniwind`; the engine arm with `globalThis.__SHADEWIND_ENGINE_OFF__ = true;` as the first line of `index.js` (the
+adapter's components with no engine: no refs, no registration, no native class resolution); the engine arm as is. Arm 2 minus arm 1
+is the adapter's own pipeline, arm 3 minus arm 2 is the engine's registration.
+
 Check every launch on screen (header, "x 10 runs" / "x 10 theme changes"): a fixed sleep has captured wrong screens before. Report
 medians next to `uniwind` from the same run. For the theme scenario note that `hookAsync` leaves the JS thread at once (their
 metric), so also run the engine arm with the synchronous strategy (`Shadewind.setTheme(name, 'hook')`, or the example's

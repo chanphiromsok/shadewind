@@ -68,7 +68,8 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
     const ref = useEngineRef(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed
+      onRegisterFailed,
+      true // pause() / resume() around a press (below)
     );
     const [pressed, setPressed] = useState(false);
     const handlers = usePressability(

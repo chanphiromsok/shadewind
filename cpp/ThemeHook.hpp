@@ -373,6 +373,16 @@ public:
     return style;
   }
 
+  // One view to register (see add).
+  struct Registration {
+    std::shared_ptr<const ShadowNodeFamily> family;
+    std::shared_ptr<const ThemeStyle> style;
+    Props::Shared base;
+    const char* componentName = nullptr;
+    SurfaceId surface = 0;
+    bool renderedWithCurrentTheme = false;
+  };
+
   void add(
       const std::shared_ptr<const ShadowNodeFamily>& family,
       std::shared_ptr<const ThemeStyle> style,
@@ -382,6 +392,28 @@ public:
       bool renderedWithCurrentTheme = false) {
     std::lock_guard<std::mutex> lock(_mutex);
     syncTheme(); // "the current theme" is the one setTheme published last, also when no commit has run since
+    beforeAdding(1);
+    addLocked(family, std::move(style), std::move(base), componentName, surface, renderedWithCurrentTheme);
+  }
+
+  // The registrations of one React commit, under one lock hold (a mount registers thousands).
+  void addMany(std::vector<Registration>& batch) {
+    if (batch.empty()) {
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    syncTheme();
+    beforeAdding(batch.size());
+    _prewarmQueue.reserve(_prewarmQueue.size() + batch.size());
+
+    for (auto& r : batch) {
+      addLocked(r.family, std::move(r.style), std::move(r.base), r.componentName, r.surface, r.renderedWithCurrentTheme);
+    }
+  }
+
+  // Caller holds _mutex.
+  void beforeAdding(size_t count) {
     const uint32_t diagnostics = _log.flags();
 
     // before the insert: a new view can take the address of a released one, whose unmount would then never be reported
@@ -389,15 +421,31 @@ public:
       collectExpired(diagnostics);
     }
 
-    // unmounted views leave expired entries behind; drop them as the map grows, not only every 128 commits
-    if (_entries.size() >= _purgeAt) {
-      purgeExpired();
-      _purgeAt = std::max<size_t>(1024, _entries.size() * 2);
+    // unmounted views leave expired entries behind; drop them as the map grows, not only every 128 commits. Their props (the
+    // prewarmed ones above all) are freed by the next prewarm, off the JS thread: a remount registers right after the unmount,
+    // and freeing the old screen's props here was a third of the registration's cost.
+    if (_entries.size() + count > _purgeAt) {
+      purgeExpired(&_graveyard);
+      _purgeAt = std::max<size_t>(1024, (_entries.size() + count) * 2);
+    }
+  }
+
+  // Caller holds _mutex.
+  void addLocked(
+      const std::shared_ptr<const ShadowNodeFamily>& family,
+      std::shared_ptr<const ThemeStyle> style,
+      Props::Shared base,
+      const char* componentName,
+      SurfaceId surface,
+      bool renderedWithCurrentTheme) {
+    const uint32_t diagnostics = _log.flags();
+    const auto [it, inserted] = _entries.try_emplace(family.get());
+    auto& entry = it->second;
+
+    if (!inserted) {
+      entry = Entry{}; // registered again (other styles, a re-attach): nothing of the old registration carries over
     }
 
-    auto& entry = _entries[family.get()];
-
-    entry = Entry{};
     entry.family = family;
     entry.style = std::move(style);
     entry.base = std::move(base);
@@ -539,11 +587,13 @@ public:
 
     std::vector<Job> jobs;
     std::shared_ptr<const ContextContainer> context;
+    std::vector<Entry> released; // declared first: destroyed last, after every lock below is released
 
     {
       std::lock_guard<std::mutex> lock(_mutex);
       std::vector<std::weak_ptr<const ShadowNodeFamily>> queue;
 
+      released.swap(_graveyard);
       queue.swap(_prewarmQueue);
       context = _contextContainer;
 
@@ -568,6 +618,10 @@ public:
           jobs.push_back(std::move(job));
         }
       }
+
+      // give the queue its capacity back (nothing was queued meanwhile: the lock is held), so the next mount does not regrow it
+      queue.clear();
+      _prewarmQueue.swap(queue);
     }
 
     if (jobs.empty() || !context) {
@@ -648,6 +702,12 @@ public:
     return _entries.size();
   }
 
+  // Entries of unmounted views waiting for the next prewarm to free them.
+  size_t pendingRelease() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _graveyard.size();
+  }
+
   // The last commit's counts and times. Filled only with SHADEWIND_DEV_TOOLS (zeros otherwise).
   HookStats stats() {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -688,6 +748,7 @@ public:
     // views that unmounted never show up in a walk, so drop their entries now and then
     if ((++_commits & 127) == 0) {
       purgeExpired();
+      _graveyard.clear(); // normally prewarm frees these; a backstop if none ran since
     }
 
     Walk walk;
@@ -827,7 +888,9 @@ private:
   }
 
   // Caller holds _mutex.
-  void purgeExpired() {
+  // Caller holds _mutex. With `graveyard`, the dropped entries are moved there (to be freed later, without the lock) instead of
+  // being freed here.
+  void purgeExpired(std::vector<Entry>* graveyard = nullptr) {
     std::vector<const ShadowNodeFamily*> expired;
 
     for (const auto& [key, entry] : _entries) {
@@ -836,8 +899,18 @@ private:
       }
     }
 
+    if (graveyard != nullptr) {
+      graveyard->reserve(graveyard->size() + expired.size());
+    }
+
     for (const auto* key : expired) {
-      _entries.erase(key);
+      const auto it = _entries.find(key);
+
+      if (graveyard != nullptr) {
+        graveyard->push_back(std::move(it->second));
+      }
+
+      _entries.erase(it);
     }
   }
 
@@ -1185,6 +1258,7 @@ private:
   std::mutex _mutex;
   folly::F14FastMap<const ShadowNodeFamily*, Entry> _entries;
   std::vector<std::weak_ptr<const ShadowNodeFamily>> _prewarmQueue;
+  std::vector<Entry> _graveyard; // entries of unmounted views dropped while registering; prewarm frees them (it always follows)
   std::array<Proof, 16> _proofs{};
   size_t _nextProof = 0;
   // Trees returned since the first transition, with the epoch they carry (rootCarries). Own lock: see rootCarries.
