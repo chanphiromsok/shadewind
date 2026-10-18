@@ -2,6 +2,7 @@
 // reveal as freezeOnBlur does it, theme switches) and reads the committed tree: what would be mounted on screen.
 
 #include "App.hpp"
+#include "ThemeTransition.hpp"
 
 #include <gtest/gtest.h>
 
@@ -334,4 +335,161 @@ TEST(Baseline, RevealCommitShowsStaleFrame) {
 
   EXPECT_GT(app.lastReactCommit().stale, 0) << "expected the 44eb043 engine to show the old theme in the reveal commit";
   EXPECT_EQ(app.check().stale, 0) << "and to fix it in the flush commit after the refs re-attach";
+}
+
+// ---- Theme transition: knowing when the new theme is mounted (cpp/ThemeTransition.hpp, ThemeHook::rootCarries) ----
+//
+// The platform overlay is replaced by a log. A mount is simulated the way UIManager::reportMount does it: pull the transaction (that
+// makes the revision the base one) and hand the base revision's root to the mount hook.
+
+namespace margelo::nitro::shadewind {
+
+std::vector<std::string>& transitionLog() {
+  static std::vector<std::string> log;
+
+  return log;
+}
+
+void themeTransitionBegin(uint64_t id, ThemeTransitionPreset, double) {
+  transitionLog().push_back("begin " + std::to_string(id));
+}
+
+void themeTransitionRun(uint64_t id) {
+  transitionLog().push_back("run " + std::to_string(id));
+}
+
+} // namespace margelo::nitro::shadewind
+
+namespace {
+
+RootShadowNode::Shared mountedRoot(App& app) {
+  auto coordinator = app.react().tree().getMountingCoordinator();
+
+  coordinator->pullTransaction();
+
+  return coordinator->getBaseRevision().rootShadowNode;
+}
+
+// A commit hook that runs after the engine's and returns another root (a library that clones the root in its own hook)
+class RootCloner final : public facebook::react::UIManagerCommitHook {
+public:
+  void commitHookWasRegistered(const facebook::react::UIManager&) noexcept override {}
+  void commitHookWasUnregistered(const facebook::react::UIManager&) noexcept override {}
+
+  RootShadowNode::Unshared shadowTreeWillCommit(
+      const facebook::react::ShadowTree&,
+      const RootShadowNode::Shared&,
+      const RootShadowNode::Unshared& newRoot,
+      const facebook::react::ShadowTreeCommitOptions&) noexcept override {
+    return std::static_pointer_cast<RootShadowNode>(newRoot->ShadowNode::clone({}));
+  }
+};
+
+const auto kNow = [] { return facebook::react::HighResTimeStamp::now(); };
+
+} // namespace
+
+TEST_F(Current, MountedRootCarriesTheEpochItWasCommittedFor) {
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+
+  hook.watchMounts();
+  app.mount({screen(app, styles, 5)});
+
+  const auto lightRoot = mountedRoot(app);
+
+  app.setTheme("dark"); // commits the theme; not mounted yet (the transaction was not pulled)
+
+  const auto target = hook.epoch();
+
+  EXPECT_FALSE(hook.rootCarries(lightRoot.get(), target)) << "the tree on screen still has the old theme";
+
+  const auto darkRoot = mountedRoot(app);
+
+  EXPECT_NE(darkRoot.get(), lightRoot.get());
+  EXPECT_TRUE(hook.rootCarries(darkRoot.get(), target)) << "the root React Native reports is the one the hook returned";
+  EXPECT_FALSE(hook.rootCarries(lightRoot.get(), target));
+}
+
+TEST_F(Current, MountedRootCarriesTheEpochAfterABackgroundCommit) {
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+
+  hook.watchMounts();
+  app.mount({screen(app, styles, 5)});
+  app.setThemeAsync("dark"); // hookAsync on iOS: the commit runs on another thread
+
+  EXPECT_TRUE(hook.rootCarries(mountedRoot(app).get(), hook.epoch()));
+}
+
+TEST_F(Current, NothingIsRecordedUntilATransitionAsksForIt) {
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+
+  app.mount({screen(app, styles, 5)});
+  app.setTheme("dark");
+
+  EXPECT_FALSE(hook.rootCarries(mountedRoot(app).get(), 0)) << "the default path must not record mounts";
+}
+
+TEST_F(Current, TransitionFadesOnlyForTheMountThatShowsTheNewTheme) {
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+  sw::ThemeTransition transition(hook);
+
+  app.mount({screen(app, styles, 5)});
+  sw::transitionLog().clear();
+
+  // what setTheme does: epoch first, then the transition (snapshot), then the commit
+  engine.engine().setTheme("dark");
+  app.assumeTheme("dark");
+  transition.begin(sw::ThemeTransitionPreset::Fade, 250);
+
+  const auto before = app.react().committed(); // the tree React Native still has mounted
+
+  transition.shadowTreeDidMount(before, kNow()); // a mount report for an earlier commit
+
+  app.react().commitTick();
+
+  transition.shadowTreeDidMount(mountedRoot(app), kNow());
+  transition.shadowTreeDidMount(mountedRoot(app), kNow()); // a later report must not fade twice
+
+  EXPECT_EQ(sw::transitionLog(), (std::vector<std::string>{"begin 1", "run 1"}));
+}
+
+TEST_F(Current, RapidTogglesFadeOnlyTheLastTransition) {
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+  sw::ThemeTransition transition(hook);
+
+  app.mount({screen(app, styles, 5)});
+  sw::transitionLog().clear();
+
+  for (const auto* theme : {"dark", "light", "dark"}) {
+    engine.engine().setTheme(theme);
+    transition.begin(sw::ThemeTransitionPreset::Fade, 250);
+    app.assumeTheme(theme);
+    app.react().commitTick();
+  }
+
+  transition.shadowTreeDidMount(mountedRoot(app), kNow());
+
+  EXPECT_EQ(sw::transitionLog(), (std::vector<std::string>{"begin 1", "begin 2", "begin 3", "run 3"}));
+  EXPECT_EQ(app.check().stale, 0) << "ends in the last theme";
+}
+
+TEST_F(Current, AnotherHookThatClonesTheRootDefeatsTheMountSignal) {
+  // Documents the known limit: the pointer identity breaks, so the native 1 s failsafe is what ends the fade.
+  App app(engine, kThemes, "light");
+  RootCloner cloner;
+
+  app.react().addHook(cloner);
+
+  auto& hook = engine.engine().hook();
+
+  hook.watchMounts();
+  app.mount({screen(app, styles, 5)});
+  app.setTheme("dark");
+
+  EXPECT_FALSE(hook.rootCarries(mountedRoot(app).get(), hook.epoch()));
 }
