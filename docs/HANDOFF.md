@@ -1,3 +1,72 @@
+# Handoff (2026-10-18): why Shadewind on Uniwind is not faster at mount, and what to do next
+
+Branch `claude/exciting-tesla-0ajx5i`. Read this section first; the 2026-10-17 handoff below is older.
+
+## Numbers so far (owner's runs, iPhone 17 Pro simulator, iOS 26.5, RN 0.86, 2003 views, median of 6 warm launches)
+
+| Arm | Mount |
+|---|---|
+| plain Uniwind 1.12 | 61.86 ms |
+| shadewind adapter, `__SHADEWIND_ENGINE_OFF__` | 56.25 ms |
+| shadewind, engine on | 62.03 ms |
+| Uniwind Pro (their chart, their device and protocol; never run here) | ~45 ms |
+
+Theme switch to pixels (filmstrip): plain Uniwind ~127-130 ms, shadewind ~58-63 ms. Pro's switch: not measured.
+
+## Why the engine costs ~6 ms at mount
+
+Metro (`shadewind/metro`) does the per-class work at build time: it swaps Uniwind's `View` / `Text` / `Pressable` /
+`TouchableOpacity` / `withUniwind` for ours and prebuilds the C++ class table. It cannot do the per-view work: which native view gets
+which className is known only when React mounts it. Today each themed view pays at mount, on the JS thread:
+
+- a ref callback per view, which makes React create the view's public instance (`ReactNativeElement`). React creates it lazily, on
+  the first ref access (`ReactFabric-prod.js:10361`); plain Uniwind views have no ref and never create one. Not measured.
+- the JS register path (ref holder, WeakMaps, queue): 1.6-2.8 ms per 2003 views (Hermes `-O`, VM, logic copied).
+- `registerMany` in C++: about 2 M instructions per mount (harness).
+- the C++ class resolver: unmeasured at mount. `__SHADEWIND_ENGINE_OFF__` turns it off too, so it is mixed into the 5.8 ms.
+
+The rest of the gap to Pro (56 ms vs 45 ms) is the component layers (Uniwind-style hooks per view, React, React Native), not
+the engine.
+
+## Next steps, in order
+
+1. **Fourth arm (no code).** The engine build with `-resolverOff 1` added to the TheirBench render launch args, same protocol, same
+   session as the other three. Arm 3 minus arm 4 = the resolver's mount cost. If it costs, the cheap fix is to keep it off for the
+   first mount.
+2. **Register at switch time instead of at mount (the real fix; not started).** Remove the per-view ref and registration:
+   - the component passes the per-theme colours as an extra prop on the host element (e.g. `$sw={themed}`). React Native filters props
+     through the view config before they reach native (`createAttributePayload(newProps, validAttributes)`,
+     `ReactFabric-prod.js:7099`), so it costs nothing natively. It stays on the fiber (`memoizedProps`,
+     `stateNode.canonical.currentProps`), and `stateNode.node` is the shadow node (`ReactFabric-prod.js:7104-7118`).
+   - on `setTheme`, JS walks the React tree from the root (one ref per app root through
+     `AppRegistry.setWrapperComponentProvider`), collects `{ node, themed }` for each host fiber that carries the prop, and calls
+     `registerMany` once, then applies the theme as today.
+   - walk cost: 0.42 ms per walk of a synthetic 8,013-fiber tree (2003 cells; Hermes `-O`, VM). Not a real React tree.
+   - deletes: `useEngineRef` / ref holders, the Pressable `pause` / `resume`, `registeredWith` / `attachedNodes`, the render-theme
+     re-attach logic.
+   - to check before trusting it: hidden subtrees (Activity, Suspense, `freezeOnBlur`) still themed when shown; walk the current
+     tree (`root.current`), not the work-in-progress tree; modals and other separately registered roots; a view mounted between the
+     walk and the native commit (it rendered with the new theme, so expected fine); React internals are a private API (the engine
+     already uses `__internalInstanceHandle` and `RendererProxy`).
+   - prototype behind a launch flag (`-registerAtSwitch 1`), harness and JS checks first, then the owner's mount and switch arms with
+     and without the flag. Ceiling: at best removes the engine's ~6 ms (near the engine-off 56 ms), it does not reach 45 ms.
+3. **Component layers (only path toward ~45 ms).** View and Text already render the host components directly (`NativeView`,
+   `NativeText`). What is left per view is the hooks (context, reducer, layout effect + subscribe) and `getStyles`. Profile one mount
+   with the Hermes sampling profiler before changing anything.
+4. **Switch tail (~60 ms to pixels).** Pending recordings: the example TheirBench without the adapter, and `-theirBenchNoText 1`.
+   Hypothesis: main-thread mount and text redraw, not the engine.
+
+## Done in this session (2026-10-18)
+
+- Yoga configured flag kept on themed clones; next React commit after a switch 4.2-5.0 ms -> 1.3-1.4 ms (harness).
+- `hookDeferred` rides React's commit (Low-priority fallback commit); the Uniwind driver uses it by default.
+- Registration: `addMany`, 4-slot style memo, graveyard freed off the JS thread.
+- Adapter trim: Text 8 -> 5 hooks, one style object without a `style` prop, `shadewind/uniwind/aot` removed.
+- Engine inactive (`__SHADEWIND_ENGINE_OFF__` or any inactive reason): views now subscribe to the theme like Uniwind's own
+  components (they stayed stale on a switch before). JS check added (40 checks pass). Typecheck: no errors in `src/`; the 34 errors
+  in `spikes/` were there before. Not run on a simulator.
+- Not verified anywhere: a device; Android for the 2026-10-18 changes; the resolver's mount cost.
+
 # Handoff (2026-10-17)
 
 State of the `engine/freeze-and-mount` work, merged into `main`. Read this first, then `docs/LOCAL_TESTING.md`.

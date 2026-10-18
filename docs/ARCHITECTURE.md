@@ -908,7 +908,7 @@ same-session A/B. What the engine adds at mount is about 5.8 ms (arm 3 minus arm
 registration, native class resolver); the adapter alone is about 5.6 ms lighter than Uniwind's components. Still not run: a device,
 Android. Known gap shown by the engine-off arm: with the engine inactive, `useShadewindStyle` still drops the Theme dependency from
 its subscription, so views do not re-render on a theme switch, while `install.ts` documents the inactive case as behaving like plain
-Uniwind (not fixed yet).
+Uniwind. Fixed later on 2026-10-18: with the engine inactive the subscription keeps the theme (JS check "engine inactive").
 
 Before that run: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
 arms with the same protocol (`docs/LOCAL_TESTING.md` step 7): plain Uniwind, shadewind with `__SHADEWIND_ENGINE_OFF__` (the adapter

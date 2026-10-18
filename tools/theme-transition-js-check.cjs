@@ -83,7 +83,7 @@ const fakeInternals = {
   UniwindListener: { subscribe: () => () => {} },
   StyleDependency: { Theme: THEME },
 };
-const hooks = { reducers: 0, effects: [] };
+const hooks = { reducers: 0, effects: [], active: true };
 const refStubs = {
   react: {
     useLayoutEffect: (fn, deps) => { hooks.effects.push(deps); },
@@ -91,7 +91,7 @@ const refStubs = {
     useRef: (v) => ({ current: v }),
   },
   'react-native': { StyleSheet: { flatten: (s) => s } },
-  './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: true }) },
+  './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: hooks.active }) },
   'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
   'shadewind/internal': {
     ShadewindEngine: {
@@ -126,6 +126,7 @@ ok('style: no accent, one reducer and one layout effect, subscribed to the non-t
 ok('style: a theme-dependent accent keeps the hook count, returns its colour and subscribes to the theme too', () => { const r = render('accent-brand'); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 1); assert.strictEqual(r.out.accentColor, 'green'); assert.ok(r.deps[0].includes(THEME) && r.deps[0].includes(RTL)); });
 ok('style: an accent that does not depend on the theme leaves the theme out', () => { const r = render('accent-red-500'); assert.strictEqual(r.out.accentColor, 'red'); assert.ok(!r.deps[0].includes(THEME)); });
 ok('style: the subscription array is the same object across renders (the effect does not subscribe again)', () => { assert.strictEqual(render('accent-brand').deps[0], render('accent-brand').deps[0]); assert.strictEqual(render(undefined).deps[0], render(undefined).deps[0]); });
+ok('style: engine inactive, the view subscribes to the theme like Uniwind\'s own (with and without an accent)', () => { hooks.active = false; try { assert.ok(render(undefined).deps[0].includes(THEME)); assert.ok(render('accent-red-500').deps[0].includes(THEME)); assert.strictEqual(render('accent-red-500').deps[0], render('accent-red-500').deps[0]); assert.strictEqual(render(undefined).out.themed, null); } finally { hooks.active = true; } assert.ok(!render('accent-red-500').deps[0].includes(THEME)); });
 console.warn = warn;
 
 // src/uniwind/native.ts withUserStyle: the cached className style alone when there is no user style
