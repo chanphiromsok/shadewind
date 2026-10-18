@@ -141,3 +141,17 @@ target_compile_definitions(harness_tests PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_S
 add_executable(harness_bench bench.cpp)
 target_link_libraries(harness_bench PRIVATE harness_support)
 
+
+# The class resolver's JSI glue (cpp/ResolveGlue.hpp) inside a real Hermes runtime: parity with Uniwind and a bench (hermes/glue.cpp).
+# Optional: HERMES_DIR is a checkout of the Hermes version React Native pins (sdks/.hermesv1version), HERMES_BUILD its CMake build
+# with the `hermesvm` target built. Uses Hermes' own JSI, not React Native's copy (rn_renderer is not linked).
+set(HERMES_DIR "" CACHE PATH "Hermes checkout (facebook/hermes at the tag React Native pins)")
+set(HERMES_BUILD "" CACHE PATH "Hermes build directory with hermesvm built")
+
+if(HERMES_DIR AND HERMES_BUILD)
+  add_executable(hermes_glue hermes/glue.cpp "${HERMES_DIR}/API/jsi/jsi/JSIDynamic.cpp")
+  target_include_directories(hermes_glue PRIVATE "${ENGINE}" "${HERMES_DIR}/API" "${HERMES_DIR}/API/jsi" "${HERMES_DIR}/public")
+  target_compile_definitions(hermes_glue PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+  target_link_libraries(hermes_glue PRIVATE folly_runtime "${HERMES_BUILD}/lib/libhermesvm.so")
+  set_target_properties(hermes_glue PROPERTIES BUILD_RPATH "${HERMES_BUILD}/lib")
+endif()

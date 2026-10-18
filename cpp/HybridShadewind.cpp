@@ -1,6 +1,7 @@
 #include "HybridShadewind.hpp"
 #include "css/ClassMerge.hpp"
 #include "css/StyleResolver.hpp"
+#include "ResolveGlue.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
@@ -535,66 +536,6 @@ static css::StyleResolver::Result gResolved;
 // the JS reference, so output can never differ from it.
 namespace {
 
-constexpr size_t kMergeMaxArgs = 16;
-constexpr size_t kMergeBuffer = 4096;
-
-struct MergeInput {
-  char buffer[kMergeBuffer];
-  size_t length = 0;
-  std::string_view views[kMergeMaxArgs];
-  size_t count = 0;
-};
-
-bool readAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count, MergeInput& in) {
-  if (count > kMergeMaxArgs) {
-    return false;
-  }
-
-  for (size_t i = 0; i < count; i++) {
-    if (!args[i].isString()) {
-      return false;
-    }
-
-    const size_t begin = in.length;
-    bool ok = true;
-    auto cb = [&](bool ascii, const void* data, size_t num) {
-      if (num > kMergeBuffer - in.length) {
-        ok = false;
-        return;
-      }
-
-      if (ascii) {
-        std::memcpy(in.buffer + in.length, data, num);
-      } else {
-        const auto* p = static_cast<const char16_t*>(data);
-
-        for (size_t k = 0; k < num; k++) {
-          if (p[k] > 127) {
-            ok = false;
-            return;
-          }
-
-          in.buffer[in.length + k] = static_cast<char>(p[k]);
-        }
-      }
-
-      in.length += num;
-    };
-
-    args[i].getString(rt).getStringData(rt, cb);
-
-    if (!ok) {
-      return false;
-    }
-
-    in.views[i] = std::string_view(in.buffer + begin, in.length - begin);
-  }
-
-  in.count = count;
-
-  return true;
-}
-
 jsi::Value mergeAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
   if (!gClassMerge.loaded()) {
     return jsi::Value::undefined();
@@ -620,78 +561,9 @@ jsi::Value mergeAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
   return jsi::String::createFromAscii(rt, out.data(), out.size());
 }
 
-// isPressed / isFocused / isDisabled: only a boolean equals Uniwind's `true` / `false` (resolveStyles compares with !==)
-css::StyleResolver::Tri triOf(const jsi::Value& value) {
-  if (!value.isBool()) {
-    return css::StyleResolver::Tri::Unset;
-  }
-
-  return value.getBool() ? css::StyleResolver::Tri::True : css::StyleResolver::Tri::False;
-}
-
-jsi::Value styleValue(jsi::Runtime& rt, const css::StyleResolver::Item& item) {
-  if (!item.value) {
-    return jsi::Value(item.number);
-  }
-
-  if (item.value->undefined) {
-    return jsi::Value::undefined();
-  }
-
-  const folly::dynamic& value = item.value->value;
-
-  switch (value.type()) {
-    case folly::dynamic::DOUBLE:
-      return jsi::Value(value.getDouble());
-    case folly::dynamic::INT64:
-      return jsi::Value(static_cast<double>(value.getInt()));
-    case folly::dynamic::STRING:
-      return jsi::String::createFromUtf8(rt, value.getString());
-    case folly::dynamic::BOOL:
-      return jsi::Value(value.getBool());
-    case folly::dynamic::NULLT:
-      return jsi::Value::null();
-    default:
-      return jsi::valueFromDynamic(rt, value);
-  }
-}
-
-// (className, theme, screenWidth, isPressed, isFocused, isDisabled) -> Uniwind's resolveStyles result
-// ({ styles, dependencies, dependencySum, hasDataAttributes }), or undefined: resolve it with Uniwind's JS
+// (className, theme, screenWidth, isPressed, isFocused, isDisabled) -> Uniwind's resolveStyles result, or undefined (ResolveGlue.hpp)
 jsi::Value resolveClasses(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
-  MergeInput in;
-
-  if (count < 3 || !gStyleResolver.loaded() || !args[2].isNumber() || !readAscii(rt, args, 2, in)) {
-    return jsi::Value::undefined();
-  }
-
-  const int theme = gStyleResolver.themeIndex(in.views[1]);
-  const auto state = [&](size_t i) { return i < count ? triOf(args[i]) : css::StyleResolver::Tri::Unset; };
-
-  if (!gStyleResolver.resolve(in.views[0], theme, args[2].getNumber(), state(3), state(4), state(5), gResolved)) {
-    return jsi::Value::undefined();
-  }
-
-  jsi::Object styles(rt);
-
-  for (const auto& item : gResolved.styles) {
-    styles.setProperty(rt, gStyleResolver.propertyName(item.property).c_str(), styleValue(rt, item));
-  }
-
-  jsi::Array dependencies(rt, gResolved.dependencies.size());
-
-  for (size_t i = 0; i < gResolved.dependencies.size(); i++) {
-    dependencies.setValueAtIndex(rt, i, gResolved.dependencies[i]);
-  }
-
-  jsi::Object result(rt);
-
-  result.setProperty(rt, "styles", std::move(styles));
-  result.setProperty(rt, "dependencies", std::move(dependencies));
-  result.setProperty(rt, "dependencySum", static_cast<double>(gResolved.dependencySum));
-  result.setProperty(rt, "hasDataAttributes", false);
-
-  return result;
+  return resolveClassesWith(rt, gStyleResolver, gResolved, args, count);
 }
 
 } // namespace
