@@ -121,6 +121,17 @@ Prove the check can fail by introducing a typo in a copy.
 - Then run the numbered checks in `docs/THEME_TRANSITION_TESTS.md` (30 fps recordings, per-frame `signalstats` YAVG, view hierarchy
   check for orphan overlays, reduce motion on and off, restore any simulator/emulator setting you change).
 
+## Memory on a device (what the harness cannot reach)
+
+- iOS: Xcode Instruments, Leaks and Allocations templates, Release build, 20 theme switches with a transition and 20 without. Expect
+  no leaked blocks, and `UIView` / `UIVisualEffectView` / snapshot counts back to the starting value after the last fade (overlays are
+  removed by identity; the 1 s timer keeps a removed snapshot alive up to 1 s, so wait 2 s before reading).
+- Android: Android Studio Memory Profiler (or a heap dump with LeakCanary in a debug build): no `ImageView` from
+  `ThemeTransitionOverlay` and no transition `Bitmap` left after the fades; Java heap and graphics memory back near the baseline
+  2 s after 10 rapid toggles.
+- JS: a Hermes heap snapshot (React Native DevTools) before and after 50 mounts and unmounts of a screen of adapter views; the count
+  of retained `registeredWith` entries (a WeakMap) must not grow.
+
 ## Possible next steps (not started)
 
 - Make the transition independent of the theme switch: `withTransition(() => anyChange(), options)` with a pluggable mount gate

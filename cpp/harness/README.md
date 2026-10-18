@@ -67,6 +67,22 @@ cmake -S . -B build -DHERMES_DIR=<dir>/hermes -DHERMES_BUILD=<dir>/build && cmak
 build/hermes_glue                                    # GLUE_QUICK=1 for a short run, e.g. under valgrind
 ```
 
+## Memory: leaks and growth
+
+Three checks, because they find different things:
+
+- **Memory never freed, use after free, overflows:** `-DHARNESS_SANITIZE=ON` builds the engine and React Native's renderer with
+  AddressSanitizer, LeakSanitizer and UBSan; `ASAN_OPTIONS=detect_leaks=1 build-asan/harness_tests` fails on any of them (LeakSanitizer
+  reports at exit). Without that build: `valgrind --leak-check=full --error-exitcode=9 build/harness_tests` (slower).
+- **Memory kept but no longer needed** (the usual leak with smart pointers: a cache or a map that holds what unmounted views left):
+  the test `MemoryStaysFlatAcrossMountSwitchUnmountCycles` mounts, prewarms, switches twice and unmounts 900 times and fails if the
+  live heap grows by 64 KB over the last 300 cycles or the registry passes its purge threshold.
+- **The JSI glue and its per-runtime cache:** `GLUE_QUICK=1 valgrind --leak-check=full build/hermes_glue` (two runtimes created and
+  destroyed).
+
+The iOS and Android overlays (`ios/ShadewindNative.mm`, `ThemeTransitionOverlay.kt`) are not reached by any of these: check them on a
+device (docs/THEME_TRANSITION_AGENT_REVIEW.md, "Memory on a device").
+
 ## Regenerating the resolver fixture
 
 `fixtures/resolver/generate.mjs` compiles example-real's CSS with Uniwind's own bundler and records Uniwind's own results, so it

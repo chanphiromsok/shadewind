@@ -11,6 +11,15 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# HARNESS_SANITIZE: AddressSanitizer (use after free, overflows), LeakSanitizer (memory never freed, reported at exit) and UBSan
+# over the engine and React Native's renderer. UBSan's vptr check is left out: it needs the type info of classes the harness
+# stubs (UIManager, EventBeat). Run with ASAN_OPTIONS=detect_leaks=1.
+option(HARNESS_SANITIZE "build with AddressSanitizer, LeakSanitizer and UBSan" OFF)
+if(HARNESS_SANITIZE)
+  add_compile_options(-fsanitize=address,undefined -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined -fno-sanitize=vptr)
+endif()
+
 set(DEPS "${CMAKE_CURRENT_SOURCE_DIR}/.deps" CACHE PATH "fetch-deps.sh output")
 set(RN "${DEPS}/react-native/ReactCommon")
 set(ENGINE "${CMAKE_CURRENT_SOURCE_DIR}/..")
@@ -33,6 +42,9 @@ set(FOLLY_SRC
   json/json.cpp lang/CString.cpp lang/Exception.cpp lang/SafeAssert.cpp lang/ToAscii.cpp memory/detail/MallocImpl.cpp
   net/NetOps.cpp portability/SysUio.cpp synchronization/SanitizeThread.cpp synchronization/ParkingLot.cpp
   system/AtFork.cpp system/ThreadId.cpp)
+if(HARNESS_SANITIZE)
+  list(APPEND FOLLY_SRC memory/SanitizeLeak.cpp) # folly annotates for the sanitizers when it sees them
+endif()
 list(TRANSFORM FOLLY_SRC PREPEND "${DEPS}/folly/folly/")
 
 add_library(folly_runtime STATIC ${FOLLY_SRC})
