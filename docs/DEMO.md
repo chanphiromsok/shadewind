@@ -100,6 +100,6 @@ Our own run on one iOS simulator (iPhone 17 Pro, iOS 26.5, Release, React Native
 | Theme change (JS thread idle) | 100.69 ms | **2.53 ms** |
 | Rendering (2003 views mounted) | 61.86 ms | 62.03 ms |
 
-Switching is much faster. Mounting is level with plain Uniwind: every view registers with the engine, which costs a little, and that
-is offset by the adapter's lighter views. Full details and
+Switching is much faster. Mounting is level with plain Uniwind: what the engine adds at mount (a ref and a registration per themed
+view) costs a little, and that is offset by the adapter's lighter views. Full details and
 caveats: [BENCHMARK.md](BENCHMARK.md).

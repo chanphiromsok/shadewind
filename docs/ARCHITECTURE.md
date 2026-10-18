@@ -898,6 +898,15 @@ What the engine adds to a mount, found with the harness and Hermes:
 - Not measured here: React attaching a ref to each themed view (it creates the view's public instance), and the per-view work of
   the adapter's components that plain Uniwind also has (hooks, `getStyles`).
 
-Not verified on a device: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
+Owner's re-run at `9ee5b93` (same protocol, three builds back to back, iPhone 17 Pro simulator, iOS 26.5): plain Uniwind 61.86 ms,
+adapter with `__SHADEWIND_ENGINE_OFF__` 56.25 ms, shadewind 62.03 ms (`docs/BENCHMARK.md`). Level with plain within the run-to-run
+spread (about 2 ms between launches); the old build read 64.44 against 61.30 ms in an earlier session, so the two runs are not a
+same-session A/B. What the engine adds at mount is about 5.8 ms (arm 3 minus arm 2: plan lookup, refs and public instances,
+registration, native class resolver); the adapter alone is about 5.6 ms lighter than Uniwind's components. Still not run: a device,
+Android. Known gap shown by the engine-off arm: with the engine inactive, `useShadewindStyle` still drops the Theme dependency from
+its subscription, so views do not re-render on a theme switch, while `install.ts` documents the inactive case as behaving like plain
+Uniwind (not fixed yet).
+
+Before that run: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
 arms with the same protocol (`docs/LOCAL_TESTING.md` step 7): plain Uniwind, shadewind with `__SHADEWIND_ENGINE_OFF__` (the adapter
 alone; arm 3 minus arm 2 is then everything the engine adds, not only the registration), shadewind with the engine on.

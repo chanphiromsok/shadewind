@@ -26,12 +26,15 @@ Reading it:
 
 - **Mounting with the engine is level with plain Uniwind** (62.03 against 61.86 ms, a difference inside the run-to-run spread). Before the
   registration changes the same measurement was 64.44 against 61.30 ms, about 5% slower.
-- **The adapter's own views are cheaper than Uniwind's** (56.25 ms), so registering every view with the engine costs about 5.8 ms
-  here, which cancels that gain.
+- **The adapter's own views are cheaper than Uniwind's** (56.25 ms), and what the engine adds at mount costs about 5.8 ms here,
+  which cancels that gain. That 5.8 ms is everything the engine-off switch turns off, not only the registration: the per-view plan
+  lookup, React attaching a ref (and creating the public instance) for each themed view, registration in JS and in C++, and the native
+  class resolver.
 - Switching is much faster either way (see the table above).
 
-The example's authors publish about 60.7 ms for plain Uniwind rendering, close to the 61.86 ms measured here. I did not check that
-the engine-off build themes every view correctly (this arm exists to measure cost). To repeat the runs yourself, see
+The example's authors publish about 60.7 ms for plain Uniwind rendering, close to the 61.86 ms measured here. The engine-off build
+exists to measure cost only: with the engine inactive, views do not follow a theme switch (a known gap, see
+[ARCHITECTURE.md](ARCHITECTURE.md), "Mount cost"). To repeat the runs yourself, see
 [DEMO.md](DEMO.md).
 
 How it was run, following the example's own method: Release build, React Native 0.86.3, iPhone 17 Pro simulator (iOS 26.5), one

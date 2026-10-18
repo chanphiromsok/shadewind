@@ -4,9 +4,11 @@ What shadewind does not do yet, and where it is not fully proven. Back to the [R
 
 ## Performance
 
-- **Mounting costs a little.** A theme switch is fast, but every view registers with the engine when it mounts. On a real-app
-  benchmark (30 feed cards, Release, iOS simulator) mounting is level with plain Uniwind: 64.4 ms against 65.3 ms, a tie rather
-  than a win. Details: [ARCHITECTURE.md](ARCHITECTURE.md) section 17b.
+- **Mounting costs a little.** A theme switch is fast, but every themed view gets a ref and registers with the engine when it
+  mounts (about 5.8 ms for 2003 views on the iOS simulator, measured against the adapter with the engine off). The adapter's lighter
+  views offset it: mounting is level with plain Uniwind on the Uniwind benchmarks example (62.03 against 61.86 ms for 2003 views,
+  [BENCHMARK.md](BENCHMARK.md)) and on a real-app benchmark (30 feed cards: 64.4 against 65.3 ms, [ARCHITECTURE.md](ARCHITECTURE.md)
+  section 17b). A tie, not a win; one simulator, no device.
 - **The commit hook runs on every commit.** It skips subtrees the previous commit already themed and `display: none` subtrees
   (frozen screens), so a React commit costs about what React changed. A mount commit still visits the new nodes once. After a switch
   made off the JS thread (iOS `hookAsync`), the first React commit themes the views again, once.
