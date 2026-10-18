@@ -4,6 +4,21 @@
 #include "App.hpp"
 #include "ThemeTransition.hpp"
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HARNESS_ASAN 1
+#endif
+#endif
+#ifndef HARNESS_ASAN
+#define HARNESS_ASAN 0
+#endif
+
+#if HARNESS_ASAN
+#include <sanitizer/allocator_interface.h>
+#else
+#include <malloc.h>
+#endif
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -356,6 +371,55 @@ TEST_F(Current, UnmountedViewsAndStylesAreDropped) {
   }
 
   EXPECT_LE(engine.engine().cachedStyles(), 150u) << "styles of unmounted views stayed cached";
+}
+
+namespace {
+
+// Bytes the process has allocated and not freed (ASan's own count under AddressSanitizer, glibc's otherwise).
+size_t liveHeapBytes() {
+#if HARNESS_ASAN
+  return __sanitizer_get_current_allocated_bytes();
+#else
+  return mallinfo2().uordblks;
+#endif
+}
+
+} // namespace
+
+TEST_F(Current, MemoryStaysFlatAcrossMountSwitchUnmountCycles) {
+  // Smart pointers stop memory from being lost, not from piling up: a cache or a map that keeps what unmounted views left
+  // behind is a leak too. Mount, prewarm, switch twice and unmount, over and over (with the mount recording of a transition on):
+  // after a warm-up, the live heap and the engine's registry must stop growing.
+  App app(engine, kThemes, "light");
+  auto& hook = engine.engine().hook();
+
+  hook.watchMounts();
+
+  const auto cycle = [&] {
+    app.mount({screen(app, styles, 50)});
+    engine.prewarm();
+    app.setTheme("dark");
+    app.setTheme("light");
+    app.mount({});
+    app.collectGarbage();
+  };
+
+  for (int i = 0; i < 600; i++) {
+    cycle(); // warm-up: the registry (about 1000 dead views before a purge) and the style cache reach their purge thresholds
+  }
+
+  const size_t heapBefore = liveHeapBytes();
+  const size_t entriesBefore = hook.size();
+
+  for (int i = 0; i < 300; i++) {
+    cycle();
+  }
+
+  const size_t heapAfter = liveHeapBytes();
+
+  EXPECT_LE(hook.size(), std::max<size_t>(entriesBefore, 1024u + 102u)) << "the registry kept growing";
+  EXPECT_LT(heapAfter, heapBefore + 64 * 1024)
+      << "live heap grew by " << (heapAfter - heapBefore) << " bytes over 300 cycles of 102 themed views";
 }
 
 // ---- development diagnostics (shadewind/diagnostics)

@@ -232,6 +232,12 @@ public:
       return;
     }
 
+    // a WeakMap forgets unmounted views (Hermes' GC); without this the model itself would pile up their families
+    if (registered_.size() >= pruneAt_) {
+      std::erase_if(registered_, [](const auto& item) { return item.second.first.expired(); });
+      pruneAt_ = std::max<size_t>(1024, registered_.size() * 2);
+    }
+
     registered_[&node->getFamily()] = {node->getFamilyShared(), style.id};
     queue_.push_back({node, &style, first ? std::optional<std::string>(renderTheme) : std::nullopt});
   }
@@ -309,6 +315,7 @@ private:
   std::shared_ptr<const ContextContainer> context_;
   std::vector<Pending> queue_;
   std::unordered_map<const ShadowNodeFamily*, std::pair<std::weak_ptr<const ShadowNodeFamily>, int64_t>> registered_;
+  size_t pruneAt_ = 1024;
 };
 
 } // namespace harness
