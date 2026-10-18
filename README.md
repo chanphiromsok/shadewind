@@ -90,7 +90,7 @@ hold (shadows, transforms, safe-area and screen units, data / rtl variants) is s
 | Export | |
 |---|---|
 | `configure({ themes, initialTheme, onUnsupported })` | declare themes once, before the first render |
-| `setTheme(name, { transition? })` / `getTheme()` | switch / read; `transition: { type: 'fade', durationMs }` cross-fades (see below) |
+| `setTheme(name, { transition? })` / `getTheme()` | switch / read; `transition: { type: 'fade', durationMs }` cross-fades (see below). With the Uniwind adapter active it calls `Uniwind.setTheme`, so Uniwind's subscribers re-render as usual |
 | `setDefaultTransition(t)`, `configure({ transition })` | the transition for every switch that passes none, Uniwind's `setTheme` included |
 | `useTheme()` / `subscribe(fn)` | the current theme as React state, for UI the engine does not update |
 | `followSystem(map?)` | follow the OS appearance (an explicit `setTheme` stops it) |

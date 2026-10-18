@@ -124,6 +124,11 @@ let config: Config | null = null;
 let defaultTransition: ThemeTransition | undefined;
 let current: string | null = null;
 let stopFollowing: (() => void) | null = null;
+// Set by shadewind/uniwind: an explicit setTheme goes to Uniwind, whose listener brings the engine along (applyUniwindTheme).
+let themeDriver: ((name: string) => void) | null = null;
+// The setTheme call the driver is running, so its listener uses the call's transition and keeps followSystem; Uniwind notifies
+// synchronously.
+let driving: { transition: ThemeTransition | false | undefined } | null = null;
 const listeners = new Set<(theme: ThemeName) => void>();
 
 const assertConfigured = (): Config => {
@@ -280,8 +285,48 @@ const applyTheme = (
  * blurs the old screen first.
  */
 export function setTheme(name: ThemeName, options?: SetThemeOptions): void {
+  const transition = options?.transition;
+
   stopFollowing?.();
-  applyTheme(name, undefined, options?.transition);
+
+  if (!themeDriver) {
+    applyTheme(name, undefined, transition);
+
+    return;
+  }
+
+  // checked before the driver runs: its listener only warns, so a throw there would leave Uniwind switched and the engine not
+  if (!assertConfigured().themes.includes(name)) {
+    throw new ShadewindError(
+      'UNKNOWN_THEME',
+      `theme '${name}' was not declared`
+    );
+  }
+
+  nativeTransition(transition);
+
+  // Called even when the engine is on `name` already: Uniwind decides whether it changes, so both end on the same theme.
+  driving = { transition };
+
+  try {
+    themeDriver(name);
+  } finally {
+    driving = null;
+  }
+
+  // Uniwind was on `name` already while the engine was not, so it notified nobody
+  if (current !== name) {
+    applyTheme(name, undefined, transition);
+  }
+}
+
+/**
+ * For shadewind/uniwind: routes setTheme through Uniwind's setTheme, so Uniwind and the engine never hold different themes.
+ * Not part of the public API.
+ * @internal
+ */
+export function setThemeDriver(driver: ((name: string) => void) | null): void {
+  themeDriver = driver;
 }
 
 /**
@@ -290,8 +335,11 @@ export function setTheme(name: ThemeName, options?: SetThemeOptions): void {
  * @internal
  */
 export function applyUniwindTheme(name: ThemeName): void {
-  stopFollowing?.();
-  applyTheme(name, 'hookDeferred');
+  if (!driving) {
+    stopFollowing?.();
+  }
+
+  applyTheme(name, 'hookDeferred', driving?.transition);
 }
 
 /** Follows the OS appearance. An explicit setTheme() stops following. Returns an unsubscribe. */

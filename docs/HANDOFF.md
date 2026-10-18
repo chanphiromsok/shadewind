@@ -25,7 +25,8 @@ What changed (all in the branch above):
 2. **`hookDeferred`** (new `setTheme` strategy, `cpp/HybridShadewind.cpp`, `src/internal.tsx`, `applyUniwindTheme` in `src/index.tsx`,
    used by `src/uniwind/install.ts`): the commit runs on the JS thread but is mounted with `mountSynchronously = false`, i.e. queued on the
    RuntimeScheduler with React's own commit of the same task. Engine-bound views and views React re-renders (LinearGradient colours)
-   then change in the same frame. It is applied on iOS and Android. The public `setTheme` default is still `hookAsync`.
+   then change in the same frame. It is applied on iOS and Android. The public `setTheme` default is still `hookAsync`
+   (with the Uniwind adapter active, `setTheme` goes through `Uniwind.setTheme` and so uses `hookDeferred` too).
 3. **Podspec / package.json**: `cpp/harness`, `cpp/tests`, `cpp/experiments` are no longer compiled into the app (the gtest files broke
    the first iOS app build) nor packed.
 4. **Harness**: Android mode feeds signed colours and decodes them as Java does; new test `AndroidColours.CssStringsSurviveJavaDoubleToInt`.

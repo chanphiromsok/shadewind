@@ -47,4 +47,23 @@ ok('setDefaultTransition validates', () => assert.throws(() => api.setDefaultTra
 ok('configure({transition}) validates (Opus fix)', () => assert.throws(() => api.configure({ themes: ['light', 'dark'], initialTheme: 'light', transition: { type: 'x' } }), (e) => e.code === 'UNKNOWN_TRANSITION'));
 ok('blur is accepted and passed to the engine', () => { api.setTheme('dark'); api.setTheme('light', { transition: { type: 'blur', durationMs: 400 } }); assert.deepStrictEqual(last()[2], { type: 'blur', durationMs: 400 }); });
 ok('blur as the default is used by the Uniwind path', () => { api.setDefaultTransition({ type: 'blur' }); api.applyUniwindTheme('dark'); assert.deepStrictEqual(last(), ['dark', 'hookDeferred', { type: 'blur', durationMs: 250 }]); api.setDefaultTransition(undefined); });
+
+// shadewind/uniwind installs a driver: setTheme goes to Uniwind, whose listener calls applyUniwindTheme. The fake is Uniwind 1.12's
+// setTheme: no notify when it is on that theme already, otherwise a synchronous notify.
+api.setTheme('light');
+const uniwind = { current: 'light', setTheme(name) { if (name === uniwind.current) return; uniwind.current = name; api.applyUniwindTheme(name); } };
+assert.strictEqual(typeof api.setThemeDriver, 'function', 'setThemeDriver is exported');
+api.setThemeDriver((name) => uniwind.setTheme(name));
+const fade = { type: 'fade', durationMs: 250 };
+ok('driver: setTheme with fade moves Uniwind and the engine together (deferred, with the transition)', () => { api.setTheme('dark', { transition: fade }); assert.strictEqual(uniwind.current, 'dark'); assert.deepStrictEqual(last(), ['dark', 'hookDeferred', fade]); assert.strictEqual(api.getTheme(), 'dark'); });
+ok('driver: a later Uniwind.setTheme reaches the engine (the reported bug)', () => { uniwind.setTheme('light'); assert.strictEqual(api.getTheme(), 'light'); assert.deepStrictEqual(last(), ['light', 'hookDeferred', undefined]); });
+ok('driver: no options uses the default transition', () => { api.setDefaultTransition({ type: 'blur', durationMs: 300 }); api.setTheme('dark'); assert.deepStrictEqual(last(), ['dark', 'hookDeferred', { type: 'blur', durationMs: 300 }]); });
+ok('driver: transition:false overrides the default', () => { api.setTheme('light', { transition: false }); assert.deepStrictEqual(last(), ['light', 'hookDeferred', undefined]); api.setDefaultTransition(undefined); });
+ok('driver: a bad preset throws before Uniwind switches', () => { const before = calls.length; assert.throws(() => api.setTheme('dark', { transition: { type: 'spin' } }), (e) => e.code === 'UNKNOWN_TRANSITION'); assert.strictEqual(uniwind.current, 'light'); assert.strictEqual(calls.length, before); });
+ok('driver: an undeclared theme throws before Uniwind switches', () => { assert.throws(() => api.setTheme('drak'), (e) => e.code === 'UNKNOWN_THEME'); assert.strictEqual(uniwind.current, 'light'); });
+ok('driver: Uniwind already on the theme, engine not: the engine is brought to it', () => { uniwind.current = 'dark'; api.setTheme('dark', { transition: fade }); assert.strictEqual(api.getTheme(), 'dark'); assert.deepStrictEqual(last(), ['dark', undefined, fade]); });
+ok('driver: engine already on the theme, Uniwind not: Uniwind is still asked', () => { uniwind.current = 'light'; api.setTheme('dark'); assert.strictEqual(uniwind.current, 'dark'); assert.strictEqual(api.getTheme(), 'dark'); });
+ok('driver: setTheme through the driver does not stop a later applyUniwindTheme', () => { uniwind.setTheme('light'); assert.strictEqual(api.getTheme(), 'light'); });
+api.setThemeDriver(null);
+ok('driver removed: setTheme is engine-only again', () => { api.setTheme('dark'); assert.deepStrictEqual(last(), ['dark', undefined, undefined]); assert.strictEqual(uniwind.current, 'light'); });
 console.log(n + ' checks passed');

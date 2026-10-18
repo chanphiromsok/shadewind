@@ -55,7 +55,7 @@ const probe = (): InstallResult => {
   internals = { UniwindStore, UniwindListener, StyleDependency };
 
   const { Uniwind } = require('uniwind') as {
-    Uniwind: { currentTheme: string };
+    Uniwind: { currentTheme: string; setTheme: (name: string) => void };
   };
   const version = String(
     (require('uniwind/package.json') as { version?: string }).version
@@ -102,6 +102,9 @@ const probe = (): InstallResult => {
       }
     }
   }, [StyleDependency.Theme]);
+
+  // shadewind's own setTheme goes through Uniwind too: one source of truth, the listener above brings the engine along
+  shadewind.setThemeDriver((name) => Uniwind.setTheme(name));
 
   // cache misses of Uniwind's getStyles resolve natively once the class table is built (nativeResolver.ts)
   installNativeResolver(
