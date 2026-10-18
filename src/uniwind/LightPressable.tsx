@@ -8,7 +8,7 @@ import { Pressable as RNPressable, type PressableProps } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import { useUniwindContext } from 'uniwind-internal/core/context';
 import { getInternals } from './install';
-import { NativeView, TextAncestorContext } from './native';
+import { NativeView, TextAncestorContext, withUserStyle } from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 
 type Props = PressableProps & { className?: string };
@@ -68,7 +68,8 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
     const ref = useEngineRef(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed
+      onRegisterFailed,
+      true // pause() / resume() around a press (below)
     );
     const [pressed, setPressed] = useState(false);
     const handlers = usePressability(
@@ -109,7 +110,7 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
         ];
       }
 
-      return [style, user];
+      return withUserStyle(style, user);
     };
 
     if (!light) {

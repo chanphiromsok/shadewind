@@ -93,9 +93,15 @@ struct Instance {
   }
 };
 
+// The screen the tree is laid out for: the pixel density and, for RTL apps, whether left/right styles are swapped
+struct Screen {
+  Float pointScaleFactor = 1;
+  bool rtl = false;
+};
+
 class FakeReact {
 public:
-  explicit FakeReact(SurfaceId surface = 1) : surface_(surface) {
+  explicit FakeReact(SurfaceId surface = 1, Screen screen = {}) : surface_(surface) {
     // this thread is the JS thread: in a bridgeless app ReactInstance sets this before running JS (ReactInstance.cpp)
     ShadowNode::setUseRuntimeShadowNodeReferenceUpdateOnThread(true);
 
@@ -115,8 +121,13 @@ public:
 
     constraints.minimumSize = {.width = 390, .height = 844};
     constraints.maximumSize = {.width = 390, .height = 844};
+    constraints.layoutDirection = screen.rtl ? LayoutDirection::RightToLeft : LayoutDirection::LeftToRight;
 
-    tree_ = std::make_unique<ShadowTree>(surface_, constraints, LayoutContext{}, delegate_, *context_);
+    LayoutContext layout;
+
+    layout.pointScaleFactor = screen.pointScaleFactor;
+    layout.swapLeftAndRightInRTL = screen.rtl;
+    tree_ = std::make_unique<ShadowTree>(surface_, constraints, layout, delegate_, *context_);
     rootInstance_.type = "Root";
   }
 
@@ -177,6 +188,18 @@ public:
   void rerender(Instance& instance, const folly::dynamic& props) {
     setHandle(instance, cloneProps(*instance.node(), props));
     reparent(instance);
+    commitReact();
+  }
+
+  // React inserts a new child (appendChild on the clone made by cloneNodeWithNewChildren), and clones the ancestors.
+  void append(Instance& parent, Instance* child) {
+    child->parent = &parent;
+    parent.children.push_back(child);
+
+    const auto& node = *parent.node();
+
+    setHandle(parent, node.getComponentDescriptor().cloneShadowNode(node, {.children = childSet(parent), .runtimeShadowNodeReference = false}));
+    reparent(parent);
     commitReact();
   }
 

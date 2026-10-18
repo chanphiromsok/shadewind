@@ -1,5 +1,205 @@
 # Theme-change benchmark: this engine vs Uniwind
 
+## On screen, frame by frame (2026-10-18, latest code)
+
+![One theme switch of 2003 views, frame by frame](assets/benchmark-frames.png)
+
+The Uniwind `uniwind-benchmarks` theme screen (header card + 1000 items = 2003 views) in `example-real` with `-theirBench theme`,
+Release build with dev tools on, iPhone 17 Pro simulator (iOS 26.5), code at `1a54fa6` plus a local `-mainProbe` option in
+`example-real/src/bench/TheirBench.tsx` (not committed). Plain Uniwind is `bash scripts/arm.sh plain && REAL_PLAIN=1 ...`, the engine is
+`bash scripts/arm.sh engine`; `hookAsync` is `-uniwindStrategy hookAsync`. For each row: one cold launch discarded, then six warm launches.
+
+**JS thread busy** (the "JS idle avg" of each launch; the median of the six is the last column). It leaves out the main thread's mount,
+and for `hookAsync` its background commit, so read it as JS time, not as switch time:
+
+| Build / strategy | Six warm launches (ms) | Median | Result line |
+|---|---|---|---|
+| Plain Uniwind | 108.40, 107.95, 106.11, 102.74, 107.93, 108.95 | **107.94** | "no engine report (plain arm)" |
+| `hookDeferred` | 2.81, 2.65, 3.10, 3.24, 3.00, 3.11 | **3.05** | `registered=treeOK=viewOK=layerOK=2003` |
+| `hookAsync` | 0.10, 0.10, 0.12, 0.11, 0.11, 0.11 | **0.11** | `registered=treeOK=viewOK=layerOK=2003` |
+
+**New theme on screen.** One screen recording per row (`xcrun simctl io booted recordVideo`, a variable-frame-rate video with about
+8 ms timestamp resolution). In each switch the page background flips first, then the 2003 cells follow. 0 ms is the first changed frame,
+which we take as the `setTheme` call (we did not observe the call itself; plain Uniwind's gap matching its JS time supports it, it does
+not prove it). The gap is the time until the cells change, for each of the 10 switches of the recording:
+
+| Row | Gap per switch (ms) | Median |
+|---|---|---|
+| Plain Uniwind | 108, 103, 112, 107, 127, 118, 118, 110, 123, 107 | **111** |
+| `hookDeferred` | 67, 58, 57, 57, 57, 58, 55, 57, 58, 57 | **57** |
+| `hookAsync` | 78, 60, 57, 53, 57, 57, 55, 60, 57, 57 | **57** |
+
+What it shows:
+
+- Plain Uniwind: the screen waits for the JS work (about 108 ms) and then for the main thread.
+- `hookAsync` frees the JS thread (0.11 ms), but the cells appear at the same time as with `hookDeferred`: about 57 ms. The first switch
+  of a recording is a little slower for both (67 and 78 ms).
+- Where the 57 ms goes is not traced. An earlier run with the main-thread busy probe (`-mainProbe 1`: the longest stretch the main run
+  loop stays awake after each switch, read 300 ms later; one launch each, before the latest pull) gave a median of 74.6 ms for
+  `hookDeferred` and 71.6 ms for `hookAsync`, so it looks like native main-thread work. That is a reading of one measurement, not a finding.
+
+Earlier recordings on the previous build (before the latest pull): plain 127 ms, `hookDeferred` 58 ms, `hookAsync` 62 ms, `hookAsync` with
+a `useCSSVariable` reader 59 ms. With the reader, the reader's text changed in the same frame as the cells (checked by eye on one switch
+per strategy). With the reader the JS time of `hookAsync` was about 12.3 ms on that build (plain with the reader 124.03 ms,
+`hookDeferred` with the reader 3.79 ms); these were not re-run on the latest code.
+
+Caveats: one simulator, not a device. One recording per row (median of 10 switches), not six. The anchor for 0 ms is an assumption (above).
+The filmstrip shows one switch per row, the one closest to that row's median. The frame-extraction scripts are not in the repository yet.
+We have not measured other libraries on a device, so we make no claim against them.
+
+## Four numbers per strategy (2026-10-18, earlier build, `example/` app)
+
+> **Superseded for the on-screen question.** The "until the new theme is mounted" (10.3 ms) and "+5.7 ms at the next commit" figures
+> below come from a different probe (a React commit in the `example/` app). The screen recordings above show the cells changing about
+> 57 to 62 ms after the first changed frame for `hookAsync`, and the check counted 2002 views here but 2003 in `example-real`. We have not
+> reconciled the two; trust the recordings for what is on screen.
+
+One switch of the 2003-view screen, measured with the example in this repository (`example/src/TheirBench.tsx`, which ports the Uniwind
+example and adds the main-thread and next-commit timings). Release build with dev tools on (the measurement costs one extra
+main-thread hop), iPhone 17 Pro simulator, code at `9ee5b93`. For each strategy: one cold launch discarded, then warm launches; the
+median of the per-launch values is shown.
+
+| Strategy | 1. JS thread busy (6 warm) | 2. Until the new theme is mounted (6 warm) | 3. React commit after the switch, against a commit with no switch (3 warm) | 4. Correctness |
+|---|---|---|---|---|
+| `hook` | 4.12 ms (3.46, 4.67, 4.45, 3.95, 4.10, 4.14) | not measured by the app | 0.62 to 0.66 ms against 0.79 to 0.82 ms: no extra cost | 2002 / 2002 / 2002 |
+| `hookAsync` | 0.07 ms (0.06, 0.07, 0.06, 0.07, 0.09, 0.08) | 10.32 ms (9.72, 10.82, 9.68, 9.82, 11.52, 10.83) | 6.56 ms (6.42, 6.81, 6.56) against about 0.84 ms: **+5.7 ms** on the JS thread | 2002 / 2002 / 2002 |
+| `hookDeferred` | 2.53 ms (Uniwind example, earlier build) | not measured | not measured | see the diagnostics check below |
+| Plain Uniwind | 100.69 ms (Uniwind example) | not measured | not measured | n/a |
+
+Number 4 is the `treeOK / viewOK / layerOK` line the example prints after each run: shadow tree, native `UIView` colour and layer colour
+of every registered view against the expected theme.
+
+The `hookAsync` JS-thread figure here (0.07 ms) is higher than the 0.04 ms in the "Current run" section below: it is a different app (this repository's example, not the Uniwind one) and has dev tools on.
+
+What it means:
+
+- **JS thread free is not the same as on screen.** With `hookAsync` the JS thread is free after 0.07 ms, but the new theme is mounted
+  about 10.3 ms after the call, and the next React commit pays about 5.7 ms to theme the views again on the JS thread. Adding the
+  two JS costs gives about 5.8 ms, in the same range as `hook` (4.12 ms): `hookAsync` moves the work to the next commit, it does not
+  remove it. What it buys is that the JS thread is free at the moment of the switch (for an animation, for example).
+- **`hook` leaves nothing for later.** The commit after a synchronous switch costs the same as any commit.
+- **Caveats.** The next-commit number is the median of three warm launches, not six. "Mounted" is not reported for `hook`. The
+  probe (`-commitProbe 1`) makes its own React commit 100 ms after each switch, so numbers 1 and 2 come from separate runs without it.
+  The `hookDeferred` row was not re-measured in this example, and one simulator is not a device.
+
+## Current run (2026-10-18): the Uniwind benchmarks example
+
+> For when the new theme is on screen, the recordings in the first section of this page are newer: the statements below about the
+> time until the theme is mounted come from the `example/` app's own probe and have not been reconciled with them.
+
+Thank you to the Uniwind team for publishing [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks). We used its
+theme-change example as it is, so anyone can repeat the measurement. The screen is a header card plus 1000 items (2003 views),
+mounted once and then switched between light and dark 10 times; each change is timed from `Uniwind.setTheme` until the JavaScript
+thread is idle again, and the app shows the average.
+
+| | Warm launches | Median of 6 |
+|---|---|---|
+| Uniwind 1.12.0 (the example, unmodified) | 93.08 / 101.07 / 100.48 / 101.94 / 99.88 / 100.90 ms | **100.69 ms** |
+| Uniwind 1.12.0 with shadewind (same example) | 2.42 / 2.62 / 2.53 / 2.53 / 2.46 / 2.60 ms | **2.53 ms** |
+
+Rendering (the example's other scenario: the 2003-view list re-mounted 10 times, started without `-benchmarkScenario`), run on the
+code at `9ee5b93` ("cheaper registration"), three builds measured back to back, same protocol (one cold launch discarded, six warm,
+median):
+
+| | Warm launches (ms) | Median of 6 |
+|---|---|---|
+| Uniwind 1.12.0, the example unmodified | 61.66 / 62.29 / 61.92 / 61.83 / 61.90 / 61.44 | **61.86 ms** |
+| shadewind adapter with the engine off (`__SHADEWIND_ENGINE_OFF__`) | 55.23 / 56.71 / 56.26 / 56.11 / 56.25 / 56.85 | **56.25 ms** |
+| shadewind as normal | 61.70 / 60.29 / 62.67 / 60.34 / 62.37 / 62.39 | **62.03 ms** |
+
+Reading it:
+
+- **Mounting with the engine is level with plain Uniwind** (62.03 against 61.86 ms, a difference inside the run-to-run spread). Before the
+  registration changes the same measurement was 64.44 against 61.30 ms, about 5% slower.
+- **The adapter's own views are cheaper than Uniwind's** (56.25 ms), and what the engine adds at mount costs about 5.8 ms here,
+  which cancels that gain. That 5.8 ms is everything the engine-off switch turns off, not only the registration: the per-view plan
+  lookup, React attaching a ref (and creating the public instance) for each themed view, registration in JS and in C++, and the native
+  class resolver.
+- Switching is much faster either way (see the table above).
+
+The example's authors publish about 60.7 ms for plain Uniwind rendering, close to the 61.86 ms measured here. The engine-off build
+exists to measure cost only: with the engine inactive, views do not follow a theme switch (a known gap, see
+[ARCHITECTURE.md](ARCHITECTURE.md), "Mount cost"). To repeat the runs yourself, see
+[DEMO.md](DEMO.md).
+
+Same screen and method, with the strategy as the only difference (both Release, code at `9ee5b93` for `hookAsync`):
+
+| Strategy | Warm launches (ms) | Median of 6 |
+|---|---|---|
+| `hookDeferred` (what `Uniwind.setTheme` uses through the adapter) | 2.42 / 2.62 / 2.53 / 2.53 / 2.46 / 2.60, measured on the build before the registration changes | **2.53 ms** |
+| `hookAsync` (the engine's own `setTheme`, the commit runs off the JS thread) | 0.03 / 0.04 / 0.03 / 0.04 / 0.03 / 0.04 (the app shows two decimals) | **about 0.04 ms** |
+
+For `hookAsync` the example's `setTheme` was changed to `ShadewindEngine.setTheme(theme, 'hookAsync')` (from `shadewind/internal`); nothing
+else differs. A recording of one run shows the screen flipping between the two themes ten times, so the switches really happen.
+`hookAsync` does not tell Uniwind about the change, so Uniwind's own state stays on the first theme; that does not matter for this screen,
+where every themed view is driven by the engine, but an app should use the adapter path (`Uniwind.setTheme`) instead.
+
+The `hookDeferred` row was not re-run on the latest code; the registration changes affect mounting, not the switch, but treat it as
+the older build.
+
+How it was run, following the example's own method: Release build, React Native 0.86.3, iPhone 17 Pro simulator (iOS 26.5), one
+cold launch discarded, then six warm launches (terminate and relaunch) started with `-benchmarkScenario theme`; the table shows the
+median of the six. Uniwind without shadewind measured close to the 104 ms the example's authors publish for the same version, which
+is a good sign that the machine is comparable.
+
+The example's code is untouched. Two things were added for the shadewind run: `withShadewind` in `metro.config.js`
+(`require('shadewind/metro')`) and a call to `installUniwind()` from `shadewind/uniwind` in `index.js`.
+
+To check that the engine really drives the screen, a Debug build of the same app with `shadewind/diagnostics` reported 2007 views
+registered, 2007 of 2007 matching the theme in the shadow tree, in the native `UIView` colours and in the layer colours, and no
+stale views, in light and after switching to dark. A screen recording of the Release run shows the whole screen switching between
+light and dark ten times.
+
+What this does not show:
+
+- **Time until pixels.** The metric stops when the JavaScript thread is idle, before the main thread has finished mounting the change,
+  so the real time until the screen shows the new theme is longer than 2.53 ms. We have not measured that remaining time on this
+  build. The recording shows the screen switching, but it is not a frame-accurate measurement.
+- **Which strategy.** The example calls `Uniwind.setTheme`, which the adapter applies as `hookDeferred`: the engine makes no commit of its
+  own and the theme rides the React commit the switch causes, on the JS thread. So the 2.53 ms includes the engine's work. With `hookAsync`
+  (the engine's own `setTheme`, commit off the JS thread) the JS thread is free almost at once (about 0.04 ms), but the work happens
+  on another thread, so the time until the screen updates is longer than that number, and we have not measured it on this build.
+- **A device.** It is one iOS simulator, one machine, six launches. A phone will be slower, and Android was not measured here.
+- **Your app.** The example is a flat list of themed views. A real app also spends time in components that read theme values, and
+  that part is not sped up (see [KNOWN_LIMITS.md](KNOWN_LIMITS.md)).
+
+To reproduce: clone the Uniwind benchmarks, install only the `uniwind` app, build it in Release, and run it with
+`-benchmarkScenario theme`; then add those two changes and run the same steps again.
+
+## Uniwind with hookAsync (how to measure it)
+
+The Uniwind adapter switches the engine with `hookDeferred`. `hookAsync` can be measured on the same `className` app without leaving
+Uniwind behind: `Uniwind.setTheme` still drives the switch, only the engine's strategy changes. Do not call
+`ShadewindEngine.setTheme(name, 'hookAsync')` directly for this: Uniwind then stays on the old theme, and so does everything it renders.
+
+1. App: `uniwind-benchmarks/apps/uniwind` with the two shadewind lines (above), Release, the same simulator for every arm. Or, in this
+   repository, example-real's port of the same scenario with `className`s: `-theirBench theme` (plain arm: `scripts/arm.sh plain` and
+   `REAL_PLAIN=1`; `-uniwindStrategy hookAsync` for the third arm; `-theirBenchReader 1` for step 5; `example-real/README.md`).
+2. Arms, built back to back, one cold launch discarded, six warm launches each, median:
+   - plain Uniwind;
+   - shadewind as is (`hookDeferred`);
+   - shadewind with `globalThis.__SHADEWIND_UNIWIND_STRATEGY__ = 'hookAsync';` as the first line of `index.js` (measuring only).
+3. For each arm run the theme scenario (`-benchmarkScenario theme`) and note the example's number (until the JavaScript thread is idle).
+4. Read it right: with `hookAsync` the engine's commit runs on a background thread (iOS; Android commits on the JavaScript thread
+   anyway), so the example's number leaves it out, and the main thread's mount too. The screen still updates about 10 ms after the
+   call (measured on the iOS simulator with the plain-API example, `visualMs`). Report it as "JavaScript free after X ms", never as the
+   switch time.
+5. What the example hides, and a second variant that shows it: its screen has nothing React re-renders on a switch. Add one component
+   that reads the theme (for example a `Text` whose colour comes from `useCSSVariable`) and measure again. With `hookAsync` that
+   component and the engine's views change in different frames, and the React commit it causes re-themes every view on the
+   JavaScript thread (views changed off the JavaScript thread are not React's own; harness, 2003 views: 8.4-9.9 ms, against 1.3-1.4
+   ms after a switch on the JavaScript thread).
+6. Time to the screen, the only measure fair to every arm: record the simulator (`xcrun simctl io booted recordVideo out.mp4`) and
+   count the frames from one switch to the next change on screen (per-frame brightness with ffmpeg `signalstats`, as in
+   `THEME_TRANSITION_TESTS.md`). A 60 Hz recording resolves 16.7 ms: it tells "same frame or N frames later", not milliseconds.
+7. Check correctness once per arm with a Debug build and `shadewind/diagnostics`: every registered view matches the theme after a
+   switch.
+
+## Earlier runs
+
+The tables below are older runs from earlier builds. They call the engine's own `setTheme` strategies directly and are kept for reference.
+
+
 Scenario: the `uni-stack/uniwind-benchmarks` theme-change screen. 2003 views (header card + 1000 items, item text themed too),
 mounted once, then switched dark/light 10 times, 100 ms apart. Each change is timed from the theme call until the JS thread is
 idle (`performance.now()` + `requestIdleCallback`), the app shows the average.

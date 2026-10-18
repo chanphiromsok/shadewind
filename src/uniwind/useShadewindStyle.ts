@@ -185,6 +185,10 @@ const plan = (
 
   renderThemeOf.set(themed, UniwindStore.runtime.currentThemeName);
 
+  if (__DEV__) {
+    engine().label(themed, `className: "${className}"`);
+  }
+
   return decide(themed as unknown as ThemedStyles, 'engine');
 };
 
@@ -246,6 +250,36 @@ export const nonThemeDeps = (current: Resolved, theme: number): number[] => {
   return deps;
 };
 
+// The subscription of a view with an accent className (Text's selectionColorClassName): the non-theme dependencies of its style plus
+// every dependency of the accent, the theme included (Uniwind's useAccentColor re-renders on a theme change, so does this). One array
+// per pair of resolutions, so the layout effect does not subscribe again on every render.
+const accentDepsCache = new WeakMap<object, WeakMap<object, number[]>>();
+const accentDeps = (
+  current: Resolved,
+  accent: Resolved,
+  theme: number
+): number[] => {
+  let byAccent = accentDepsCache.get(current);
+
+  if (!byAccent) {
+    byAccent = new WeakMap();
+    accentDepsCache.set(current, byAccent);
+  }
+
+  let deps = byAccent.get(accent);
+
+  if (!deps) {
+    deps = [
+      ...new Set([...nonThemeDeps(current, theme), ...accent.dependencies]),
+    ];
+    byAccent.set(accent, deps);
+  }
+
+  return deps;
+};
+
+let warnedAccent = false;
+
 const warnUnbound = () => {
   if (debugOn()) {
     console.warn(
@@ -266,7 +300,10 @@ const useContext = () =>
 export const useShadewindStyle = (
   className: string | undefined,
   props: Record<string, any>,
-  state?: State
+  state?: State,
+  // Text's selectionColorClassName, resolved here rather than with Uniwind's useAccentColor: that is three more hooks and a layout
+  // effect for every Text, used or not
+  accentClassName?: string
 ) => {
   'use no memo';
 
@@ -297,7 +334,27 @@ export const useShadewindStyle = (
   const planned = active
     ? cachedPlan(className, props, state, context, current, hasInlineOverlap)
     : NO_PLAN;
-  const deps = nonThemeDeps(current, StyleDependency!.Theme);
+  const accent = accentClassName
+    ? UniwindStore!.getStyles(accentClassName, props, state, context)
+    : null;
+  const deps = accent
+    ? accentDeps(current, accent, StyleDependency!.Theme)
+    : nonThemeDeps(current, StyleDependency!.Theme);
+  const accentColor = accent
+    ? (accent.styles as { accentColor?: string }).accentColor
+    : undefined;
+
+  if (
+    __DEV__ &&
+    accentClassName?.trim() &&
+    accentColor === undefined &&
+    !warnedAccent
+  ) {
+    warnedAccent = true;
+    console.warn(
+      `[shadewind] selectionColorClassName '${accentClassName}' has no accent colour (use an accent-* class)`
+    );
+  }
 
   useLayoutEffect(
     () =>
@@ -310,12 +367,15 @@ export const useShadewindStyle = (
     style: current.styles,
     themed: planned.themed,
     onRegisterFailed: warnUnbound,
+    accentColor,
   };
 };
 
+// `pause` / `resume` exist only on a pausable ref (a Pressable's): adding properties to a function object is slow on Hermes (about
+// 0.7 us per view on a desktop VM, a third of a mount's registration work), so the other components get the plain function.
 type EngineRef = ((node: unknown) => void) & {
-  pause(): void;
-  resume(): void;
+  pause?(): void;
+  resume?(): void;
 };
 
 type RefHolder = {
@@ -329,7 +389,8 @@ type RefHolder = {
 const makeHolder = (
   themed: ThemedStyles,
   user: Ref<unknown> | undefined,
-  onRegisterFailed: (() => void) | undefined
+  onRegisterFailed: (() => void) | undefined,
+  pausable: boolean
 ): RefHolder => {
   let registered: unknown = null;
   let attached: unknown = null;
@@ -370,6 +431,12 @@ const makeHolder = (
     }
   };
 
+  if (!pausable) {
+    holder.ref = ref;
+
+    return holder;
+  }
+
   holder.ref = Object.assign(ref, {
     // a Pressable unbinds the view while it is pressed (React draws the pressed style) and binds it again on release
     pause() {
@@ -391,12 +458,13 @@ const makeHolder = (
 
 /**
  * The ref for an engine view: registers on attach and forwards to the user's ref. A view that is not bound gets the user's own
- * ref back unchanged, so React attaches nothing for it. The ref also carries `pause()` / `resume()` (Pressable).
+ * ref back unchanged, so React attaches nothing for it. With `pausable` the ref also carries `pause()` / `resume()` (Pressable).
  */
 export const useEngineRef = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
-  onRegisterFailed?: () => void
+  onRegisterFailed?: () => void,
+  pausable = false
 ): any => {
   const holder = useRef<RefHolder | null>(null);
 
@@ -416,7 +484,12 @@ export const useEngineRef = (
       h.superseded = true;
     }
 
-    h = holder.current = makeHolder(themed, userRef, onRegisterFailed);
+    h = holder.current = makeHolder(
+      themed,
+      userRef,
+      onRegisterFailed,
+      pausable
+    );
   }
 
   return h.ref;

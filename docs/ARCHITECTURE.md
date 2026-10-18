@@ -576,6 +576,9 @@ pass-through `MountingOverrideDelegate` probe is the way to split the ~43 ms int
 `className`, inside the noise of a single launch; the 13 ms down to the static-host floor is not removed by it. Do not advertise `aot` or
 `LightPressable` as performance features. Not measured: several launches, a device, the JS-thread-only time.
 
+Removed on 2026-10-18 (`src/uniwind/aot.ts`, `shadewind/uniwind/aot`, example-real's `aot` variant): a second code path with no
+measured gain.
+
 ### 17d. Where the remaining mount time is, and the lighter Pressable (2026-10-15)
 
 Timers inside the adapter (a measurement build, not shipped), 30 cards, `className` path, app state before `freezeOnBlur`: React
@@ -750,3 +753,179 @@ requires the colour each Java view holds to be the theme's. All 18 tests pass in
 Not checked: the NDK compile of this version, JNI, Java, a device or emulator (`docs/LOCAL_TESTING.md` step 9). The class resolver's
 Android bundle is built and compiled by `hermesc` (section 19), not run. example-real's launch-argument benches use `Settings`,
 which is iOS-only.
+
+## 21. Performance review of the C++ paths, measured with callgrind (2026-10-18)
+
+Method: `BENCH_PROFILE=1 cpp/harness/build/harness_bench --runs 3` (the current engine on the 2003-view screen, one process) under
+`valgrind --tool=callgrind`, with `--toggle-collect` on one function at a time; instruction counts are stable on a noisy VM, wall
+times are medians of 3 runs (x86 Linux VM; a phone is slower). A temporary micro-benchmark timed the class resolver.
+
+Changed: **prewarm reuses the props React rendered.** A view registered with the theme React rendered it with already holds that
+theme's props (`ThemeHook::add`, `renderedWithCurrentTheme`), yet prewarm built a second copy of them through React Native's props
+parser (`copyProps`: the `Props(context, source, rawProps)` constructor walks every prop key with string comparisons; its copy
+constructor is deleted). Now `produced[currentTheme] = base` there, and only there (props React gives later may carry an older
+theme). Harness test `SwitchBackReusesTheRenderedPropsWithoutACopy`; a mutant without the guard fails
+`ThemeChangeBeforeRefAttachIsAppliedByTheFlush`.
+
+| | before | after |
+|---|---|---|
+| prewarm instructions (5 mounts) | 948.6 M | 480.3 M (-49 %) |
+| props copies View / Text (5 mounts) | 10,010 / 10,030 | 5,005 / 5,015 |
+| prewarm wall time, median | 18.8-19.4 ms | 10.3-10.7 ms |
+| mount: refs attach + flush | 4.6-5.4 ms | 4.3-4.6 ms |
+| peak RSS of the run | 65.6 MB | 55.5 MB |
+| commit hook instructions (all commits of the run) | 216.25 M | 216.08 M (unchanged) |
+| switch, sync | 5.4-6.3 ms | 5.4-6.7 ms (unchanged: the cache hit either way) |
+
+Profiled and left alone:
+
+- **Class resolver** (`cpp/css/StyleResolver.hpp`): 0.155 us per `resolve` (about 340 instructions) over the 1531 class names of the
+  parity fixture, no allocation (F14's heterogeneous lookup takes the `string_view` tokens). Nothing worth changing.
+- **Theme switch commit**: about a third of the hook's instructions are React Native's own clone work, `yoga::Style::operator==`
+  in `YogaLayoutableShadowNode::updateYogaProps` (every clone with new props compares the whole Yoga style) and
+  `updateYogaChildren` for the ancestors cloned with new child lists. The engine's walk is about 5 %, `cloneThemed` under 1 %.
+- **Registration**: about 4 M instructions per mount, mostly freeing the entries of the previous mount (fewer props objects now).
+- **Done after Hermes was built here (same day):** the resolver's JSI glue created a `jsi::PropNameID` from a C string for every
+  key of every result. It now takes them from a per-runtime cache kept as JSI runtime data (`cpp/ResolveGlue.hpp`), which the
+  runtime releases when it is destroyed (Hermes does that first in its destructor, while the heap exists), rebuilt when another
+  table is loaded (`StyleResolver::generation`). Measured with `cpp/harness/hermes/glue.cpp` on the Hermes React Native 0.86.2 pins
+  (hermes-v250829098.0.16, Release, x86 VM), 3831 resolvable calls x 40 x 7 rounds: 952-1118 ns per call without the cache,
+  586-654 ns with it (-38 to -41 % over three runs; the C++ resolve itself is about 155 ns). Same program: first end-to-end run of
+  the glue's JS objects, 137,790 cases, 0 mismatches with Uniwind (a mutant of the glue makes all 114,930 resolved cases mismatch);
+  the cached glue returns the same objects as the uncached one on every call, also after a table reload; a second runtime created
+  and destroyed meanwhile; valgrind memcheck over a short run including both runtimes' teardown: 0 errors. JavaScriptCore was not
+  tried (the cache relies on JSI runtime data, which every JSI runtime implements).
+
+Release gating (same day): everything that exists to inspect or measure is now compiled only with `SHADEWIND_DEV_TOOLS`
+(`cpp/DevTools.hpp`; on in Debug, opt-in for measuring release builds). Checked in the harness: a release-configuration build
+(`-DHARNESS_RELEASE_CONFIG=ON`) passes 21 tests and skips the 10 that read stats or the recorder, by name; its binary has no
+`gReasons` / `gRecolored` symbols of the engine and no clock call in `ThemeHook::shadowTreeWillCommit` (the remaining ones belong to
+the frozen baseline engine); the hook runs 215.96 M instructions against 216.14 M with the tools in (the timers and counters were
+cheap, the point is that they do not ship). `HybridShadewind.cpp` and `ShadewindNative.cpp` compile with `-Wall` in both settings.
+Not measurable here: the iOS main-thread hop per hookAsync switch that only measured `visualMs`, now gone from release.
+
+Memory profile (valgrind massif, x86 VM, same day):
+
+- Growth: 900 cycles of mount / prewarm / two switches / unmount (102 themed views): the heap swings 1.3-5.2 MB inside each cycle;
+  the floor after unmount is 1.30 MB in the middle third and 1.33 MB in the last (purge thresholds settling), the peaks 4.8-5.2 MB
+  throughout. No growth. Test: `MemoryStaysFlatAcrossMountSwitchUnmountCycles`.
+- Peak of the 2003-view screen (33.9 MB, `BENCH_PROFILE=1`): the engine holds 6.7 MB of prewarmed props (3.6 MB Paragraph, 3.1 MB
+  View: one copy per view for the theme not on screen, about 3.1-3.6 KB each: a React Native props object is large) and 0.77 MB of
+  registry entries; React Native's own nodes and props of the screen about 10 MB. The prewarm cache is what makes a switch a cache
+  hit; its cost grows with the number of themes (one copy per view per other theme: about 16 KB per view with six themes). Building
+  lazily on the first switch, or only for the next likely theme, would trade switch time for this memory; not done.
+- Leak checks: valgrind --leak-check=full over harness_tests and hermes_glue: 0 bytes lost; AddressSanitizer + LeakSanitizer + UBSan
+  (`-DHARNESS_SANITIZE=ON`) over all harness tests and the current engine's bench: clean, after fixing a test that destroyed a commit
+  hook before the fake React's last commit (stack-use-after-scope in test code, not in the engine).
+
+`setTheme` no longer takes the hook's lock (same day). It publishes `(epoch << 8) | theme` in one atomic word; a commit folds it in
+once, at the start of its walk, and registration folds it in before it reads the theme. A background (iOS hookAsync) walk holds
+the lock for its whole duration, and setTheme used to wait for it: under continuous background commits on 2003 views, p99 6.5-7.1 ms,
+max 16.7-18.0 ms, about 350 of 1500 calls over 1 ms; now p99 1.6-2.1 us, max 25-57 us, none over 1 ms. Only iOS hookAsync gains:
+hookDeferred (the Uniwind adapter) and Android commit on the JS thread, which takes the lock anyway; registration and
+`flushPending` still wait for a background walk. Tests: `SetThemeDoesNotWaitForABackgroundWalk` (fails with the lock put back:
+setTheme took 122 ms), `ViewRegisteredAfterAnUncommittedSwitchIsFiledUnderThatTheme` (fails if registration does not fold the
+published theme in). ThreadSanitizer over all tests: no race (a non-atomic mutant of the published word is reported).
+
+The React commit after a switch (same day). The switch commit clones every themed view with new props and their ancestors with new
+child lists; React Native's clone constructor drops Yoga's "configured" flag on such clones, and since the switch changes no layout
+Yoga does not run in that commit, so the committed tree kept about 2000 unconfigured nodes. The next React commit, whatever it
+changed, then ran `configureYogaTree` over them, cloning each one again (`cloneChildInPlace`; callgrind: about 2000
+`yogaNodeCloneCallbackConnector` calls per commit). The hook now copies the flag from the node it clones when that node was
+configured and not RTL-swapped (`keepYogaConfigured` in `ThemeHook.hpp`, which documents why the copy is in the state
+`configureYogaTree` would leave it in). 2003-view screen, 3 runs each:
+
+| | without | with |
+|---|---|---|
+| next React commit after a switch on the JS thread (`hook`; also `hookDeferred` and Android) | 4.15-4.96 ms | 1.32-1.44 ms |
+| switch itself | 3.2-6.1 ms | 4.3-5.2 ms (unchanged, noise) |
+| first / second React commit after an iOS `hookAsync` switch | 9.2-10.4 / 0.94-1.10 ms | 8.4-9.9 / 0.93-1.00 ms (unchanged) |
+
+`hookAsync` does not gain: its background clones are not React's handles, so the first React commit after it re-themes every view
+on the JS thread anyway (that cost is the other open item). RTL apps that swap left/right styles do not gain either, by design.
+
+The flag is private; an explicit template instantiation names it (legal C++, binding to React Native 0.86.2: a rename fails to
+compile, a change of meaning would not). Guarded by three harness tests that compare every node's layout with plain React Native
+(point scale 1, 2.625, and RTL at 3) through mounts, switches, React re-renders of themed views while a switch is uncommitted, and
+new children inserted then; mutants: copying from an unconfigured source fails the 2.625 test, copying from a swapped source fails
+the RTL test, removing the fix passes them and brings the 4.2-5.0 ms back (`cpp/harness/README.md`, "Layout tests and their
+mutants"). Compiled only by the harness's clang 18 so far, not by Apple clang or the NDK.
+
+`hookDeferred` rides React's commit (same day). It used to commit on the JS thread and queue the mount on the RuntimeScheduler, so the
+mount landed with React's commit only when React rendered in the same task: a SyncLane render (a press handler) does. A switch from
+anywhere else (Uniwind's adaptive themes following the system appearance, an effect, a timer, after an `await`, the example-real
+meter) gives React's re-render the Default lane, which React schedules as a Normal-priority RuntimeScheduler task: the engine's views
+were mounted at the end of the switch's task, the colours React renders (`useResolveClassNames`, `useCSSVariable`, gradients) a task
+or more later. Now `hookDeferred` only publishes the theme; the hook applies it in the next commit, which is that React commit, so
+both change in one mount. A Low-priority task then commits each surface whose committed root does not carry the theme
+(`commitUnlessThemed`, which asks `ThemeHook::carriesTheme`: the committed root is a tree the hook returned for the latest epoch with
+no registration since; a commit that failed never becomes the committed root, so no counter can go wrong). Why Low is late enough,
+from the sources: React maps Default and Transition lanes to Normal priority, Continuous to UserBlocking, Idle to Idle
+(`ReactFabric-prod.js`, `scheduleTaskForRootDuringMicrotask`); `RuntimeScheduler_Modern` orders tasks by expiration time, Normal
+timing out after 5 s and Low after 10 s (`SchedulerPriorityUtils.h`), so a React render scheduled within 5 s of the switch, and every
+slice of one React splits, runs first. An Idle-lane render comes after the fallback (the fallback commits then, as before). Run, not
+only read: `cpp/harness/scheduler/order.cpp` drives React Native 0.86.2's `RuntimeScheduler_Modern` with a Hermes runtime (the
+pinned hermes-v250829098.0.16) and gets switch, UserBlocking render, Normal render, its Normal continuation, the Low fallback, then
+Idle; with the fallback at Normal priority the order differs (the check fails). Costs:
+the engine's views now wait for React's re-render (a slow subscriber render delays the whole switch); with nothing to re-render the
+switch waits for one scheduler turn. Any other commit made in between (Reanimated or the animation backend committing from the UI
+thread, the flush of a view registered meanwhile) carries the theme first, and the gap is back for that switch. Harness tests `Deferred*` (the switch makes no commit, the React commit shows every view
+themed and its root passes the transition's mount gate, the fallback is a no-op after it and commits when React did not, rapid
+toggles); mutants of `carriesTheme` (always true, always false, epoch ignored) each fail two or three of them. The `Deferred*` tests exercise `commitUnlessThemed` and
+`carriesTheme`; the `setTheme` path in `HybridShadewind.cpp` that schedules the fallback is syntax-checked with clang 18 only, not
+run. Not run on a device. A commit hook that clones the root after the engine's (Reanimated) makes `carriesTheme` false for every
+committed root, so the fallback then adds one full-walk commit per switch (time, not a visible change). The fallback's `carriesTheme`
+takes the hook's lock, so on iOS it can wait for a background (hookAsync) walk, once per switch, inside the Low task. The public `setTheme` without Uniwind keeps `hookAsync` on iOS: its
+background commit and the React render of `useTheme` subscribers can also land in different frames; not changed here.
+
+Mount cost (2026-10-18, reported: mounting the uniwind-benchmarks render scenario, 2003 views, took 64.44 ms with shadewind
+against 61.30 ms with plain Uniwind 1.12.0, median of 6 warm launches, iPhone 17 Pro simulator, iOS 26.5; measured by the owner).
+What the engine adds to a mount, found with the harness and Hermes:
+
+- The commit hook's walk inside the mount commit: React commits of the render scenario, 7 per run, 273.31 M instructions without
+  the engine, 274.70 M with it (about 0.2 M per mount, 0.5 %). Not the cost.
+- The native registration (`registerMany`, after the commit, on the JS thread): 21.24 M instructions for 5 mounts of 2003 views,
+  now 10.07 M (-53 %). A third of it was freeing the previous screen's entries (their prewarmed props) when the table crossed its
+  purge threshold: they are now moved aside and freed by the next prewarm, off the JS thread on both platforms (`_graveyard`; the
+  every-128-commits purge frees whatever is left, as a backstop). The rest: one lock per view (now one per batch, `addMany`), a
+  locked style-cache lookup per view (a 4-entry memo of the batch: a mount cycles through a handful of styles), resetting and
+  move-assigning a fresh entry (`try_emplace`), the prewarm queue regrowing every mount (prewarm hands its capacity back), and a 128 KB batch
+  vector allocated per call (kept). The table is `F14FastMap`, which falls back to `std::unordered_map` with `FOLLY_MOBILE=1` (as
+  React Native builds folly on iOS and Android): one node allocation per view remains.
+- The JS of registration (`src/internal.tsx`, `src/uniwind/useShadewindStyle.ts`), measured with a micro-benchmark on Hermes
+  (hermes-v250829098.0.16 CLI, `-O`, x86 VM; the logic copied, native and React stubbed): ref holders plus the register path cost
+  3.3-4.5 ms per 2003 views, of which 1.4-1.7 ms was `Object.assign(ref, { pause, resume })`, adding two methods to every ref
+  function (adding properties to a function object is slow on Hermes). Only a Pressable calls them; the other components now get
+  the plain function: 1.6-2.8 ms. The WeakMap bookkeeping (`registeredWith`, `attachedNodes`) stays: it is what keeps a re-attach
+  with other styles from claiming a render theme (the stale revealed tab of section 18).
+- Not measured here: React attaching a ref to each themed view (it creates the view's public instance), and the per-view work of
+  the adapter's components that plain Uniwind also has (hooks, `getStyles`).
+
+Owner's re-run at `9ee5b93` (same protocol, three builds back to back, iPhone 17 Pro simulator, iOS 26.5): plain Uniwind 61.86 ms,
+adapter with `__SHADEWIND_ENGINE_OFF__` 56.25 ms, shadewind 62.03 ms (`docs/BENCHMARK.md`). Level with plain within the run-to-run
+spread (about 2 ms between launches); the old build read 64.44 against 61.30 ms in an earlier session, so the two runs are not a
+same-session A/B. What the engine adds at mount is about 5.8 ms (arm 3 minus arm 2: plan lookup, refs and public instances,
+registration, native class resolver); the adapter alone is about 5.6 ms lighter than Uniwind's components. Still not run: a device,
+Android. Known gap shown by the engine-off arm: with the engine inactive, `useShadewindStyle` still drops the Theme dependency from
+its subscription, so views do not re-render on a theme switch, while `install.ts` documents the inactive case as behaving like plain
+Uniwind (not fixed yet).
+
+Before that run: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
+arms with the same protocol (`docs/LOCAL_TESTING.md` step 7): plain Uniwind, shadewind with `__SHADEWIND_ENGINE_OFF__` (the adapter
+alone; arm 3 minus arm 2 is then everything the engine adds, not only the registration), shadewind with the engine on.
+
+Adapter trim (2026-10-18), mount and re-render only (a switch renders no component, so none of this changes the time from a switch
+to the screen):
+
+- Text no longer calls Uniwind's `useAccentColor` (its `useStyle`: a context read, a reducer, a layout effect and a `getStyles` per
+  Text, used or not). `useShadewindStyle` resolves `selectionColorClassName` in the same render and adds the accent's dependencies,
+  the theme included, to its one subscription, so a Text with a theme-dependent accent still re-renders on a switch as with Uniwind.
+  Hooks per Text: 8 -> 5 (View: 4). One import of Uniwind internals less (`components/native/useAccentColor`).
+- The resolved style goes to the host as the single object Uniwind caches per className when there is no `style` prop, instead of
+  a new `[style, props.style]` array per render (View, Text, TouchableOpacity, the Pressable, `withUniwind`).
+- `shadewind/uniwind/aot` removed (section 17c).
+
+Checked: the JS check tool runs `useShadewindStyle` against a fake Uniwind store (one reducer and one layout effect with or without
+an accent, the theme in the subscription only with a theme-dependent accent, the same subscription array across renders; mutants
+dropping the accent's theme or rebuilding the array each render fail), typecheck, example-real Metro bundles of both arms and a
+Hermes compile. Not measured: the effect on mounting, which needs the rendering benchmark on a simulator.

@@ -10,6 +10,7 @@
 #include <react/renderer/core/RawValue.h>
 #include <react/renderer/graphics/Color.h>
 #include <react/renderer/graphics/PlatformColorParser.h>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -124,6 +125,40 @@ public:
     return it != _styles.end() ? it->second.lock() : nullptr;
   }
 
+  // The styles the last few views of a batch used: a mount registers a handful of styles over and over in a short cycle (a
+  // card's View, its Text, ...), so most lookups are found here, without the lock and the map.
+  struct StyleMemo {
+    struct Slot {
+      int64_t id = -1;
+      SurfaceId surface = 0;
+      std::shared_ptr<const ThemeStyle> style;
+    };
+
+    std::array<Slot, 4> slots;
+    size_t next = 0;
+
+    void remember(int64_t id, SurfaceId surface, std::shared_ptr<const ThemeStyle> style) {
+      slots[next] = {id, surface, std::move(style)};
+      next = (next + 1) % slots.size();
+    }
+  };
+
+  std::shared_ptr<const ThemeStyle> cachedStyle(int64_t styleId, SurfaceId surface, StyleMemo& memo) {
+    for (const auto& slot : memo.slots) {
+      if (slot.style && slot.id == styleId && slot.surface == surface) {
+        return slot.style;
+      }
+    }
+
+    auto style = cachedStyle(styleId, surface);
+
+    if (style) {
+      memo.remember(styleId, surface, style);
+    }
+
+    return style;
+  }
+
   // Parses one style. Kept (weakly) under `styleId` while views use it: once they are gone the entry expires, so a long session
   // that mounts many distinct styles does not grow without bound.
   std::shared_ptr<const ThemeStyle> buildStyle(int64_t styleId, SurfaceId surface, PropsByTheme props, const ContextContainer& container) {
@@ -136,7 +171,7 @@ public:
       deltas.emplace_back(name, toTypedDelta(container, surface, values));
     }
 
-    auto style = _hook->makeStyle(deltas);
+    auto style = _hook->makeStyle(deltas, styleId);
 
     if (styleId >= 0) {
       std::lock_guard<std::mutex> lock(_mutex);
@@ -153,21 +188,6 @@ public:
     }
 
     return style;
-  }
-
-  // `renderTheme`: the theme JS rendered the view with, when its props are known to be that render's (first attach). Equal to
-  // the current theme, the view needs nothing until the theme changes.
-  void registerView(const ShadowNode& node, std::shared_ptr<const ThemeStyle> style, const std::string* renderTheme) {
-    bool renderedWithCurrent = false;
-
-    if (renderTheme != nullptr) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      renderedWithCurrent = !_theme.empty() && *renderTheme == _theme;
-    }
-
-    _hook->add(
-        node.getFamilyShared(), std::move(style), node.getProps(), node.getComponentName(), node.getFamily().getSurfaceId(),
-        renderedWithCurrent);
   }
 
   void unregisterView(const ShadowNode& node) {
@@ -204,5 +224,24 @@ private:
   size_t _purgeAt = 256;
   std::string _theme;
 };
+
+// An (almost) empty commit of `tree`: the commit hook does the real work on it. Same trick as RN's animation backend.
+inline void commitThroughHook(const ShadowTree& tree, bool mountSynchronously) {
+  tree.commit(
+      [](const RootShadowNode& oldRoot) { return std::static_pointer_cast<RootShadowNode>(oldRoot.ShadowNode::clone({})); },
+      {.mountSynchronously = mountSynchronously});
+}
+
+// The end of a deferred switch ('hookDeferred'): setTheme only published the theme, so the first commit after it (normally React's,
+// for the re-render the switch caused) carries it to every bound view in the same mount as React's own changes. This runs after
+// that, as a low-priority task, and commits `tree` only if no commit has carried the theme yet. Returns whether it committed.
+inline bool commitUnlessThemed(ThemeHook& hook, const ShadowTree& tree, bool mountSynchronously) {
+  if (hook.carriesTheme(tree.getCurrentRevision().rootShadowNode)) {
+    return false;
+  }
+
+  commitThroughHook(tree, mountSynchronously);
+  return true;
+}
 
 } // namespace margelo::nitro::shadewind

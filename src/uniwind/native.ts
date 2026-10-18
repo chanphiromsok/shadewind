@@ -20,6 +20,11 @@ const TextAncestorContext = (
 
 export { NativeView, NativeText, TextAncestorContext };
 
+// The resolved className style, with the user's `style` after it only when there is one: a single object (Uniwind caches one per
+// className) is cheaper for React Native than an array, which it flattens, and a new array per render never diffs as unchanged.
+export const withUserStyle = (resolved: unknown, user: unknown): any =>
+  user == null || user === false ? resolved : [resolved, user];
+
 // props React Native's View.js (0.86) rewrites or reads in JS
 const VIEW_TRANSFORMED = [
   'accessibilityState',

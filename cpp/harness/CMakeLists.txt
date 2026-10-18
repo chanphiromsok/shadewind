@@ -11,6 +11,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# HARNESS_SANITIZE: AddressSanitizer (use after free, overflows), LeakSanitizer (memory never freed, reported at exit) and UBSan
+# over the engine and React Native's renderer. UBSan's vptr check is left out: it needs the type info of classes the harness
+# stubs (UIManager, EventBeat). Run with ASAN_OPTIONS=detect_leaks=1.
+option(HARNESS_SANITIZE "build with AddressSanitizer, LeakSanitizer and UBSan" OFF)
+if(HARNESS_SANITIZE)
+  add_compile_options(-fsanitize=address,undefined -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined -fno-sanitize=vptr)
+endif()
+
+# HARNESS_TSAN: ThreadSanitizer (data races: the commit hook runs on the JS thread and on background threads). Its own build
+# directory; not together with HARNESS_SANITIZE.
+option(HARNESS_TSAN "build with ThreadSanitizer" OFF)
+if(HARNESS_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
+
 set(DEPS "${CMAKE_CURRENT_SOURCE_DIR}/.deps" CACHE PATH "fetch-deps.sh output")
 set(RN "${DEPS}/react-native/ReactCommon")
 set(ENGINE "${CMAKE_CURRENT_SOURCE_DIR}/..")
@@ -33,6 +50,9 @@ set(FOLLY_SRC
   json/json.cpp lang/CString.cpp lang/Exception.cpp lang/SafeAssert.cpp lang/ToAscii.cpp memory/detail/MallocImpl.cpp
   net/NetOps.cpp portability/SysUio.cpp synchronization/SanitizeThread.cpp synchronization/ParkingLot.cpp
   system/AtFork.cpp system/ThreadId.cpp)
+if(HARNESS_SANITIZE OR HARNESS_TSAN)
+  list(APPEND FOLLY_SRC memory/SanitizeLeak.cpp) # folly annotates for the sanitizers when it sees them
+endif()
 list(TRANSFORM FOLLY_SRC PREPEND "${DEPS}/folly/folly/")
 
 add_library(folly_runtime STATIC ${FOLLY_SRC})
@@ -123,6 +143,15 @@ target_link_libraries(rn_renderer PUBLIC yoga folly_runtime glog atomic)
 
 add_library(harness_support INTERFACE)
 target_include_directories(harness_support INTERFACE "${ENGINE}" "${CMAKE_CURRENT_SOURCE_DIR}")
+# the development diagnostics recorder, as the app's Debug builds compile it (cpp/Diagnostics.hpp)
+# HARNESS_RELEASE_CONFIG: the engine as a release build compiles it (no recorder, no dev tools); tests that read what only those
+# provide skip themselves. Default: both in, as in a debug build.
+option(HARNESS_RELEASE_CONFIG "build the engine as in a release app (SHADEWIND_DIAGNOSTICS=0, SHADEWIND_DEV_TOOLS=0)" OFF)
+if(HARNESS_RELEASE_CONFIG)
+  target_compile_definitions(harness_support INTERFACE SHADEWIND_DIAGNOSTICS=0 SHADEWIND_DEV_TOOLS=0)
+else()
+  target_compile_definitions(harness_support INTERFACE SHADEWIND_DIAGNOSTICS=1 SHADEWIND_DEV_TOOLS=1)
+endif()
 target_link_libraries(harness_support INTERFACE rn_renderer)
 
 add_executable(harness_tests tests.cpp class_merge_tests.cpp style_resolver_tests.cpp)
@@ -132,3 +161,26 @@ target_compile_definitions(harness_tests PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_S
 add_executable(harness_bench bench.cpp)
 target_link_libraries(harness_bench PRIVATE harness_support)
 
+
+# The class resolver's JSI glue (cpp/ResolveGlue.hpp) inside a real Hermes runtime: parity with Uniwind and a bench (hermes/glue.cpp).
+# Optional: HERMES_DIR is a checkout of the Hermes version React Native pins (sdks/.hermesv1version), HERMES_BUILD its CMake build
+# with the `hermesvm` target built. Uses Hermes' own JSI, not React Native's copy (rn_renderer is not linked).
+set(HERMES_DIR "" CACHE PATH "Hermes checkout (facebook/hermes at the tag React Native pins)")
+set(HERMES_BUILD "" CACHE PATH "Hermes build directory with hermesvm built")
+
+if(HERMES_DIR AND HERMES_BUILD)
+  add_executable(hermes_glue hermes/glue.cpp "${HERMES_DIR}/API/jsi/jsi/JSIDynamic.cpp")
+  target_include_directories(hermes_glue PRIVATE "${ENGINE}" "${HERMES_DIR}/API" "${HERMES_DIR}/API/jsi" "${HERMES_DIR}/public")
+  target_compile_definitions(hermes_glue PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+  target_link_libraries(hermes_glue PRIVATE folly_runtime "${HERMES_BUILD}/lib/libhermesvm.so")
+  set_target_properties(hermes_glue PROPERTIES BUILD_RPATH "${HERMES_BUILD}/lib")
+
+  # The task order hookDeferred relies on, on React Native's RuntimeScheduler (scheduler/order.cpp). React Native's jsi (in
+  # rn_renderer) with the Hermes it pins, as an app links them.
+  file(GLOB SCHEDULER_SRC "${RN}/react/renderer/runtimescheduler/*.cpp"
+       "${RN}/jsinspector-modern/tracing/EventLoopReporter.cpp" "${RN}/runtimeexecutor/platform/cxx/ReactCommon/RuntimeExecutorSyncUIThreadUtils.cpp")
+  add_executable(scheduler_order scheduler/order.cpp ${SCHEDULER_SRC})
+  target_include_directories(scheduler_order PRIVATE "${HERMES_DIR}/public" "${HERMES_DIR}/API" "${RN}/runtimeexecutor/platform/cxx")
+  target_link_libraries(scheduler_order PRIVATE harness_support "${HERMES_BUILD}/lib/libhermesvm.so")
+  set_target_properties(scheduler_order PROPERTIES BUILD_RPATH "${HERMES_BUILD}/lib")
+endif()

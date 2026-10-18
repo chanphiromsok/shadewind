@@ -72,8 +72,8 @@ struct Check {
 
 class App {
 public:
-  App(Engine& engine, std::vector<std::string> themes, std::string initial)
-      : engine_(engine), themes_(std::move(themes)), theme_(std::move(initial)) {
+  App(Engine& engine, std::vector<std::string> themes, std::string initial, Screen screen = {})
+      : engine_(engine), react_(1, screen), themes_(std::move(themes)), theme_(std::move(initial)) {
     engine_.attach(react_.context());
     react_.addHook(engine_.hook());
     engine_.configure(themes_);
@@ -163,6 +163,13 @@ public:
     afterCommit();
   }
 
+  // A new child of a mounted instance, its refs attached after the commit
+  void append(Instance& parent, Instance* child) {
+    react_.append(parent, child);
+    lastReactCommit_ = checked();
+    attachRefs();
+  }
+
   // A Pressable pressed: unbound, React renders the pressed colours itself
   void press(Instance& instance, folly::dynamic pressedProps) {
     auto& binding = bindings_.at(&instance);
@@ -189,6 +196,13 @@ public:
     engine_.setTheme(name);
     react_.commitTick();
     lastThemeCommit_ = checked();
+  }
+
+  // 'hookDeferred' (the Uniwind adapter): the engine only publishes the theme. The next commit carries it, normally React's for the
+  // re-render the switch causes; sw::commitUnlessThemed stands for the low-priority task that commits if none did.
+  void setThemeDeferred(const std::string& name) {
+    theme_ = name;
+    engine_.setTheme(name);
   }
 
   // 'hookAsync' (the iOS default): the engine's commit on a background thread

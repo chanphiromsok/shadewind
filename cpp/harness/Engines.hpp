@@ -232,6 +232,12 @@ public:
       return;
     }
 
+    // a WeakMap forgets unmounted views (Hermes' GC); without this the model itself would pile up their families
+    if (registered_.size() >= pruneAt_) {
+      std::erase_if(registered_, [](const auto& item) { return item.second.first.expired(); });
+      pruneAt_ = std::max<size_t>(1024, registered_.size() * 2);
+    }
+
     registered_[&node->getFamily()] = {node->getFamilyShared(), style.id};
     queue_.push_back({node, &style, first ? std::optional<std::string>(renderTheme) : std::nullopt});
   }
@@ -290,25 +296,46 @@ private:
     std::optional<std::string> renderTheme;
   };
 
+  // HybridShadewind::registerMany: one batch per call
   void drain() {
+    if (queue_.empty()) {
+      return;
+    }
+
+    const std::string current = engine_.theme();
+    auto& batch = batch_;
+    sw::ThemeEngine::StyleMemo memo;
+
+    batch.clear();
+    batch.reserve(queue_.size());
+
     for (const auto& pending : queue_) {
       const auto surface = pending.node->getFamily().getSurfaceId();
-      auto style = engine_.cachedStyle(pending.style->id, surface);
+      auto style = engine_.cachedStyle(pending.style->id, surface, memo);
 
       if (!style) {
         style = engine_.buildStyle(pending.style->id, surface, pending.style->props, *context_);
+        memo.remember(pending.style->id, surface, style);
       }
 
-      engine_.registerView(*pending.node, std::move(style), pending.renderTheme ? &*pending.renderTheme : nullptr);
+      const bool renderedWithCurrent = pending.renderTheme && !current.empty() && *pending.renderTheme == current;
+
+      batch.push_back(
+          {pending.node->getFamilyShared(), std::move(style), pending.node->getProps(), pending.node->getComponentName(), surface,
+           renderedWithCurrent});
     }
 
+    engine_.hook().addMany(batch);
+    batch.clear();
     queue_.clear();
   }
 
   sw::ThemeEngine engine_;
   std::shared_ptr<const ContextContainer> context_;
   std::vector<Pending> queue_;
+  std::vector<sw::ThemeHook::Registration> batch_;
   std::unordered_map<const ShadowNodeFamily*, std::pair<std::weak_ptr<const ShadowNodeFamily>, int64_t>> registered_;
+  size_t pruneAt_ = 1024;
 };
 
 } // namespace harness

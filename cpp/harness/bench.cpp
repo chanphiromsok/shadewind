@@ -9,6 +9,10 @@
 //
 //   build/harness_bench            all scenarios, a table
 //   build/harness_bench --json     the same as JSON lines
+//   BENCH_PROFILE=1 build/harness_bench --runs 3
+//                                  the current engine on the 2003-view screen only, in this process (no fork; BENCH_PROFILE=none:
+//                                  no engine, the same React work; BENCH_MOUNT_ONLY=1: the render scenario alone): for callgrind,
+//                                  e.g. valgrind --tool=callgrind --toggle-collect='*ThemeHook::prewarm*' ...
 
 #include "App.hpp"
 
@@ -161,6 +165,12 @@ void theirBenchmark(int items, int runs) {
     if (run >= 2) {
       prewarm.add(ms(p0, Clock::now()));
     }
+  }
+
+  if (std::getenv("BENCH_MOUNT_ONLY")) { // profiling the render scenario alone
+    record("2003 views (uniwind-benchmarks screen)", "mount: React commit (hook + layout)", engine.name(), commit.median());
+    record("2003 views (uniwind-benchmarks screen)", "mount: refs attach + flush", engine.name(), refs.median());
+    return;
   }
 
   // an unrelated React commit with no switch so far
@@ -460,6 +470,17 @@ int main(int argc, char** argv) {
     } else if (std::strcmp(argv[i], "--runs") == 0 && i + 1 < argc) {
       runs = std::atoi(argv[++i]);
     }
+  }
+
+  if (const char* profile = std::getenv("BENCH_PROFILE")) { // profiling: one engine in this process (see the header)
+    if (std::strcmp(profile, "none") == 0) {
+      theirBenchmark<NoEngine>(1000, runs); // the same React work without an engine, to subtract
+    } else {
+      theirBenchmark<CurrentEngine>(1000, runs);
+    }
+
+    print();
+    return 0;
   }
 
   isolated([&] { theirBenchmark<NoEngine>(1000, runs); });

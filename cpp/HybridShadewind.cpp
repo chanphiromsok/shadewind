@@ -1,6 +1,7 @@
 #include "HybridShadewind.hpp"
 #include "css/ClassMerge.hpp"
 #include "css/StyleResolver.hpp"
+#include "ResolveGlue.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
@@ -8,6 +9,8 @@
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/mounting/ShadowTree.h>
 #include <react/renderer/mounting/ShadowTreeRegistry.h>
+#include <react/renderer/runtimescheduler/RuntimeScheduler.h>
+#include <react/renderer/runtimescheduler/RuntimeSchedulerBinding.h>
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/primitives.h>
@@ -28,6 +31,7 @@ using namespace facebook::react;
 
 namespace {
 
+#if SHADEWIND_DEV_TOOLS
 // Main-thread busy probe: how long the main run loop stays awake without going back to sleep. A mount of 1500 updated views
 // shows up here as one long busy period (it is what a user sees as a dropped frame); nothing in JS can see it.
 // Only iOS feeds it (run loop observer); elsewhere mainBusyMs() reports 0.
@@ -67,8 +71,10 @@ int64_t colorValueBits(const ColorT& value) {
 int64_t colorBits(const SharedColor& color) {
   return colorValueBits(*color);
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 #if defined(__APPLE__)
+#if SHADEWIND_DEV_TOOLS
 void runOnMain(std::function<void()> work) {
   auto* task = new std::function<void()>(std::move(work));
 
@@ -79,6 +85,7 @@ void runOnMain(std::function<void()> work) {
     delete function;
   });
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 void runInBackground(std::function<void()> work, qos_class_t qos) {
   auto* task = new std::function<void()>(std::move(work));
@@ -91,6 +98,7 @@ void runInBackground(std::function<void()> work, qos_class_t qos) {
   });
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Main-thread busy probe (iOS only): see below.
 std::atomic<bool> gBusyObserverInstalled{false};
 
@@ -109,8 +117,10 @@ void runLoopActivity(CFRunLoopObserverRef, CFRunLoopActivity activity, void*) {
     }
   }
 }
+#endif // SHADEWIND_DEV_TOOLS
 #endif
 
+#if SHADEWIND_DEV_TOOLS
 // Results of the last background / main-thread pass, read by the next setTheme call (they finish after it returned).
 [[maybe_unused]] std::atomic<double> gLastAsyncCommitMs{0};
 // setTheme call -> main thread done mounting (the screen update), of the last switch
@@ -121,16 +131,22 @@ using Clock = std::chrono::steady_clock;
 double ms(Clock::time_point from, Clock::time_point to) {
   return std::chrono::duration<double, std::milli>(to - from).count();
 }
+#endif // SHADEWIND_DEV_TOOLS
 
-// An (almost) empty commit: the commit hook does the real work on it. Same trick as RN's animation backend.
+// When setTheme was called, for its timings; empty in a release build (local to this file, so its layout may differ).
+struct SwitchClock {
+#if SHADEWIND_DEV_TOOLS
+  Clock::time_point start = Clock::now();
+#endif
+};
+
+// An (almost) empty commit of every surface: the commit hook does the real work on it (commitThroughHook, ThemeEngine.hpp).
 void commitTick(UIManager& ui, bool mountSynchronously = true) {
-  ui.getShadowTreeRegistry().enumerate([mountSynchronously](const ShadowTree& shadowTree, bool&) {
-    shadowTree.commit(
-        [](const RootShadowNode& oldRoot) { return std::static_pointer_cast<RootShadowNode>(oldRoot.ShadowNode::clone({})); },
-        {.mountSynchronously = mountSynchronously});
-  });
+  ui.getShadowTreeRegistry().enumerate(
+      [mountSynchronously](const ShadowTree& shadowTree, bool&) { commitThroughHook(shadowTree, mountSynchronously); });
 }
 
+#if SHADEWIND_DEV_TOOLS
 // The hook's last commit, as the JS timing object (`ThemeTimings` in src/internal.tsx).
 jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs, double totalMs) {
   auto result = jsi::Object(rt);
@@ -155,6 +171,7 @@ jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs,
 
   return result;
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 } // namespace
 
@@ -169,17 +186,22 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("register", 4, &HybridShadewind::registerNode);
     prototype.registerRawHybridMethod("registerMany", 4, &HybridShadewind::registerMany);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
-    prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
     prototype.registerRawHybridMethod("flushPending", 0, &HybridShadewind::flushPending);
     prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
-    prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
-    prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
     prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
     prototype.registerRawHybridMethod("loadClassTable", 1, &HybridShadewind::loadClassTable);
     prototype.registerRawHybridMethod("mergeClasses", 0, &HybridShadewind::mergeClasses);
     prototype.registerRawHybridMethod("loadStyleTable", 1, &HybridShadewind::loadStyleTable);
     prototype.registerRawHybridMethod("resolveClasses", 6, &HybridShadewind::resolveStyleClasses);
     prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
+    prototype.registerRawHybridMethod("setDiagnostics", 1, &HybridShadewind::setDiagnostics);
+    prototype.registerRawHybridMethod("drainDiagnostics", 0, &HybridShadewind::drainDiagnostics);
+#if SHADEWIND_DEV_TOOLS
+    // inspect and measure: not in a release build (src/internal.tsx says so when they are called)
+    prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
+    prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
+    prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
+#endif
   });
 }
 
@@ -229,13 +251,15 @@ void HybridShadewind::schedulePrewarm() {
 // One registration: `props` is { light: { backgroundColor: 4294967295 }, dark: { ... } } (colours as processColor numbers or CSS
 // strings); `styleId` tags it so views of one style share the parsed form; `renderTheme` is the theme the view rendered with,
 // passed only on a node's first attach.
-void HybridShadewind::registerOne(
+ThemeHook::Registration HybridShadewind::registrationOf(
     jsi::Runtime& rt,
     UIManager& ui,
     const jsi::Value& nodeValue,
     const jsi::Value& propsValue,
     const jsi::Value& styleIdValue,
-    const jsi::Value& renderThemeValue) {
+    const jsi::Value& renderThemeValue,
+    const std::string& currentTheme,
+    ThemeEngine::StyleMemo& memo) {
   auto node = Bridging<std::shared_ptr<const ShadowNode>>::fromJs(rt, nodeValue);
 
   if (!node) {
@@ -244,7 +268,7 @@ void HybridShadewind::registerOne(
 
   const SurfaceId surface = node->getFamily().getSurfaceId();
   const int64_t styleId = styleIdValue.isNumber() ? static_cast<int64_t>(styleIdValue.asNumber()) : -1;
-  auto style = _engine.cachedStyle(styleId, surface);
+  auto style = _engine.cachedStyle(styleId, surface, memo);
 
   if (!style) {
     if (!propsValue.isObject()) {
@@ -262,15 +286,17 @@ void HybridShadewind::registerOne(
     }
 
     style = _engine.buildStyle(styleId, surface, std::move(props), *ui.getContextContainer());
+
+    if (styleId >= 0) {
+      memo.remember(styleId, surface, style);
+    }
   }
 
-  if (renderThemeValue.isString()) {
-    const auto renderTheme = renderThemeValue.asString(rt).utf8(rt);
+  // the theme React rendered it with (known on a node's first attach) is the current one: nothing to apply until the theme changes
+  const bool renderedWithCurrent =
+      renderThemeValue.isString() && !currentTheme.empty() && renderThemeValue.asString(rt).utf8(rt) == currentTheme;
 
-    _engine.registerView(*node, std::move(style), &renderTheme);
-  } else {
-    _engine.registerView(*node, std::move(style), nullptr);
-  }
+  return {node->getFamilyShared(), std::move(style), node->getProps(), node->getComponentName(), surface, renderedWithCurrent};
 }
 
 // register(shadowNode, propsByTheme, styleId?, renderTheme?)
@@ -282,7 +308,12 @@ jsi::Value HybridShadewind::registerNode(jsi::Runtime& rt, const jsi::Value&, co
   if (auto* ui = attachedUIManager(rt)) {
     const jsi::Value undefined;
 
-    registerOne(rt, *ui, args[0], args[1], count > 2 ? args[2] : undefined, count > 3 ? args[3] : undefined);
+    std::vector<ThemeHook::Registration> batch;
+    ThemeEngine::StyleMemo memo;
+
+    batch.push_back(registrationOf(
+        rt, *ui, args[0], args[1], count > 2 ? args[2] : undefined, count > 3 ? args[3] : undefined, _engine.theme(), memo));
+    _engine.hook().addMany(batch);
     schedulePrewarm();
   }
 
@@ -307,10 +338,22 @@ jsi::Value HybridShadewind::registerMany(jsi::Runtime& rt, const jsi::Value&, co
   auto ids = args[2].asObject(rt).asArray(rt);
   auto themes = args[3].asObject(rt).asArray(rt);
   const size_t length = nodes.size(rt);
+  const std::string currentTheme = _engine.theme(); // the JS thread is the only one that sets it
+  auto& batch = _state.registrations; // kept between calls: a mount's batch is thousands of entries
+  ThemeEngine::StyleMemo memo;
+
+  batch.clear();
+  batch.reserve(length);
 
   for (size_t i = 0; i < length; i++) {
-    registerOne(rt, *ui, nodes.getValueAtIndex(rt, i), props.getValueAtIndex(rt, i), ids.getValueAtIndex(rt, i), themes.getValueAtIndex(rt, i));
+    batch.push_back(registrationOf(
+        rt, *ui, nodes.getValueAtIndex(rt, i), props.getValueAtIndex(rt, i), ids.getValueAtIndex(rt, i), themes.getValueAtIndex(rt, i),
+        currentTheme, memo));
   }
+
+  // one lock hold for the whole commit's views (a mount registers thousands)
+  _engine.hook().addMany(batch);
+  batch.clear(); // keeps the capacity, releases the nodes
 
   if (length > 0) {
     schedulePrewarm();
@@ -335,6 +378,7 @@ jsi::Value HybridShadewind::unregisterNode(jsi::Runtime& rt, const jsi::Value&, 
   return jsi::Value::undefined();
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Debug: for every registered view compare the background colour of
 //   - the node in the committed shadow tree,
 //   - what UIKit holds for it (iOS),
@@ -451,6 +495,7 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 
   return report;
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 // Kept for API compatibility: registerMany flushes what this used to. A view registered alone (register) is themed here.
 jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
@@ -466,6 +511,7 @@ jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi:
   return jsi::Value::undefined();
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Starts (once) the main run loop observer and clears the longest busy period seen so far.
 jsi::Value HybridShadewind::resetMainBusy(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
 #if defined(__APPLE__)
@@ -496,6 +542,7 @@ jsi::Value HybridShadewind::mainBusyMs(jsi::Runtime&, const jsi::Value&, const j
 
   return jsi::Value(busy);
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 static css::ClassMerge gClassMerge;
 // Uniwind's class resolution from the table src/uniwind/styleTable.ts builds; JS thread only (loaded and read there)
@@ -508,66 +555,6 @@ static css::StyleResolver::Result gResolved;
 // which are copied into one stack buffer here. Non-ASCII input is not handled natively: the caller gets `undefined` and uses
 // the JS reference, so output can never differ from it.
 namespace {
-
-constexpr size_t kMergeMaxArgs = 16;
-constexpr size_t kMergeBuffer = 4096;
-
-struct MergeInput {
-  char buffer[kMergeBuffer];
-  size_t length = 0;
-  std::string_view views[kMergeMaxArgs];
-  size_t count = 0;
-};
-
-bool readAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count, MergeInput& in) {
-  if (count > kMergeMaxArgs) {
-    return false;
-  }
-
-  for (size_t i = 0; i < count; i++) {
-    if (!args[i].isString()) {
-      return false;
-    }
-
-    const size_t begin = in.length;
-    bool ok = true;
-    auto cb = [&](bool ascii, const void* data, size_t num) {
-      if (num > kMergeBuffer - in.length) {
-        ok = false;
-        return;
-      }
-
-      if (ascii) {
-        std::memcpy(in.buffer + in.length, data, num);
-      } else {
-        const auto* p = static_cast<const char16_t*>(data);
-
-        for (size_t k = 0; k < num; k++) {
-          if (p[k] > 127) {
-            ok = false;
-            return;
-          }
-
-          in.buffer[in.length + k] = static_cast<char>(p[k]);
-        }
-      }
-
-      in.length += num;
-    };
-
-    args[i].getString(rt).getStringData(rt, cb);
-
-    if (!ok) {
-      return false;
-    }
-
-    in.views[i] = std::string_view(in.buffer + begin, in.length - begin);
-  }
-
-  in.count = count;
-
-  return true;
-}
 
 jsi::Value mergeAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
   if (!gClassMerge.loaded()) {
@@ -594,78 +581,9 @@ jsi::Value mergeAscii(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
   return jsi::String::createFromAscii(rt, out.data(), out.size());
 }
 
-// isPressed / isFocused / isDisabled: only a boolean equals Uniwind's `true` / `false` (resolveStyles compares with !==)
-css::StyleResolver::Tri triOf(const jsi::Value& value) {
-  if (!value.isBool()) {
-    return css::StyleResolver::Tri::Unset;
-  }
-
-  return value.getBool() ? css::StyleResolver::Tri::True : css::StyleResolver::Tri::False;
-}
-
-jsi::Value styleValue(jsi::Runtime& rt, const css::StyleResolver::Item& item) {
-  if (!item.value) {
-    return jsi::Value(item.number);
-  }
-
-  if (item.value->undefined) {
-    return jsi::Value::undefined();
-  }
-
-  const folly::dynamic& value = item.value->value;
-
-  switch (value.type()) {
-    case folly::dynamic::DOUBLE:
-      return jsi::Value(value.getDouble());
-    case folly::dynamic::INT64:
-      return jsi::Value(static_cast<double>(value.getInt()));
-    case folly::dynamic::STRING:
-      return jsi::String::createFromUtf8(rt, value.getString());
-    case folly::dynamic::BOOL:
-      return jsi::Value(value.getBool());
-    case folly::dynamic::NULLT:
-      return jsi::Value::null();
-    default:
-      return jsi::valueFromDynamic(rt, value);
-  }
-}
-
-// (className, theme, screenWidth, isPressed, isFocused, isDisabled) -> Uniwind's resolveStyles result
-// ({ styles, dependencies, dependencySum, hasDataAttributes }), or undefined: resolve it with Uniwind's JS
+// (className, theme, screenWidth, isPressed, isFocused, isDisabled) -> Uniwind's resolveStyles result, or undefined (ResolveGlue.hpp)
 jsi::Value resolveClasses(jsi::Runtime& rt, const jsi::Value* args, size_t count) {
-  MergeInput in;
-
-  if (count < 3 || !gStyleResolver.loaded() || !args[2].isNumber() || !readAscii(rt, args, 2, in)) {
-    return jsi::Value::undefined();
-  }
-
-  const int theme = gStyleResolver.themeIndex(in.views[1]);
-  const auto state = [&](size_t i) { return i < count ? triOf(args[i]) : css::StyleResolver::Tri::Unset; };
-
-  if (!gStyleResolver.resolve(in.views[0], theme, args[2].getNumber(), state(3), state(4), state(5), gResolved)) {
-    return jsi::Value::undefined();
-  }
-
-  jsi::Object styles(rt);
-
-  for (const auto& item : gResolved.styles) {
-    styles.setProperty(rt, gStyleResolver.propertyName(item.property).c_str(), styleValue(rt, item));
-  }
-
-  jsi::Array dependencies(rt, gResolved.dependencies.size());
-
-  for (size_t i = 0; i < gResolved.dependencies.size(); i++) {
-    dependencies.setValueAtIndex(rt, i, gResolved.dependencies[i]);
-  }
-
-  jsi::Object result(rt);
-
-  result.setProperty(rt, "styles", std::move(styles));
-  result.setProperty(rt, "dependencies", std::move(dependencies));
-  result.setProperty(rt, "dependencySum", static_cast<double>(gResolved.dependencySum));
-  result.setProperty(rt, "hasDataAttributes", false);
-
-  return result;
+  return resolveClassesWith(rt, gStyleResolver, gResolved, args, count);
 }
 
 } // namespace
@@ -759,8 +677,9 @@ jsi::Value HybridShadewind::configure(jsi::Runtime& rt, const jsi::Value&, const
   return result;
 }
 
-// setTheme(name, strategy?) applies `name` to every registered view without touching React.
+// setTheme(name, strategy?, transition?) applies `name` to every registered view without touching React.
 // strategy: 'hookAsync' (default; the commit runs off the JS thread on iOS) | 'hook' (the commit runs on the JS thread)
+// transition: { type: 'fade' | 'blur', durationMs } animates from a snapshot of the old screen (ThemeTransition.hpp); absent: instant.
 jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) {
   if (count < 1 || !args[0].isString()) {
     throw jsi::JSError(rt, "Shadewind.setTheme(name) expects a string");
@@ -768,8 +687,9 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
   const auto name = args[0].asString(rt).utf8(rt);
   bool async = true;
-  // 'hookDeferred': the commit runs here, on the JS thread, but its mount is queued on the RuntimeScheduler (the same queue
-  // React's own commit of this task uses), so both reach the screen in one update.
+  // 'hookDeferred': no commit here. The next commit carries the theme, normally React's for the re-render this switch causes
+  // (Uniwind's subscribers), so React-rendered colours and bound views change in the same mount; a low-priority task commits
+  // afterwards if nothing did (commitUnlessThemed).
   bool deferred = false;
 
   if (count > 1 && args[1].isString()) {
@@ -783,15 +703,84 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     deferred = requested == "hookDeferred";
   }
 
+  bool animated = false;
+  double transitionMs = 0;
+  auto preset = ThemeTransitionPreset::Fade;
+
+  if (count > 2 && args[2].isObject()) {
+    auto options = args[2].asObject(rt);
+    const auto type = options.getProperty(rt, "type");
+
+    const auto typeName = type.isString() ? type.asString(rt).utf8(rt) : std::string();
+
+    if (typeName == "fade") {
+      preset = ThemeTransitionPreset::Fade;
+    } else if (typeName == "blur") {
+      preset = ThemeTransitionPreset::Blur;
+    } else {
+      throw jsi::JSError(rt, "Shadewind.setTheme: unknown transition type (fade, blur)");
+    }
+
+    const auto duration = options.getProperty(rt, "durationMs");
+
+    transitionMs = duration.isNumber() ? duration.asNumber() : 250;
+    animated = transitionMs > 0;
+  }
+
   auto* ui = attachedUIManager(rt);
 
   if (ui == nullptr) {
     throw jsi::JSError(rt, "Shadewind.setTheme: Fabric UIManager is not available (New Architecture only)");
   }
 
-  const auto t0 = Clock::now();
+  [[maybe_unused]] const SwitchClock clock;
 
   _engine.setTheme(name);
+
+  if (animated) {
+    // The mount hook is what tells the transition the new theme is on screen. Registered on first use, once per UIManager.
+    if (_state.transitionContainer.lock() != ui->getContextContainer()) {
+      ui->registerMountHook(_state.transition);
+      _state.transitionContainer = ui->getContextContainer();
+    }
+
+    // after the epoch changed (that is the one to wait for), before any commit (the snapshot is queued ahead of the mount)
+    _state.transition.begin(preset, transitionMs);
+  }
+
+  if (deferred) {
+    // React's renders are Normal (or UserBlocking) priority tasks of this scheduler, ordered by expiration: one scheduled within
+    // 5 s of this call runs before this Low one, and so does each slice of a render React splits. A SyncLane render (a press
+    // handler) commits in this very task. A render at React's Idle priority comes after; this commits first then.
+    const auto scheduler = RuntimeSchedulerBinding::getBinding(rt);
+
+    if (scheduler) {
+      std::weak_ptr<UIManagerBinding> weakBinding = UIManagerBinding::getBinding(rt);
+      std::weak_ptr<ThemeHook> weakHook = _engine.hookShared();
+
+      scheduler->getRuntimeScheduler()->scheduleTask(SchedulerPriority::LowPriority, [weakBinding, weakHook](jsi::Runtime&) {
+        const auto binding = weakBinding.lock();
+        const auto hook = weakHook.lock();
+
+        if (!binding || !hook) {
+          return;
+        }
+
+        // inside a task on the JS thread: `mountSynchronously = false` queues the mount for the end of this task, as React does
+        binding->getUIManager().getShadowTreeRegistry().enumerate(
+            [&hook](const ShadowTree& shadowTree, bool&) { commitUnlessThemed(*hook, shadowTree, false); });
+      });
+
+#if SHADEWIND_DEV_TOOLS
+      const double elapsed = ms(clock.start, Clock::now());
+
+      return timingsOf(rt, _engine.hook().stats(), 0, elapsed);
+#else
+      return jsi::Value::undefined();
+#endif
+    }
+    // no RuntimeScheduler (not expected in a Fabric app): commit now, below
+  }
 
 #if defined(__APPLE__)
   if (async) {
@@ -800,43 +789,136 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     std::weak_ptr<UIManagerBinding> weakBinding = UIManagerBinding::getBinding(rt);
 
     runInBackground(
-        [weakBinding, t0]() {
+        [weakBinding, clock]() {
+          (void)clock; // empty in a release build
           auto locked = weakBinding.lock();
 
           if (!locked) {
             return;
           }
 
+#if SHADEWIND_DEV_TOOLS
           const auto c0 = Clock::now();
+#endif
 
           // `mountSynchronously = false` would queue a rendering update on the RuntimeScheduler, whose queues only the JS thread
           // may touch. `true` is what React Native uses for commits made off the JS thread: on iOS the mount itself is still
           // dispatched asynchronously to the main queue.
           commitTick(locked->getUIManager(), true);
+
+#if SHADEWIND_DEV_TOOLS
           gLastAsyncCommitMs = ms(c0, Clock::now());
 
           // The commit queued its mount on the main queue; this block queues behind it, so when it runs the views are mounted
-          // (the next vsync presents them). That is the time from the setTheme call to the screen update.
-          runOnMain([t0]() { gLastVisualMs = ms(t0, Clock::now()); });
+          // (the next vsync presents them). That is the time from the setTheme call to the screen update. A measurement only:
+          // a release build makes no such main-thread hop.
+          runOnMain([clock]() { gLastVisualMs = ms(clock.start, Clock::now()); });
+#endif
         },
         QOS_CLASS_USER_INTERACTIVE);
 
+#if SHADEWIND_DEV_TOOLS
     // the stats and the commit time are those of the previous run (this one finishes after the call returns)
-    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(t0, Clock::now()));
+    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
+#else
+    return jsi::Value::undefined();
+#endif
   }
 #else
   (void)async; // Android commits on the JS thread for now
 #endif
 
-  // `mountSynchronously = false` queues the mount with RuntimeScheduler::scheduleRenderingUpdate (Scheduler.cpp), which only the JS
-  // thread may call, inside a task: this runs in the JS thread's setTheme call, which is one. Same on both platforms: React Native's
-  // Scheduler decides this, not the platform. Without it Android mounted the engine's commit on its own, ahead of React's commit
-  // (views React re-renders, e.g. LinearGradient colours, changed 4-8 frames after the engine-bound ones).
+  // `mountSynchronously = false` (hookDeferred without a scheduler) queues the mount with RuntimeScheduler::scheduleRenderingUpdate
+  // (Scheduler.cpp), which only the JS thread may call, inside a task. Mounted at once instead, Android showed LinearGradient colours
+  // 4-8 frames after the bound views. Mounted at the end of this task, it still came before React's commit of a render React did
+  // not do in this task (colours read with useResolveClassNames / useCSSVariable): that is why hookDeferred no longer commits here.
   commitTick(*ui, !deferred);
 
-  const double elapsed = ms(t0, Clock::now());
+#if SHADEWIND_DEV_TOOLS
+  const double elapsed = ms(clock.start, Clock::now());
 
   return timingsOf(rt, _engine.hook().stats(), elapsed, elapsed);
+#else
+  return jsi::Value::undefined(); // timings exist only with SHADEWIND_DEV_TOOLS
+#endif
+}
+
+// setDiagnostics(flags): which events the hook records (Diagnostics.hpp: 1 mounts, 2 unmounts, 4 updates); 0 turns it off.
+// Returns false when this build has no recorder (a release build).
+jsi::Value HybridShadewind::setDiagnostics(jsi::Runtime&, const jsi::Value&, const jsi::Value* args, size_t count) {
+  const double flags = count > 0 && args[0].isNumber() ? args[0].asNumber() : 0;
+
+  _engine.hook().diagnostics().setFlags(static_cast<uint32_t>(flags));
+
+  return jsi::Value(DiagnosticLog::available());
+}
+
+// drainDiagnostics(): { dropped, events: [...] }, everything recorded since the last call (`NativeDiagnostics` in src/internal.tsx).
+jsi::Value HybridShadewind::drainDiagnostics(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
+  auto [events, dropped] = _engine.hook().diagnostics().drain();
+  auto list = jsi::Array(rt, events.size());
+
+  for (size_t i = 0; i < events.size(); i++) {
+    const auto& event = events[i];
+    auto item = jsi::Object(rt);
+    const char* kind = "registered";
+
+    switch (event.kind) {
+      case DiagnosticEvent::Kind::Registered:
+        kind = "registered";
+        break;
+      case DiagnosticEvent::Kind::Unregistered:
+        kind = "unregistered";
+        break;
+      case DiagnosticEvent::Kind::Unbound:
+        kind = "unbound";
+        break;
+      case DiagnosticEvent::Kind::Commit:
+        kind = "commit";
+        break;
+    }
+
+    item.setProperty(rt, "kind", kind);
+    item.setProperty(rt, "live", static_cast<double>(event.live));
+
+    if (event.kind == DiagnosticEvent::Kind::Commit) {
+      auto updates = jsi::Array(rt, event.updates.size());
+
+      for (size_t j = 0; j < event.updates.size(); j++) {
+        const auto& update = event.updates[j];
+        auto view = jsi::Object(rt);
+
+        view.setProperty(rt, "tag", static_cast<double>(update.tag));
+        view.setProperty(rt, "component", update.component != nullptr ? update.component : "");
+        view.setProperty(rt, "styleId", static_cast<double>(update.styleId));
+        view.setProperty(rt, "props", jsi::valueFromDynamic(rt, update.props));
+        view.setProperty(rt, "themeChange", update.themeChange);
+        view.setProperty(rt, "textWithoutLayout", update.textWithoutLayout);
+        updates.setValueAtIndex(rt, j, std::move(view));
+      }
+
+      item.setProperty(rt, "theme", event.theme);
+      item.setProperty(rt, "themeChanged", event.themeChanged);
+      item.setProperty(rt, "reused", event.reused);
+      item.setProperty(rt, "skipped", event.skipped);
+      item.setProperty(rt, "hidden", event.hidden);
+      item.setProperty(rt, "ms", event.ms);
+      item.setProperty(rt, "updates", std::move(updates));
+    } else {
+      item.setProperty(rt, "tag", static_cast<double>(event.tag));
+      item.setProperty(rt, "component", event.component != nullptr ? event.component : "");
+      item.setProperty(rt, "styleId", static_cast<double>(event.styleId));
+    }
+
+    list.setValueAtIndex(rt, i, std::move(item));
+  }
+
+  auto result = jsi::Object(rt);
+
+  result.setProperty(rt, "dropped", static_cast<double>(dropped));
+  result.setProperty(rt, "events", std::move(list));
+
+  return result;
 }
 
 } // namespace margelo::nitro::shadewind

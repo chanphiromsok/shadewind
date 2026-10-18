@@ -24,8 +24,12 @@ import {
   ShadewindEngine,
   toNativeProps,
   toNativePropsWith,
+  type NativeThemeTransition,
   type ThemeStrategy,
+  type ThemeTransitionPreset,
 } from './internal';
+
+export type { ThemeTransitionPreset };
 
 // Public API, see docs/API.md. Everything diagnostic or benchmark-only lives in `shadewind/internal`.
 
@@ -55,7 +59,11 @@ export type Capabilities = Readonly<{
 }>;
 
 export type ShadewindErrorCode =
-  'UNKNOWN_THEME' | 'TOO_MANY_THEMES' | 'DUPLICATE_THEME' | 'NOT_CONFIGURED';
+  | 'UNKNOWN_THEME'
+  | 'TOO_MANY_THEMES'
+  | 'DUPLICATE_THEME'
+  | 'NOT_CONFIGURED'
+  | 'UNKNOWN_TRANSITION';
 
 export class ShadewindError extends Error {
   code: ShadewindErrorCode;
@@ -67,11 +75,30 @@ export class ShadewindError extends Error {
   }
 }
 
+/**
+ * An animated theme change: a snapshot of the old screen is laid over the app, the theme is switched underneath it, and the
+ * snapshot fades out once the new theme is mounted ('fade'), or first blurs for half the time and then fades ('blur'; Android
+ * below 12 fades without the blur). It never takes touches. Skipped (instant switch) when the OS asks for reduced
+ * motion, when the app is in the background or has no window. Default: no transition.
+ */
+export type ThemeTransition = {
+  type: ThemeTransitionPreset;
+  /** Length of the whole transition in ms (default 250, at most 2000). 0 or less: instant. */
+  durationMs?: number;
+};
+
+export type SetThemeOptions = {
+  /** Overrides the default set by `configure` / `setDefaultTransition`; `false` forces an instant switch. */
+  transition?: ThemeTransition | false;
+};
+
 export type ConfigureOptions = {
   themes: readonly ThemeName[];
   initialTheme: ThemeName;
   /** What to do when a binding cannot use the fast path (it renders through React instead). Default 'warn'. */
   onUnsupported?: 'warn' | 'throw' | 'silent';
+  /** Transition for every theme change that does not pass its own (Uniwind's setTheme included). Default: none. */
+  transition?: ThemeTransition;
 };
 
 const SUPPORTED_KEYS: readonly ThemeKey[] = [
@@ -94,8 +121,14 @@ type Config = {
 };
 
 let config: Config | null = null;
+let defaultTransition: ThemeTransition | undefined;
 let current: string | null = null;
 let stopFollowing: (() => void) | null = null;
+// Set by shadewind/uniwind: an explicit setTheme goes to Uniwind, whose listener brings the engine along (applyUniwindTheme).
+let themeDriver: ((name: string) => void) | null = null;
+// The setTheme call the driver is running, so its listener uses the call's transition and keeps followSystem; Uniwind notifies
+// synchronously.
+let driving: { transition: ThemeTransition | false | undefined } | null = null;
 const listeners = new Set<(theme: ThemeName) => void>();
 
 const assertConfigured = (): Config => {
@@ -111,7 +144,7 @@ const assertConfigured = (): Config => {
 
 /** Declares the themes. Call once, before the first render. A different list needs a reload (native state is per process). */
 export function configure(options: ConfigureOptions): void {
-  const { themes, initialTheme, onUnsupported = 'warn' } = options;
+  const { themes, initialTheme, onUnsupported = 'warn', transition } = options;
 
   if (new Set(themes).size !== themes.length) {
     throw new ShadewindError('DUPLICATE_THEME', 'duplicate theme name');
@@ -135,6 +168,9 @@ export function configure(options: ConfigureOptions): void {
     );
   }
 
+  // throws on a bad preset here: as the default it would make every later switch throw before it applies
+  nativeTransition(transition);
+
   if (config) {
     const same =
       config.themes.length === themes.length &&
@@ -147,6 +183,7 @@ export function configure(options: ConfigureOptions): void {
     }
 
     config.onUnsupported = onUnsupported;
+    defaultTransition = transition ?? defaultTransition;
 
     return;
   }
@@ -161,6 +198,7 @@ export function configure(options: ConfigureOptions): void {
   }
 
   config = { themes: [...themes], onUnsupported };
+  defaultTransition = transition ?? defaultTransition; // setDefaultTransition may have run first
   current = initialTheme;
   ShadewindEngine.setTheme(initialTheme, 'hook');
 }
@@ -179,7 +217,46 @@ export function subscribe(listener: (theme: ThemeName) => void): () => void {
   };
 }
 
-const applyTheme = (name: string, strategy?: ThemeStrategy) => {
+const MAX_TRANSITION_MS = 2000;
+const DEFAULT_TRANSITION_MS = 250;
+
+/** Validates and normalises a transition for the native call; undefined means an instant switch. */
+const nativeTransition = (
+  transition: ThemeTransition | false | undefined
+): NativeThemeTransition | undefined => {
+  if (!transition) {
+    return undefined;
+  }
+
+  const { type, durationMs = DEFAULT_TRANSITION_MS } = transition;
+
+  if (type !== 'fade' && type !== 'blur') {
+    throw new ShadewindError(
+      'UNKNOWN_TRANSITION',
+      `unknown transition '${String(type)}' (fade, blur)`
+    );
+  }
+
+  if (!(durationMs > 0)) {
+    return undefined; // 0, negative or NaN: instant
+  }
+
+  return { type, durationMs: Math.min(durationMs, MAX_TRANSITION_MS) };
+};
+
+/** Sets the transition used by every theme change that passes none of its own (also Uniwind's). `undefined` clears it. */
+export function setDefaultTransition(
+  transition: ThemeTransition | undefined
+): void {
+  nativeTransition(transition); // throws on a bad preset now, not at the first switch
+  defaultTransition = transition;
+}
+
+const applyTheme = (
+  name: string,
+  strategy?: ThemeStrategy,
+  transition?: ThemeTransition | false
+) => {
   const { themes } = assertConfigured();
 
   if (!themes.includes(name)) {
@@ -193,25 +270,82 @@ const applyTheme = (name: string, strategy?: ThemeStrategy) => {
     return;
   }
 
+  const animated = nativeTransition(
+    transition === undefined ? defaultTransition : transition
+  );
+
   current = name;
-  ShadewindEngine.setTheme(name, strategy);
+  ShadewindEngine.setTheme(name, strategy, animated);
   listeners.forEach((listener) => listener(name as ThemeName));
 };
 
-/** Switches every bound view without rendering React components. Rapid calls: the last one wins. */
-export function setTheme(name: ThemeName): void {
+/**
+ * Switches every bound view without rendering React components. Rapid calls: the last one wins.
+ * `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })` cross-fades instead of switching at once; `type: 'blur'`
+ * blurs the old screen first.
+ */
+export function setTheme(name: ThemeName, options?: SetThemeOptions): void {
+  const transition = options?.transition;
+
   stopFollowing?.();
-  applyTheme(name);
+
+  if (!themeDriver) {
+    applyTheme(name, undefined, transition);
+
+    return;
+  }
+
+  // checked before the driver runs: its listener only warns, so a throw there would leave Uniwind switched and the engine not
+  if (!assertConfigured().themes.includes(name)) {
+    throw new ShadewindError(
+      'UNKNOWN_THEME',
+      `theme '${name}' was not declared`
+    );
+  }
+
+  nativeTransition(transition);
+
+  // Called even when the engine is on `name` already: Uniwind decides whether it changes, so both end on the same theme.
+  driving = { transition };
+
+  try {
+    themeDriver(name);
+  } finally {
+    driving = null;
+  }
+
+  // Uniwind was on `name` already while the engine was not, so it notified nobody
+  if (current !== name) {
+    applyTheme(name, undefined, transition);
+  }
 }
 
 /**
- * For shadewind/uniwind: a Uniwind theme change, applied so the native commit is mounted together with the React commit that
- * Uniwind's own subscribers trigger in the same task (see ThemeStrategy 'hookDeferred'). Not part of the public API.
+ * For shadewind/uniwind: routes setTheme through Uniwind's setTheme, so Uniwind and the engine never hold different themes.
+ * Not part of the public API.
+ * @internal
+ */
+export function setThemeDriver(driver: ((name: string) => void) | null): void {
+  themeDriver = driver;
+}
+
+/**
+ * For shadewind/uniwind: a Uniwind theme change, applied by the React commit that Uniwind's own subscribers trigger (see
+ * ThemeStrategy 'hookDeferred'), so the engine's views and React's change together. Not part of the public API.
  * @internal
  */
 export function applyUniwindTheme(name: ThemeName): void {
-  stopFollowing?.();
-  applyTheme(name, 'hookDeferred');
+  if (!driving) {
+    stopFollowing?.();
+  }
+
+  // `__SHADEWIND_UNIWIND_STRATEGY__`: for measuring only (docs/BENCHMARK.md, "Uniwind with hookAsync"); hookDeferred is what keeps
+  // views React re-renders in the same frame as the engine's
+  const strategy =
+    (globalThis as { __SHADEWIND_UNIWIND_STRATEGY__?: ThemeStrategy })
+      .__SHADEWIND_UNIWIND_STRATEGY__ ?? 'hookDeferred';
+
+  applyTheme(name, strategy, driving?.transition);
 }
 
 /** Follows the OS appearance. An explicit setTheme() stops following. Returns an unsubscribe. */
@@ -350,6 +484,9 @@ const nativeFor = (key: string, styles: ThemedStyles) => {
         toNativeProps(style as ThemedStyle),
       ])
     );
+    if (__DEV__) {
+      ShadewindEngine.label(native, `useThemed: ${key}`);
+    }
     nativeByKey.set(key, native);
   }
 
@@ -504,16 +641,20 @@ export function useThemedProps<T extends Record<string, unknown>>(
   const key = JSON.stringify([valuesByTheme, options.colorKeys]);
   const stable = useMemo(() => valuesByTheme, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const colorKeys = options.colorKeys ?? [];
-  const native = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(stable).map(([name, values]) => [
-          name,
-          toNativePropsWith(values as Record<string, unknown>, colorKeys),
-        ])
-      ),
-    [stable] // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  const native = useMemo(() => {
+    const converted = Object.fromEntries(
+      Object.entries(stable).map(([name, values]) => [
+        name,
+        toNativePropsWith(values as Record<string, unknown>, colorKeys),
+      ])
+    );
+
+    if (__DEV__) {
+      ShadewindEngine.label(converted, `useThemedProps: ${key}`);
+    }
+
+    return converted;
+  }, [stable]); // eslint-disable-line react-hooks/exhaustive-deps
   // no cleanup: the binding outlives a Suspense/Activity hide (see useThemed)
   const ref = useCallback<RefCallback<unknown>>(
     (node) => {

@@ -25,7 +25,8 @@ What changed (all in the branch above):
 2. **`hookDeferred`** (new `setTheme` strategy, `cpp/HybridShadewind.cpp`, `src/internal.tsx`, `applyUniwindTheme` in `src/index.tsx`,
    used by `src/uniwind/install.ts`): the commit runs on the JS thread but is mounted with `mountSynchronously = false`, i.e. queued on the
    RuntimeScheduler with React's own commit of the same task. Engine-bound views and views React re-renders (LinearGradient colours)
-   then change in the same frame. It is applied on iOS and Android. The public `setTheme` default is still `hookAsync`.
+   then change in the same frame. It is applied on iOS and Android. The public `setTheme` default is still `hookAsync`
+   (with the Uniwind adapter active, `setTheme` goes through `Uniwind.setTheme` and so uses `hookDeferred` too).
 3. **Podspec / package.json**: `cpp/harness`, `cpp/tests`, `cpp/experiments` are no longer compiled into the app (the gtest files broke
    the first iOS app build) nor packed.
 4. **Harness**: Android mode feeds signed colours and decodes them as Java does; new test `AndroidColours.CssStringsSurviveJavaDoubleToInt`.
@@ -86,7 +87,7 @@ How to reproduce the checks: build tovtam with `shadewind` from the tarball (`no
 -PreactNativeArchitectures=arm64-v8a` with the debug keystore passed by `-PMYAPP_RELEASE_*`), record the Account > Theme sheet switch with the argent
 screen recorder (`trimStatic: false`) and compare the frame where each region changes (`ffmpeg ... signalstats`). Recordings are
 in `.argent/recordings` (git-ignored). Environment: `ASDF_RUBY_VERSION=3.2.0` for `pod` in `example-real/ios`; example-real needs
-`bash scripts/arm.sh engine` (writes git-ignored `src/aotImpl.ts` etc.); the emulator was nearly full (use `adb shell pm uninstall -k <app>`
+`bash scripts/arm.sh engine` (writes git-ignored `src/cnImpl.ts` etc.); the emulator was nearly full (use `adb shell pm uninstall -k <app>`
 then `adb install` to keep app data).
 
 ## What was done

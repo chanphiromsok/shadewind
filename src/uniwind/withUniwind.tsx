@@ -1,5 +1,6 @@
 import { createElement, type ComponentType } from 'react';
 import { withUniwind as uniwindWithUniwind } from 'uniwind-internal/hoc/withUniwind.native';
+import { withUserStyle } from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 
 // Uniwind's `withUniwind(Component)` for the common case: a component that takes `className` and passes `style` (and `ref`)
@@ -34,7 +35,9 @@ export const withUniwind = (
     return createElement(Component, {
       ...props,
       ref,
-      ...(props.className ? { style: [style, props.style] } : null),
+      ...(props.className
+        ? { style: withUserStyle(style, props.style) }
+        : null),
     });
   };
 

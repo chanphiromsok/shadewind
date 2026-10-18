@@ -8,17 +8,17 @@ import RootNavigator from './src/navigation/RootNavigator';
 import { startup } from './src/bench/startup';
 import { FeedSample } from './src/bench/FeedSample';
 import { FeedSampleStatic } from './src/bench/FeedSampleStatic';
-import { FeedSampleAot } from './src/bench/FeedSampleAot';
 import { FeedSampleNoPress } from './src/bench/FeedSampleNoPress';
 import { runIdle, runStall, type IdleResult, type StallResult } from './src/bench/stall';
 import { ResolveBench } from './src/bench/ResolveBench';
+import { TheirBench } from './src/bench/TheirBench';
 
-type Kind = 'class' | 'static' | 'aot' | 'nopress';
-const KINDS: Kind[] = ['class', 'aot', 'nopress', 'static'];
+type Kind = 'class' | 'static' | 'nopress';
+const KINDS: Kind[] = ['class', 'nopress', 'static'];
 
 // `-realBench 1` runs the switch benchmark by itself 15 s after launch and shows the result on top of the app.
 function AutoBench() {
-  const [result, setResult] = useState<{ stall: StallResult; idle: IdleResult; mountMs: number; staticMs: number; aotMs: number; noPressMs: number } | null>(null);
+  const [result, setResult] = useState<{ stall: StallResult; idle: IdleResult; mountMs: number; staticMs: number; noPressMs: number } | null>(null);
   const [variant, setVariant] = useState<Kind>('class');
   const [mountKey, setMountKey] = useState<number | null>(null);
   const waiter = useRef<(() => void) | null>(null);
@@ -31,7 +31,7 @@ function AutoBench() {
     const t = setTimeout(async () => {
       // initial render: mount 30 cards, 10 times; each time from setState to the root's onLayout
       const perf = (globalThis as unknown as { performance: { now(): number } }).performance;
-      const times: Record<Kind, number[]> = { class: [], static: [], aot: [], nopress: [] };
+      const times: Record<Kind, number[]> = { class: [], static: [], nopress: [] };
 
       // the variants alternate inside one launch, so launch-to-launch noise cancels
       // each cycle rotates the order, so every variant takes every slot equally often (the first mount of each is dropped)
@@ -53,12 +53,11 @@ function AutoBench() {
       const mean = (a: number[]) => +(a.slice(1).reduce((x, y) => x + y, 0) / (a.length - 1)).toFixed(1);
       const mountMs = mean(times.class);
       const staticMs = mean(times.static);
-      const aotMs = mean(times.aot);
       const noPressMs = mean(times.nopress);
       const idleResult = await runIdle();
       const stall = await runStall();
 
-      setResult({ stall, idle: idleResult, mountMs, staticMs, aotMs, noPressMs });
+      setResult({ stall, idle: idleResult, mountMs, staticMs, noPressMs });
     }, 15000);
 
     return () => clearTimeout(t);
@@ -69,8 +68,6 @@ function AutoBench() {
       <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, overflow: 'hidden' }}>
         {variant === 'class' ? (
           <FeedSample key={mountKey} onLayout={() => waiter.current?.()} />
-        ) : variant === 'aot' ? (
-          <FeedSampleAot key={mountKey} onLayout={() => waiter.current?.()} />
         ) : variant === 'nopress' ? (
           <FeedSampleNoPress key={mountKey} onLayout={() => waiter.current?.()} />
         ) : (
@@ -84,7 +81,7 @@ function AutoBench() {
       <Text testID="auto-stall" className="text-xs text-inverse">
         IDLE median {result.idle.medianMs} ms (sync {result.idle.syncMs}, micro {result.idle.microMs}), worst {result.idle.worstMs} | STALL median{' '}
         {result.stall.medianMs} ms, worst {result.stall.worstMs} | first feed layout {String(startup.firstLayoutMs)} ms | MOUNT
-        30 cards className {result.mountMs} ms, aot {result.aotMs} ms, no Pressable {result.noPressMs} ms, static host {result.staticMs} ms
+        30 cards className {result.mountMs} ms, no Pressable {result.noPressMs} ms, static host {result.staticMs} ms
       </Text>
     </View>
   ) : (
@@ -118,6 +115,11 @@ function Probe() {
 }
 
 export default function App() {
+  // `-theirBench theme`: the uniwind-benchmarks theme scenario with className, instead of the app (src/bench/TheirBench.tsx)
+  if (Settings.get('theirBench')) {
+    return <TheirBench />;
+  }
+
   return (
     <SafeAreaProvider>
       <RootNavigator />

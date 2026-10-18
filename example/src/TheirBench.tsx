@@ -3,15 +3,30 @@
 // (performance.now() at the theme call until requestIdleCallback), same colours (global.css of apps/uniwind).
 // Added on top, so the engine's async strategies are not flattered by a 0.1 ms JS return:
 //   visual = setTheme call until the main thread finished mounting it (ThemeTimings.visualMs, reported by the NEXT call),
-//   inspect = treeOK / nativeOK after the run.
+//   inspect = treeOK / nativeOK after the run,
+//   commit  = with `-commitProbe 1`: one small React state update ~100 ms after each switch, timed from setState until its layout effect
+//             (render + commit, the commit hook included). It shows what a background-thread switch postpones to the next React commit.
+//             `baseline` is the same update before any switch.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, Settings, StyleSheet, Text, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  Settings,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {
   ShadewindEngine,
   useThemedRef,
   type ThemeStrategy,
   type ThemedStyles,
 } from 'shadewind/internal';
+
+// -commitProbe 1: also time one React commit after every switch (see the header comment)
+const COMMIT_PROBE = Boolean(Settings.get('commitProbe'));
+const COMMIT_DELAY = 100;
 
 const RUNS = 10;
 const ITEMS_COUNT = 1000;
@@ -66,10 +81,41 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
+// A tiny component whose state update is one React commit; `ping()` resolves with the ms from setState to its layout effect.
+let pingImpl: (() => Promise<number>) | null = null;
+
+function Ping() {
+  const [n, setN] = useState(0);
+  const t0 = useRef(0);
+  const done = useRef<((ms: number) => void) | null>(null);
+
+  pingImpl = () =>
+    new Promise<number>((resolve) => {
+      done.current = resolve;
+      t0.current = performance.now();
+      setN((v) => v + 1);
+    });
+
+  useLayoutEffect(() => {
+    if (done.current) {
+      const resolve = done.current;
+
+      done.current = null;
+      resolve(performance.now() - t0.current);
+    }
+  }, [n]);
+
+  return (
+    <Text style={styles.ping}>{COMMIT_PROBE ? `commit probe ${n}` : ''}</Text>
+  );
+}
+
 type Result = {
   strategy: ThemeStrategy;
   js: number[];
   visual: number[];
+  commit: number[];
+  baseline: number[];
   inspect: string;
   parts: string;
 };
@@ -96,13 +142,31 @@ export default function TheirBench({
   const [result, setResult] = useState<Result | null>(null);
   const js = useRef<number[]>([]);
   const visual = useRef<number[]>([]);
+  const commit = useRef<number[]>([]);
+  const baseline = useRef<number[]>([]);
   const parts = useRef<Array<Record<string, number | string | undefined>>>([]);
   const started = useRef(0);
 
-  const start = () => {
+  const start = async () => {
     js.current = [];
     visual.current = [];
+    commit.current = [];
+    baseline.current = [];
     parts.current = [];
+
+    if (COMMIT_PROBE && pingImpl) {
+      // three ordinary React commits before any switch (the first is dropped: it warms the path)
+      for (let i = 0; i < 4; i++) {
+        const ms = await pingImpl();
+
+        if (i > 0) {
+          baseline.current.push(ms);
+        }
+
+        await new Promise<void>((r) => setTimeout(() => r(), 50));
+      }
+    }
+
     ShadewindEngine.setTheme('light', strategy); // unmeasured switch to light, like their harness
     setResult(null);
     setTimeout(() => setRun(0), 600);
@@ -127,7 +191,7 @@ export default function TheirBench({
 
     const timer = setTimeout(() => {
       const t0 = performance.now();
-      const timings = ShadewindEngine.setTheme(
+      const timings = ShadewindEngine.setThemeTimed(
         run % 2 === 0 ? 'dark' : 'light',
         strategy
       );
@@ -151,6 +215,19 @@ export default function TheirBench({
       // @ts-ignore requestIdleCallback exists on Hermes + RN
       requestIdleCallback(() => {
         js.current.push(performance.now() - t0);
+
+        if (COMMIT_PROBE && pingImpl) {
+          // one React commit COMMIT_DELAY ms after the switch: a background switch leaves the views for this commit to theme again
+          setTimeout(() => {
+            pingImpl?.().then((ms) => {
+              commit.current.push(ms);
+              setRun((r) => r + 1);
+            });
+          }, COMMIT_DELAY);
+
+          return;
+        }
+
         setRun((r) => r + 1);
       });
     }, DELAY_BETWEEN_RUNS);
@@ -164,7 +241,7 @@ export default function TheirBench({
     }
 
     // one more call reports the last switch's visualMs (re-applies the same theme, so it is a no-op change)
-    const last = ShadewindEngine.setTheme(
+    const last = ShadewindEngine.setThemeTimed(
       (RUNS - 1) % 2 === 0 ? 'dark' : 'light',
       strategy
     );
@@ -180,6 +257,8 @@ export default function TheirBench({
         strategy,
         js: js.current,
         visual: visual.current,
+        commit: commit.current,
+        baseline: baseline.current,
         parts: (() => {
           const mean = (k: string) =>
             avg(parts.current.map((p) => Number(p[k] ?? 0))).toFixed(2);
@@ -198,6 +277,7 @@ export default function TheirBench({
     <View style={styles.root}>
       <Text style={styles.title}>Uniwind Benchmark (shadow engine port)</Text>
 
+      <Ping />
       <Card>
         <Typo style={styles.cardText}>
           {running
@@ -217,6 +297,11 @@ export default function TheirBench({
             <Typo
               style={styles.cardText}
             >{`Visual (call to mounted) avg: ${avg(result.visual).toFixed(2)}ms  max: ${Math.max(0, ...result.visual).toFixed(2)}ms`}</Typo>
+            {COMMIT_PROBE ? (
+              <Typo
+                style={styles.cardText}
+              >{`React commit after switch: median ${med(result.commit).toFixed(2)}ms avg ${avg(result.commit).toFixed(2)}ms | baseline commit (no switch) median ${med(result.baseline).toFixed(2)}ms`}</Typo>
+            ) : null}
             <Typo style={styles.cardText}>{`${result.inspect}`}</Typo>
             <Typo style={styles.cardText}>{result.parts}</Typo>
             <Typo
@@ -288,6 +373,7 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: '#555', padding: 8, borderRadius: 6 },
   btnOn: { backgroundColor: '#1a6fdc' },
   btnText: { color: '#fff' },
+  ping: { fontSize: 1, height: 2, color: 'transparent' },
   grid: { gap: 8, flexDirection: 'row', flexWrap: 'wrap' },
   item: {
     width: '32%',

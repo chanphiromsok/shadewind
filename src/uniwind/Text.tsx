@@ -1,8 +1,12 @@
 import { use, useState, type ComponentType } from 'react';
 import { Platform, Text as RNText, type TextProps } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
-import { useAccentColor } from 'uniwind-internal/components/native/useAccentColor';
-import { NativeText, TextAncestorContext, textIsPlain } from './native';
+import {
+  NativeText,
+  TextAncestorContext,
+  textIsPlain,
+  withUserStyle,
+} from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 
 type Props = TextProps & {
@@ -19,15 +23,16 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       isPressed,
       isDisabled: Boolean((props as { disabled?: boolean }).disabled),
     };
-    const { style, themed, onRegisterFailed } = useShadewindStyle(
+    const {
+      style,
+      themed,
+      onRegisterFailed,
+      accentColor: selectionColor,
+    } = useShadewindStyle(
       props.className,
       props,
-      state
-    );
-    const selectionColor = useAccentColor(
-      props.selectionColorClassName,
-      props,
-      state
+      state,
+      props.selectionColorClassName
     );
     const ref = useEngineRef(
       themed,
@@ -49,7 +54,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
         <NativeText
           {...props}
           ref={ref}
-          style={[style, props.style]}
+          style={withUserStyle(style, props.style)}
           accessible={Platform.OS === 'ios'}
           allowFontScaling
           ellipsizeMode={props.ellipsizeMode ?? 'tail'}
@@ -61,7 +66,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       <RNText
         {...props}
         ref={ref}
-        style={[style, props.style]}
+        style={withUserStyle(style, props.style)}
         selectionColor={props.selectionColor ?? selectionColor}
         numberOfLines={
           (style as { WebkitLineClamp?: number }).WebkitLineClamp ??

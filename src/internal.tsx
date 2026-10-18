@@ -30,12 +30,19 @@ type RawMethods = {
     isFocused?: unknown,
     isDisabled?: unknown
   ): ResolvedStyles | undefined;
-  setTheme(name: string, strategy?: ThemeStrategy): ThemeTimings;
+  setTheme(
+    name: string,
+    strategy?: ThemeStrategy,
+    transition?: NativeThemeTransition
+  ): ThemeTimings | undefined;
   flushPending(): void;
   prepare(): void;
-  resetMainBusy(): void;
-  mainBusyMs(): number;
-  inspect(): InspectReport;
+  // inspect and measure: compiled in only with SHADEWIND_DEV_TOOLS (cpp/DevTools.hpp), absent from a release build
+  resetMainBusy?: () => void;
+  mainBusyMs?: () => number;
+  inspect?: () => InspectReport;
+  setDiagnostics(flags: number): boolean;
+  drainDiagnostics(): NativeDiagnostics;
 };
 
 // Created on first use, not at import: a styling library that imports the engine from a component module can be evaluated before
@@ -81,6 +88,46 @@ export type InspectReport = {
   stale?: string;
 };
 
+/** One view a commit themed (shadewind/diagnostics). */
+export type DiagnosticsUpdate = {
+  tag: number;
+  component: string;
+  styleId: number;
+  /** What the theme gives the view, as registered (colours as ARGB numbers). */
+  props: Record<string, unknown>;
+  /** The theme changed since the view was last themed; false: React replaced its props and the hook themed them again. */
+  themeChange: boolean;
+  /** A Text recoloured without a layout pass. */
+  textWithoutLayout: boolean;
+};
+
+/** What the commit hook recorded (cpp/Diagnostics.hpp). `live`: registered views after the event. */
+export type DiagnosticsEvent =
+  | {
+      kind: 'registered' | 'unregistered' | 'unbound';
+      live: number;
+      tag: number;
+      component: string;
+      styleId: number;
+    }
+  | {
+      kind: 'commit';
+      live: number;
+      theme: string;
+      themeChanged: boolean;
+      reused: number;
+      skipped: number;
+      hidden: number;
+      ms: number;
+      updates: DiagnosticsUpdate[];
+    };
+
+export type NativeDiagnostics = {
+  /** Events lost because more were recorded between two reads than the native log keeps. */
+  dropped: number;
+  events: DiagnosticsEvent[];
+};
+
 /** Native-side breakdown of the engine's last commit, in milliseconds. */
 export type ThemeTimings = {
   /** Views cloned with their theme's props. */
@@ -114,12 +161,22 @@ export type ThemeTimings = {
  * - 'hookAsync' (default): the commit runs on a background thread, the JS thread is free right away. On Android it is synchronous
  *   for now.
  * - 'hook': the commit runs synchronously on the JS thread and is mounted at once.
- * - 'hookDeferred': the commit runs synchronously on the JS thread but its mount is queued on the RuntimeScheduler, so it lands
- *   with the React commit made in the same task (a Uniwind setTheme in a press handler): views the engine handles and views
- *   React re-renders change in the same frame. Only valid inside a JS task.
+ * - 'hookDeferred': no commit of its own. The next commit carries the theme, normally React's for the re-render the switch causes
+ *   (Uniwind's subscribers: useResolveClassNames, useCSSVariable, components that read the theme), so views the engine handles
+ *   and colours React renders change in the same commit, whatever React's priority for that render. A low-priority
+ *   RuntimeScheduler task commits afterwards if no commit carried it. JS thread only.
  * Either way the theme is applied inside a commit hook, so every later commit (React's too) keeps it.
  */
 export type ThemeStrategy = 'hook' | 'hookAsync' | 'hookDeferred';
+
+/** Preset names of an animated theme change. Add a name here and to `ThemeTransitionPreset` in cpp/ShadewindNative.hpp. */
+export type ThemeTransitionPreset = 'fade' | 'blur';
+
+/** What the native overlay is asked for: a preset and its length. */
+export type NativeThemeTransition = {
+  type: ThemeTransitionPreset;
+  durationMs: number;
+};
 
 /** Style subset supported in v0: visual-only props that don't need a Yoga layout pass. */
 export type ThemedStyle = {
@@ -263,21 +320,30 @@ const nativeByStyles = new WeakMap<
 // One id per distinct native styles object: C++ builds its typed props once per id, not once per view.
 const styleIds = new WeakMap<object, number>();
 let nextStyleId = 1;
-const styleIdOf = (native: object): number => {
+const styleIdOf = (native: object, label: string | undefined): number => {
   let id = styleIds.get(native);
 
   if (id === undefined) {
     id = nextStyleId++;
     styleIds.set(native, id);
+
+    if (__DEV__ && label !== undefined) {
+      labelById.set(id, label);
+    }
   }
 
   return id;
 };
 
+// Development only: what each style is (a className, a useThemed object), so shadewind/diagnostics can name a view by its style id.
+const styleLabels = new WeakMap<object, string>();
+const labelById = new Map<number, string>();
+
 const registerNative = (
   ref: unknown,
   native: Record<string, Record<string, unknown>>,
-  renderTheme: string | undefined
+  renderTheme: string | undefined,
+  label: string | undefined
 ): boolean => {
   const key = typeof ref === 'object' && ref !== null ? ref : null;
 
@@ -293,7 +359,7 @@ const registerNative = (
 
   pendingNodes.push(node);
   pendingProps.push(native);
-  pendingIds.push(styleIdOf(native));
+  pendingIds.push(styleIdOf(native, label));
   pendingThemes.push(renderTheme);
 
   if (key !== null) {
@@ -303,6 +369,27 @@ const registerNative = (
   scheduleFlush();
 
   return true;
+};
+
+type DevToolName = 'inspect' | 'resetMainBusy' | 'mainBusyMs';
+
+// Calls a dev tool of the native module (as a method: Nitro needs `this`), or throws an error that says why it is missing: it is
+// not compiled into a release build.
+const callDevTool = <K extends DevToolName>(
+  name: K
+): ReturnType<NonNullable<RawMethods[K]>> => {
+  const native = getNative();
+
+  if (typeof native[name] !== 'function') {
+    throw new Error(
+      `[shadewind] ${name}() is not in this native build: it exists in debug builds, or in a release build made with ` +
+        'SHADEWIND_DEV_TOOLS=1 (pod install) / shadewindDevTools=true (gradle.properties)'
+    );
+  }
+
+  return (native[name] as () => ReturnType<NonNullable<RawMethods[K]>>).call(
+    native
+  );
 };
 
 export const ShadewindEngine = {
@@ -361,7 +448,7 @@ export const ShadewindEngine = {
       nativeByStyles.set(styles, native);
     }
 
-    return registerNative(ref, native, renderTheme);
+    return registerNative(ref, native, renderTheme, styleLabels.get(styles));
   },
   /** Registers with props already converted by toNativeProps (used by the public useThemed). */
   registerRaw(
@@ -369,7 +456,30 @@ export const ShadewindEngine = {
     native: Record<string, Record<string, unknown>>,
     renderTheme?: string
   ) {
-    return registerNative(ref, native, renderTheme);
+    return registerNative(ref, native, renderTheme, styleLabels.get(native));
+  },
+  /** Development only: names a styles object (as passed to register / registerRaw) in shadewind/diagnostics. */
+  label(styles: object, label: string): void {
+    if (__DEV__) {
+      styleLabels.set(styles, label);
+    }
+  },
+  /** The label of a style id, if one was given before its first registration. */
+  labelOf(styleId: number): string | undefined {
+    return labelById.get(styleId);
+  },
+  /**
+   * Development diagnostics: which events the commit hook records (1 mounts, 2 unmounts, 4 updates; 0 off). Returns false when the
+   * native build has no recorder (only Debug builds compile it in).
+   */
+  setDiagnostics(flags: number): boolean {
+    return getNative().setDiagnostics(flags);
+  },
+  /** Everything the commit hook recorded since the last call. Pending registrations are sent first, so their mounts are in it. */
+  drainDiagnostics(): NativeDiagnostics {
+    flushRegistrations();
+
+    return getNative().drainDiagnostics();
   },
   /** Whether `ref` is bound (registered or about to be). */
   isRegistered(ref: unknown): boolean {
@@ -393,19 +503,50 @@ export const ShadewindEngine = {
       getNative().unregister(node);
     }
   },
-  /** Applies a theme to every registered view without rendering any React component. */
-  setTheme(name: string, strategy: ThemeStrategy = 'hookAsync'): ThemeTimings {
+  /**
+   * Applies a theme to every registered view without rendering any React component. Returns the timings of the switch in a build
+   * with the dev tools (debug, or a release that opts in: cpp/DevTools.hpp), undefined otherwise.
+   */
+  setTheme(
+    name: string,
+    strategy: ThemeStrategy = 'hookAsync',
+    transition?: NativeThemeTransition
+  ): ThemeTimings | undefined {
     flushRegistrations();
 
-    return getNative().setTheme(name, strategy);
+    // no third argument without a transition: the instant switch is exactly the call it always was
+    return transition
+      ? getNative().setTheme(name, strategy, transition)
+      : getNative().setTheme(name, strategy);
+  },
+  /** setTheme for a benchmark: the timings, or an error when this native build has none (a release without the dev tools). */
+  setThemeTimed(
+    name: string,
+    strategy: ThemeStrategy = 'hookAsync',
+    transition?: NativeThemeTransition
+  ): ThemeTimings {
+    const timings = ShadewindEngine.setTheme(name, strategy, transition);
+
+    if (!timings) {
+      throw new Error(
+        '[shadewind] setTheme returned no timings: this native build has no dev tools (a release build made without ' +
+          'SHADEWIND_DEV_TOOLS=1 / shadewindDevTools=true)'
+      );
+    }
+
+    return timings;
+  },
+  /** Whether this native build has inspect / resetMainBusy / mainBusyMs and the setTheme timings (cpp/DevTools.hpp). */
+  hasDevTools(): boolean {
+    return typeof getNative().inspect === 'function';
   },
   /** Measurement: clears the longest main-thread busy period (iOS only; starts the run loop observer on first call). */
   resetMainBusy(): void {
-    getNative().resetMainBusy();
+    callDevTool('resetMainBusy');
   },
   /** Measurement: longest main-thread run loop busy period in ms since resetMainBusy (iOS only). */
   mainBusyMs(): number {
-    return getNative().mainBusyMs();
+    return callDevTool('mainBusyMs');
   },
   /** Kept for compatibility; does nothing. */
   prepare(): void {
@@ -415,7 +556,7 @@ export const ShadewindEngine = {
   inspect(): InspectReport {
     flushRegistrations();
 
-    return getNative().inspect();
+    return callDevTool('inspect');
   },
   getTheme(): string {
     return getNative().getTheme();

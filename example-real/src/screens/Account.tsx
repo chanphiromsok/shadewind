@@ -3,12 +3,17 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Uniwind } from 'uniwind';
+import { ShadewindEngine } from 'shadewind/internal';
 import { decisions, renders, status } from '../engineReport';
 import type { RootStackParamList } from '../navigation/types';
 import { Row } from '../components/ui';
 import { runStall, type StallResult } from '../bench/stall';
 import { cn } from '../cn';
 import { ThemeSwitchMeter } from '../bench/ThemeSwitchMeter';
+// the transition test row exists only when a transition is asked for, so the default screen, and the view count the
+// theme-switch meter is compared with, stay as they were
+import { TRANSITION } from '../transitionConfig';
+
 
 export default function Account() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -36,6 +41,46 @@ export default function Account() {
           </Pressable>
         ))}
       </View>
+
+      {TRANSITION && (
+        <>
+        <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Theme transition (test): {TRANSITION.type} {TRANSITION.durationMs} ms</Text>
+        <View className="mx-3 flex-row overflow-hidden rounded-2xl bg-card">
+          <Pressable
+            testID="transition-uniwind"
+            onPress={() => Uniwind.setTheme(Uniwind.currentTheme === 'dark' ? 'light' : 'dark')}
+            className="flex-1 items-center py-4 active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-primary">hookDeferred</Text>
+          </Pressable>
+          <Pressable
+            testID="transition-engine"
+            onPress={() =>
+              // 'hookAsync' on purpose (the commit off the JS thread): the public setTheme goes through Uniwind (hookDeferred).
+              // Engine only: Uniwind is not told, so the next Uniwind switch puts the two back in step.
+              ShadewindEngine.setTheme(ShadewindEngine.getTheme() === 'dark' ? 'light' : 'dark', 'hookAsync', TRANSITION ?? undefined)
+            }
+            className="flex-1 items-center py-4 active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-primary">hookAsync</Text>
+          </Pressable>
+          <Pressable
+            testID="toggle-x3"
+            onPress={() => {
+              // three switches within 150 ms: no orphan overlay, ends in the last theme
+              const next = Uniwind.currentTheme === 'dark' ? 'light' : 'dark';
+
+              Uniwind.setTheme(next);
+              setTimeout(() => Uniwind.setTheme(next === 'dark' ? 'light' : 'dark'), 70);
+              setTimeout(() => Uniwind.setTheme(next), 140);
+            }}
+            className="flex-1 items-center py-4 active:opacity-70"
+          >
+            <Text className="text-sm font-semibold text-primary">Toggle ×3</Text>
+          </Pressable>
+        </View>
+        </>
+      )}
 
       <Text className="px-4 pb-2 pt-6 text-xs font-semibold uppercase text-secondary">Settings</Text>
       <View className="mx-3 overflow-hidden rounded-2xl">

@@ -23,6 +23,16 @@ Pod::Spec.new do |s|
 
   s.dependency 'React-jsi'
   s.dependency 'React-callinvoker'
+  s.dependency 'React-runtimescheduler' # hookDeferred schedules its fallback commit there (HybridShadewind::setTheme)
+
+  # Debug builds only: the diagnostics recorder (cpp/Diagnostics.hpp) and the dev tools, i.e. inspect, setTheme timings, the
+  # main-thread busy probe (cpp/DevTools.hpp). A release build that is used to measure opts in to the dev tools with
+  # SHADEWIND_DEV_TOOLS=1 in the environment of `pod install`. Set before the helpers below, which merge their settings into this hash.
+  xcconfig = {
+    "GCC_PREPROCESSOR_DEFINITIONS[config=Debug]" => "$(inherited) SHADEWIND_DIAGNOSTICS=1 SHADEWIND_DEV_TOOLS=1",
+  }
+  xcconfig["GCC_PREPROCESSOR_DEFINITIONS"] = "$(inherited) SHADEWIND_DEV_TOOLS=1" if ENV["SHADEWIND_DEV_TOOLS"] == "1"
+  s.pod_target_xcconfig = xcconfig
 
   load 'nitrogen/generated/ios/Shadewind+autolinking.rb'
   add_nitrogen_files(s)

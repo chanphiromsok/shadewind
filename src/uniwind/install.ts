@@ -54,8 +54,17 @@ const probe = (): InstallResult => {
   // set first: the components need them even when the engine is inactive (they then behave like Uniwind's own)
   internals = { UniwindStore, UniwindListener, StyleDependency };
 
+  // for measuring only (docs/LOCAL_TESTING.md, step 7): the adapter's components without the engine (no refs, no registration,
+  // no native class resolution), set before the app's first render
+  if (
+    (globalThis as { __SHADEWIND_ENGINE_OFF__?: boolean })
+      .__SHADEWIND_ENGINE_OFF__ === true
+  ) {
+    return { active: false, reason: 'turned off (__SHADEWIND_ENGINE_OFF__)' };
+  }
+
   const { Uniwind } = require('uniwind') as {
-    Uniwind: { currentTheme: string };
+    Uniwind: { currentTheme: string; setTheme: (name: string) => void };
   };
   const version = String(
     (require('uniwind/package.json') as { version?: string }).version
@@ -102,6 +111,9 @@ const probe = (): InstallResult => {
       }
     }
   }, [StyleDependency.Theme]);
+
+  // shadewind's own setTheme goes through Uniwind too: one source of truth, the listener above brings the engine along
+  shadewind.setThemeDriver((name) => Uniwind.setTheme(name));
 
   // cache misses of Uniwind's getStyles resolve natively once the class table is built (nativeResolver.ts)
   installNativeResolver(

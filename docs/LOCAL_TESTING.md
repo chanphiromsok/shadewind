@@ -83,7 +83,7 @@ this branch removes.
 ## 5. Theme switch and mount on `example-real` (A/B with the baseline)
 
 Launch argument `-realBench 1` runs the benchmark by itself 15 s after launch and shows the result on top of the app
-(mount of 30 feed cards in four variants, then idle and stall of 12 switches):
+(mount of 30 feed cards in three variants: className, no Pressable, static host; then idle and stall of 12 switches):
 
 ```sh
 xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -realBench 1
@@ -152,6 +152,13 @@ scripts/bench/measure.py ios <udid> uniwind uniwind-shadewind                  #
 scripts/bench/measure.py ios <udid> uniwind uniwind-shadewind --scenario theme # theme scenario
 ```
 
+Mount cost, three arms (render scenario, median of 6 warm launches each, first cold launch discarded, same simulator and build
+type): plain `uniwind`; the engine arm with `globalThis.__SHADEWIND_ENGINE_OFF__ = true;` as the first line of `index.js` (the
+adapter's components with no engine); the engine arm as is. Arm 2 minus arm 1 is the adapter's own pipeline. Arm 3 minus arm 2 is
+everything the engine adds: the plan lookup per view, React attaching a ref (and creating the public instance) per themed view, the
+JS and native registration, and the native class resolver, which may make the first (cold) of the 10 renders faster rather than
+slower. Arm 2 is for the render scenario only: with the engine off, views do not follow a theme switch.
+
 Check every launch on screen (header, "x 10 runs" / "x 10 theme changes"): a fixed sleep has captured wrong screens before. Report
 medians next to `uniwind` from the same run. For the theme scenario note that `hookAsync` leaves the JS thread at once (their
 metric), so also run the engine arm with the synchronous strategy (`Shadewind.setTheme(name, 'hook')`, or the example's
@@ -190,3 +197,12 @@ builds them, not the NDK compile, JNI or Java. First check that it builds and wo
 - the freeze sequences with the probe lines and whether a wrong colour was visible, current and baseline (step 4)
 - per-launch numbers for steps 5-8, with the spread, current and baseline side by side (step 6 on the current code only)
 - anything that failed, with the full output
+
+## Release builds carry no debug code
+
+What exists only to inspect and measure the engine is compiled out of release builds (`SHADEWIND_DEV_TOOLS`, `cpp/DevTools.hpp`):
+`inspect()`, the timings `setTheme` returns, the main-thread busy probe (`resetMainBusy` / `mainBusyMs`), the Paragraph clone
+counters and the timers in the commit hook, and the extra main-thread hop that measured a `hookAsync` switch. Debug builds have them.
+An app that measures in release (as `example-real` and `example` do) opts in with `SHADEWIND_DEV_TOOLS=1` in the environment of
+`pod install` (iOS) and `shadewindDevTools=true` in `android/gradle.properties`. Without them those `shadewind/internal`
+functions throw an error that says so, and `ShadewindEngine.setTheme` returns `undefined`.

@@ -23,7 +23,8 @@ path is an optimisation and never changes behaviour.**
 | `shadewind` | yes | `configure`, `setTheme`, `getTheme`, `subscribe`, `useTheme`, `followSystem`, `capabilities`, `useThemed`, `ThemedView`, `ThemedText`, `mergeRefs`, types, `ShadewindError` |
 | `shadewind/uniwind` | yes | `installUniwind`, `View`, `Text`, `useShadewindStyle`, `ThemeStyleSource` |
 | `shadewind/metro` | yes (CJS) | `withShadewind(config, { uniwind })` |
-| `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending` |
+| `shadewind/diagnostics` | yes, development only | `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })`, `disableDiagnostics`, `flushDiagnostics`; no-ops outside `__DEV__`, native recorder in Debug builds only (`cpp/Diagnostics.hpp`) |
+| `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending`. `inspect`, `resetMainBusy`, `mainBusyMs` and the timings exist in debug builds or with `SHADEWIND_DEV_TOOLS` (`docs/LOCAL_TESTING.md`, "Release builds carry no debug code"); `hasDevTools()`, `setThemeTimed()` |
 
 Benchmark strategies (`stock`, `fastAsync`, `direct`, `both`) move to the example app or a build flag. No `strategy` parameter on
 the public `setTheme`; the native side picks by capability.
@@ -52,7 +53,10 @@ the public `setTheme`; the native side picks by capability.
 ## Switching
 
 - `setTheme(name): void`, queued, idempotent, last call wins. No mounted promise in 1.0 (Android has no background executor or
-  mount hook yet; a future `whenApplied()` is a minor release).
+  mount hook yet; a future `whenApplied()` is a minor release). With the Uniwind adapter active it calls `Uniwind.setTheme` (one source
+  of truth), whose listener applies the engine with `hookDeferred` and the call's transition; Uniwind's subscribers re-render, and
+  their React commit carries the engine's switch (no separate engine commit, so colours React renders change together with the
+  engine's; a low-priority task commits if React does not).
 - `subscribe` / `useTheme()` (`useSyncExternalStore`) for UI the engine does not update (status bar, navigation theme).
 - `followSystem({ map })` on top of `Appearance`, returns unsubscribe; an explicit `setTheme` stops following.
 - No persistence: the app passes the stored value as `initialTheme`.
