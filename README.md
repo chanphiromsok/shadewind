@@ -21,7 +21,8 @@ Theme values only: `backgroundColor`, `borderColor`, `color` and `opacity`. Ever
 With Uniwind, the adapter applies a switch with `hookDeferred`: the engine makes no commit of its own, the React commit of the
 re-render the switch causes carries the theme, so views React re-renders (a `LinearGradient`'s `colors`, a colour read with
 `useResolveClassNames` or `useCSSVariable`) change in the same commit as the engine's, also when the switch comes from outside a press
-handler (system appearance, an effect, a timer). If no React commit follows, a low-priority task commits the switch. The engine's work
+handler (system appearance, an effect, a timer). If no React commit follows, a low-priority task commits the switch. (Harness-tested,
+not yet verified on a device.) The engine's work
 runs on the JS thread inside that commit (about 6 ms for 473 views in `example-real` on the iOS simulator, measured for the previous
 form of `hookDeferred`; see `docs/HANDOFF.md`), and the engine's views now wait for React's re-render.
 

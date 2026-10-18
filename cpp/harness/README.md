@@ -67,6 +67,13 @@ cmake -S . -B build -DHERMES_DIR=<dir>/hermes -DHERMES_BUILD=<dir>/build && cmak
 build/hermes_glue                                    # GLUE_QUICK=1 for a short run, e.g. under valgrind
 ```
 
+## The scheduler order hookDeferred relies on
+
+With `HERMES_DIR` / `HERMES_BUILD` set (see above), `cmake --build build --target scheduler_order && ./build/scheduler_order` runs
+React Native's `RuntimeScheduler_Modern` on a Hermes runtime and checks that a Low task scheduled by a switch runs after the
+UserBlocking and Normal tasks React schedules for the re-render (and a continuation of it), and before an Idle one. Prints
+`ORDER OK` and exits 0, or `ORDER DIFFERS` and exits 1. Mutant: schedule the fallback at Normal priority, expect `ORDER DIFFERS`.
+
 ## Memory: leaks and growth
 
 Three checks, because they find different things:

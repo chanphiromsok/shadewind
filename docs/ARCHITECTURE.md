@@ -860,11 +860,17 @@ no registration since; a commit that failed never becomes the committed root, so
 from the sources: React maps Default and Transition lanes to Normal priority, Continuous to UserBlocking, Idle to Idle
 (`ReactFabric-prod.js`, `scheduleTaskForRootDuringMicrotask`); `RuntimeScheduler_Modern` orders tasks by expiration time, Normal
 timing out after 5 s and Low after 10 s (`SchedulerPriorityUtils.h`), so a React render scheduled within 5 s of the switch, and every
-slice of one React splits, runs first. An Idle-lane render comes after the fallback (the fallback commits then, as before). Costs:
+slice of one React splits, runs first. An Idle-lane render comes after the fallback (the fallback commits then, as before). Run, not
+only read: `cpp/harness/scheduler/order.cpp` drives React Native 0.86.2's `RuntimeScheduler_Modern` with a Hermes runtime (the
+pinned hermes-v250829098.0.16) and gets switch, UserBlocking render, Normal render, its Normal continuation, the Low fallback, then
+Idle; with the fallback at Normal priority the order differs (the check fails). Costs:
 the engine's views now wait for React's re-render (a slow subscriber render delays the whole switch); with nothing to re-render the
 switch waits for one scheduler turn. Any other commit made in between (Reanimated or the animation backend committing from the UI
 thread, the flush of a view registered meanwhile) carries the theme first, and the gap is back for that switch. Harness tests `Deferred*` (the switch makes no commit, the React commit shows every view
 themed and its root passes the transition's mount gate, the fallback is a no-op after it and commits when React did not, rapid
-toggles); mutants of `carriesTheme` (always true, always false, epoch ignored) each fail two or three of them. Not run on a device;
-`HybridShadewind.cpp` is syntax-checked with clang 18 only. The public `setTheme` without Uniwind keeps `hookAsync` on iOS: its
+toggles); mutants of `carriesTheme` (always true, always false, epoch ignored) each fail two or three of them. The `Deferred*` tests exercise `commitUnlessThemed` and
+`carriesTheme`; the `setTheme` path in `HybridShadewind.cpp` that schedules the fallback is syntax-checked with clang 18 only, not
+run. Not run on a device. A commit hook that clones the root after the engine's (Reanimated) makes `carriesTheme` false for every
+committed root, so the fallback then adds one full-walk commit per switch (time, not a visible change). The fallback's `carriesTheme`
+takes the hook's lock, so on iOS it can wait for a background (hookAsync) walk, once per switch, inside the Low task. The public `setTheme` without Uniwind keeps `hookAsync` on iOS: its
 background commit and the React render of `useTheme` subscribers can also land in different frames; not changed here.

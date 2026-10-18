@@ -174,4 +174,13 @@ if(HERMES_DIR AND HERMES_BUILD)
   target_compile_definitions(hermes_glue PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
   target_link_libraries(hermes_glue PRIVATE folly_runtime "${HERMES_BUILD}/lib/libhermesvm.so")
   set_target_properties(hermes_glue PROPERTIES BUILD_RPATH "${HERMES_BUILD}/lib")
+
+  # The task order hookDeferred relies on, on React Native's RuntimeScheduler (scheduler/order.cpp). React Native's jsi (in
+  # rn_renderer) with the Hermes it pins, as an app links them.
+  file(GLOB SCHEDULER_SRC "${RN}/react/renderer/runtimescheduler/*.cpp"
+       "${RN}/jsinspector-modern/tracing/EventLoopReporter.cpp" "${RN}/runtimeexecutor/platform/cxx/ReactCommon/RuntimeExecutorSyncUIThreadUtils.cpp")
+  add_executable(scheduler_order scheduler/order.cpp ${SCHEDULER_SRC})
+  target_include_directories(scheduler_order PRIVATE "${HERMES_DIR}/public" "${HERMES_DIR}/API" "${RN}/runtimeexecutor/platform/cxx")
+  target_link_libraries(scheduler_order PRIVATE harness_support "${HERMES_BUILD}/lib/libhermesvm.so")
+  set_target_properties(scheduler_order PROPERTIES BUILD_RPATH "${HERMES_BUILD}/lib")
 endif()
