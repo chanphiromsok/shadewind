@@ -197,3 +197,12 @@ builds them, not the NDK compile, JNI or Java. First check that it builds and wo
 - the freeze sequences with the probe lines and whether a wrong colour was visible, current and baseline (step 4)
 - per-launch numbers for steps 5-8, with the spread, current and baseline side by side (step 6 on the current code only)
 - anything that failed, with the full output
+
+## Release builds carry no debug code
+
+What exists only to inspect and measure the engine is compiled out of release builds (`SHADEWIND_DEV_TOOLS`, `cpp/DevTools.hpp`):
+`inspect()`, the timings `setTheme` returns, the main-thread busy probe (`resetMainBusy` / `mainBusyMs`), the Paragraph clone
+counters and the timers in the commit hook, and the extra main-thread hop that measured a `hookAsync` switch. Debug builds have them.
+An app that measures in release (as `example-real` and `example` do) opts in with `SHADEWIND_DEV_TOOLS=1` in the environment of
+`pod install` (iOS) and `shadewindDevTools=true` in `android/gradle.properties`. Without them those `shadewind/internal`
+functions throw an error that says so, and `ShadewindEngine.setTheme` returns `undefined`.

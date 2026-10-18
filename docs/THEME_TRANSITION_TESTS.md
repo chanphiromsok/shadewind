@@ -9,7 +9,7 @@ record the file names and frame numbers next to each item (30 fps = 33 ms per fr
 How it works, for reading a failure: `setTheme(name, { transition })` queues a window snapshot on the main / UI thread
 (`themeTransitionBegin`), commits the theme, and fades the snapshot out when Fabric's mount hook reports a tree that ThemeHook
 returned for the new epoch (`ThemeTransition::shadowTreeDidMount` -> `themeTransitionRun`). A native timer fades it anyway after
-1 s. Design notes: `README.md` ("Animated switch"), sources `cpp/ThemeTransition.hpp`, `ios/ShadewindNative.mm`,
+1 s. Design notes: `docs/GUIDE.md` ("Animated switch"), sources `cpp/ThemeTransition.hpp`, `ios/ShadewindNative.mm`,
 `android/.../ThemeTransitionOverlay.kt`.
 
 ## Build

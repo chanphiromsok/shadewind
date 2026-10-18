@@ -1,5 +1,68 @@
 # Theme-change benchmark: this engine vs Uniwind
 
+## Current run (2026-10-18): the Uniwind benchmarks example
+
+Thank you to the Uniwind team for publishing [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks). We used its
+theme-change example as it is, so anyone can repeat the measurement. The screen is a header card plus 1000 items (2003 views),
+mounted once and then switched between light and dark 10 times; each change is timed from `Uniwind.setTheme` until the JavaScript
+thread is idle again, and the app shows the average.
+
+| | Warm launches | Median of 6 |
+|---|---|---|
+| Uniwind 1.12.0 (the example, unmodified) | 93.08 / 101.07 / 100.48 / 101.94 / 99.88 / 100.90 ms | **100.69 ms** |
+| Uniwind 1.12.0 with shadewind (same example) | 2.42 / 2.62 / 2.53 / 2.53 / 2.46 / 2.60 ms | **2.53 ms** |
+
+Rendering (the example's other scenario: the 2003-view list re-mounted 10 times, started without `-benchmarkScenario`), run on the
+code at `9ee5b93` ("cheaper registration"), three builds measured back to back, same protocol (one cold launch discarded, six warm,
+median):
+
+| | Warm launches (ms) | Median of 6 |
+|---|---|---|
+| Uniwind 1.12.0, the example unmodified | 61.66 / 62.29 / 61.92 / 61.83 / 61.90 / 61.44 | **61.86 ms** |
+| shadewind adapter with the engine off (`__SHADEWIND_ENGINE_OFF__`) | 55.23 / 56.71 / 56.26 / 56.11 / 56.25 / 56.85 | **56.25 ms** |
+| shadewind as normal | 61.70 / 60.29 / 62.67 / 60.34 / 62.37 / 62.39 | **62.03 ms** |
+
+Reading it:
+
+- **Mounting with the engine is level with plain Uniwind** (62.03 against 61.86 ms, a difference inside the run-to-run spread). Before the
+  registration changes the same measurement was 64.44 against 61.30 ms, about 5% slower.
+- **The adapter's own views are cheaper than Uniwind's** (56.25 ms), so registering every view with the engine costs about 5.8 ms
+  here, which cancels that gain.
+- Switching is much faster either way (see the table above).
+
+The example's authors publish about 60.7 ms for plain Uniwind rendering, close to the 61.86 ms measured here. I did not check that
+the engine-off build themes every view correctly (this arm exists to measure cost). To repeat the runs yourself, see
+[DEMO.md](DEMO.md).
+
+How it was run, following the example's own method: Release build, React Native 0.86.3, iPhone 17 Pro simulator (iOS 26.5), one
+cold launch discarded, then six warm launches (terminate and relaunch) started with `-benchmarkScenario theme`; the table shows the
+median of the six. Uniwind without shadewind measured close to the 104 ms the example's authors publish for the same version, which
+is a good sign that the machine is comparable.
+
+The example's code is untouched. Two things were added for the shadewind run: `withShadewind` in `metro.config.js`
+(`require('shadewind/metro')`) and a call to `installUniwind()` from `shadewind/uniwind` in `index.js`.
+
+To check that the engine really drives the screen, a Debug build of the same app with `shadewind/diagnostics` reported 2007 views
+registered, 2007 of 2007 matching the theme in the shadow tree, in the native `UIView` colours and in the layer colours, and no
+stale views, in light and after switching to dark. A screen recording of the Release run shows the whole screen switching between
+light and dark ten times.
+
+What this does not show:
+
+- **Time until pixels.** The metric stops when the JavaScript thread is idle; it does not include the main thread finishing the
+  mount. The recording shows the screen switching, but it is not a frame-accurate measurement.
+- **A device.** It is one iOS simulator, one machine, six launches. A phone will be slower, and Android was not measured here.
+- **Your app.** The example is a flat list of themed views. A real app also spends time in components that read theme values, and
+  that part is not sped up (see [KNOWN_LIMITS.md](KNOWN_LIMITS.md)).
+
+To reproduce: clone the Uniwind benchmarks, install only the `uniwind` app, build it in Release, and run it with
+`-benchmarkScenario theme`; then add those two changes and run the same steps again.
+
+## Earlier runs
+
+The tables below are older runs from earlier builds. They call the engine's own `setTheme` strategies directly and are kept for reference.
+
+
 Scenario: the `uni-stack/uniwind-benchmarks` theme-change screen. 2003 views (header card + 1000 items, item text themed too),
 mounted once, then switched dark/light 10 times, 100 ms apart. Each change is timed from the theme call until the JS thread is
 idle (`performance.now()` + `requestIdleCallback`), the app shows the average.
