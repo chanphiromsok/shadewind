@@ -64,6 +64,7 @@ ok('driver: an undeclared theme throws before Uniwind switches', () => { assert.
 ok('driver: Uniwind already on the theme, engine not: the engine is brought to it', () => { uniwind.current = 'dark'; api.setTheme('dark', { transition: fade }); assert.strictEqual(api.getTheme(), 'dark'); assert.deepStrictEqual(last(), ['dark', undefined, fade]); });
 ok('driver: engine already on the theme, Uniwind not: Uniwind is still asked', () => { uniwind.current = 'light'; api.setTheme('dark'); assert.strictEqual(uniwind.current, 'dark'); assert.strictEqual(api.getTheme(), 'dark'); });
 ok('driver: setTheme through the driver does not stop a later applyUniwindTheme', () => { uniwind.setTheme('light'); assert.strictEqual(api.getTheme(), 'light'); });
+ok('driver: __SHADEWIND_UNIWIND_STRATEGY__ picks the engine strategy of the Uniwind path (measuring only)', () => { global.__SHADEWIND_UNIWIND_STRATEGY__ = 'hookAsync'; uniwind.setTheme('dark'); assert.deepStrictEqual(last(), ['dark', 'hookAsync', undefined]); delete global.__SHADEWIND_UNIWIND_STRATEGY__; uniwind.setTheme('light'); assert.deepStrictEqual(last(), ['light', 'hookDeferred', undefined]); });
 api.setThemeDriver(null);
 ok('driver removed: setTheme is engine-only again', () => { api.setTheme('dark'); assert.deepStrictEqual(last(), ['dark', undefined, undefined]); assert.strictEqual(uniwind.current, 'light'); });
 

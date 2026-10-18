@@ -339,7 +339,13 @@ export function applyUniwindTheme(name: ThemeName): void {
     stopFollowing?.();
   }
 
-  applyTheme(name, 'hookDeferred', driving?.transition);
+  // `__SHADEWIND_UNIWIND_STRATEGY__`: for measuring only (docs/BENCHMARK.md, "Uniwind with hookAsync"); hookDeferred is what keeps
+  // views React re-renders in the same frame as the engine's
+  const strategy =
+    (globalThis as { __SHADEWIND_UNIWIND_STRATEGY__?: ThemeStrategy })
+      .__SHADEWIND_UNIWIND_STRATEGY__ ?? 'hookDeferred';
+
+  applyTheme(name, strategy, driving?.transition);
 }
 
 /** Follows the OS appearance. An explicit setTheme() stops following. Returns an unsubscribe. */

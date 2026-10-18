@@ -61,6 +61,33 @@ What this does not show:
 To reproduce: clone the Uniwind benchmarks, install only the `uniwind` app, build it in Release, and run it with
 `-benchmarkScenario theme`; then add those two changes and run the same steps again.
 
+## Uniwind with hookAsync (how to measure it)
+
+The Uniwind adapter switches the engine with `hookDeferred`. `hookAsync` can be measured on the same `className` app without leaving
+Uniwind behind: `Uniwind.setTheme` still drives the switch, only the engine's strategy changes. Do not call
+`ShadewindEngine.setTheme(name, 'hookAsync')` directly for this: Uniwind then stays on the old theme, and so does everything it renders.
+
+1. App: `uniwind-benchmarks/apps/uniwind` with the two shadewind lines (above), Release, the same simulator for every arm.
+2. Arms, built back to back, one cold launch discarded, six warm launches each, median:
+   - plain Uniwind;
+   - shadewind as is (`hookDeferred`);
+   - shadewind with `globalThis.__SHADEWIND_UNIWIND_STRATEGY__ = 'hookAsync';` as the first line of `index.js` (measuring only).
+3. For each arm run the theme scenario (`-benchmarkScenario theme`) and note the example's number (until the JavaScript thread is idle).
+4. Read it right: with `hookAsync` the engine's commit runs on a background thread (iOS; Android commits on the JavaScript thread
+   anyway), so the example's number leaves it out, and the main thread's mount too. The screen still updates about 10 ms after the
+   call (measured on the iOS simulator with the plain-API example, `visualMs`). Report it as "JavaScript free after X ms", never as the
+   switch time.
+5. What the example hides, and a second variant that shows it: its screen has nothing React re-renders on a switch. Add one component
+   that reads the theme (for example a `Text` whose colour comes from `useCSSVariable`) and measure again. With `hookAsync` that
+   component and the engine's views change in different frames, and the React commit it causes re-themes every view on the
+   JavaScript thread (views changed off the JavaScript thread are not React's own; harness, 2003 views: 8.4-9.9 ms, against 1.3-1.4
+   ms after a switch on the JavaScript thread).
+6. Time to the screen, the only measure fair to every arm: record the simulator (`xcrun simctl io booted recordVideo out.mp4`) and
+   count the frames from one switch to the next change on screen (per-frame brightness with ffmpeg `signalstats`, as in
+   `THEME_TRANSITION_TESTS.md`). A 60 Hz recording resolves 16.7 ms: it tells "same frame or N frames later", not milliseconds.
+7. Check correctness once per arm with a Debug build and `shadewind/diagnostics`: every registered view matches the theme after a
+   switch.
+
 ## Earlier runs
 
 The tables below are older runs from earlier builds. They call the engine's own `setTheme` strategies directly and are kept for reference.
