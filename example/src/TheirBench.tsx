@@ -127,7 +127,7 @@ export default function TheirBench({
 
     const timer = setTimeout(() => {
       const t0 = performance.now();
-      const timings = ShadewindEngine.setTheme(
+      const timings = ShadewindEngine.setThemeTimed(
         run % 2 === 0 ? 'dark' : 'light',
         strategy
       );
@@ -164,7 +164,7 @@ export default function TheirBench({
     }
 
     // one more call reports the last switch's visualMs (re-applies the same theme, so it is a no-op change)
-    const last = ShadewindEngine.setTheme(
+    const last = ShadewindEngine.setThemeTimed(
       (RUNS - 1) % 2 === 0 ? 'dark' : 'light',
       strategy
     );

@@ -7,6 +7,7 @@
 
 namespace margelo::nitro::shadewind {
 
+#if SHADEWIND_DEV_TOOLS
 std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::react::Tag>& tags) {
   std::vector<UIKitBackground> result;
 
@@ -18,6 +19,7 @@ std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::r
 
   return result;
 }
+#endif
 
 #if defined(__ANDROID__)
 

@@ -24,7 +24,7 @@ path is an optimisation and never changes behaviour.**
 | `shadewind/uniwind` | yes | `installUniwind`, `View`, `Text`, `useShadewindStyle`, `ThemeStyleSource` |
 | `shadewind/metro` | yes (CJS) | `withShadewind(config, { uniwind })` |
 | `shadewind/diagnostics` | yes, development only | `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })`, `disableDiagnostics`, `flushDiagnostics`; no-ops outside `__DEV__`, native recorder in Debug builds only (`cpp/Diagnostics.hpp`) |
-| `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending` |
+| `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending`. `inspect`, `resetMainBusy`, `mainBusyMs` and the timings exist in debug builds or with `SHADEWIND_DEV_TOOLS` (README, "Release builds carry no debug code"); `hasDevTools()`, `setThemeTimed()` |
 
 Benchmark strategies (`stock`, `fastAsync`, `direct`, `both`) move to the example app or a build flag. No `strategy` parameter on
 the public `setTheme`; the native side picks by capability.

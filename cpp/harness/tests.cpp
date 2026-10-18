@@ -19,6 +19,15 @@
 
 using namespace harness;
 
+// A release-configuration harness (HARNESS_RELEASE_CONFIG) has no hook stats and no diagnostics recorder, as a release app: a test
+// that reads them stops there, explicitly, instead of passing on zeros. What it checked before that point (colours) still ran.
+#define NEEDS_DEV_TOOLS()                                                                                              \
+  if (!SHADEWIND_DEV_TOOLS)                                                                                            \
+  GTEST_SKIP() << "the hook's stats exist only with SHADEWIND_DEV_TOOLS"
+#define NEEDS_DIAGNOSTICS()                                                                                            \
+  if (!SHADEWIND_DIAGNOSTICS)                                                                                          \
+  GTEST_SKIP() << "no diagnostics recorder in this configuration"
+
 #ifdef RN_SERIALIZABLE_STATE
 namespace {
 
@@ -175,6 +184,7 @@ TEST_F(Current, ReactCommitsAfterAsyncSwitchStopRecloning) {
   // themes them again on the JS thread, which repoints the handles, so the next commit has nothing to do
   app.rerender(*leaf, folly::dynamic::object("height", 2));
   EXPECT_EQ(app.lastReactCommit().stale, 0);
+  NEEDS_DEV_TOOLS();
   EXPECT_EQ(engine.stats().applied, 102);
 
   app.rerender(*leaf, folly::dynamic::object("height", 3));
@@ -208,12 +218,13 @@ TEST_F(Current, SwitchSkipsFrozenScreens) {
   app.mount({visible, frozen});
   app.hide(*frozen);
   app.setTheme("dark");
+  EXPECT_EQ(app.lastThemeCommit().stale, 0);
+  NEEDS_DEV_TOOLS();
 
   const auto stats = engine.stats();
 
   EXPECT_EQ(stats.applied, 12) << "only the visible screen's views are cloned";
   EXPECT_EQ(stats.hidden, 1);
-  EXPECT_EQ(app.lastThemeCommit().stale, 0);
 }
 
 TEST_F(Current, ReactCommitAfterSwitchReusesProps) {
@@ -231,8 +242,9 @@ TEST_F(Current, ReactCommitAfterSwitchReusesProps) {
   EXPECT_EQ(app.lastReactCommit().stale, 0);
 
   app.rerender(*leaf, folly::dynamic::object("height", 2));
-  EXPECT_EQ(engine.stats().missNotOurs, 0) << "props rebuilt for a view React did not change";
   EXPECT_EQ(app.lastReactCommit().stale, 0);
+  NEEDS_DEV_TOOLS();
+  EXPECT_EQ(engine.stats().missNotOurs, 0) << "props rebuilt for a view React did not change";
 }
 
 TEST_F(Current, SwitchBackReusesTheRenderedPropsWithoutACopy) {
@@ -262,6 +274,8 @@ TEST_F(Current, UnrelatedReactCommitSkipsUnchangedSubtrees) {
 
   app.mount({screen(app, styles, 200), leaf});
   app.rerender(*leaf, folly::dynamic::object("height", 2));
+  EXPECT_EQ(app.lastReactCommit().stale, 0);
+  NEEDS_DEV_TOOLS();
 
   const auto stats = engine.stats();
 
@@ -367,6 +381,8 @@ int countOf(const std::vector<sw::DiagnosticEvent>& events, Kind kind) {
 } // namespace
 
 TEST_F(Current, DiagnosticsRecordNothingWhileOff) {
+  NEEDS_DIAGNOSTICS();
+
   App app(engine, kThemes, "light");
 
   app.mount({screen(app, styles, 5)});
@@ -376,6 +392,8 @@ TEST_F(Current, DiagnosticsRecordNothingWhileOff) {
 }
 
 TEST_F(Current, DiagnosticsReportMountsWithTheLiveCount) {
+  NEEDS_DIAGNOSTICS();
+
   App app(engine, kThemes, "light");
 
   engine.engine().hook().diagnostics().setFlags(sw::diagnostics::kMounts);
@@ -400,6 +418,8 @@ TEST_F(Current, DiagnosticsReportMountsWithTheLiveCount) {
 }
 
 TEST_F(Current, DiagnosticsReportAThemeSwitchPerView) {
+  NEEDS_DIAGNOSTICS();
+
   App app(engine, kThemes, "light");
 
   app.mount({screen(app, styles, 5)});
@@ -434,6 +454,8 @@ TEST_F(Current, DiagnosticsReportAThemeSwitchPerView) {
 }
 
 TEST_F(Current, DiagnosticsReportUnmountsOnceReleased) {
+  NEEDS_DIAGNOSTICS();
+
   App app(engine, kThemes, "light");
 
   engine.engine().hook().diagnostics().setFlags(sw::diagnostics::kMounts | sw::diagnostics::kUnmounts);
@@ -454,6 +476,8 @@ TEST_F(Current, DiagnosticsReportUnmountsOnceReleased) {
 }
 
 TEST_F(Current, DiagnosticsReportAnUnbindApart) {
+  NEEDS_DIAGNOSTICS();
+
   App app(engine, kThemes, "light");
   auto* main = screen(app, styles, 3);
 
@@ -470,6 +494,8 @@ TEST_F(Current, DiagnosticsReportAnUnbindApart) {
 }
 
 TEST_F(Current, DiagnosticsAreBoundedAndDropTheOldest) {
+  NEEDS_DIAGNOSTICS();
+
   App app(engine, kThemes, "light");
   auto& log = engine.engine().hook().diagnostics();
 

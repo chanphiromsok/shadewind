@@ -34,12 +34,13 @@ type RawMethods = {
     name: string,
     strategy?: ThemeStrategy,
     transition?: NativeThemeTransition
-  ): ThemeTimings;
+  ): ThemeTimings | undefined;
   flushPending(): void;
   prepare(): void;
-  resetMainBusy(): void;
-  mainBusyMs(): number;
-  inspect(): InspectReport;
+  // inspect and measure: compiled in only with SHADEWIND_DEV_TOOLS (cpp/DevTools.hpp), absent from a release build
+  resetMainBusy?: () => void;
+  mainBusyMs?: () => number;
+  inspect?: () => InspectReport;
   setDiagnostics(flags: number): boolean;
   drainDiagnostics(): NativeDiagnostics;
 };
@@ -369,6 +370,27 @@ const registerNative = (
   return true;
 };
 
+type DevToolName = 'inspect' | 'resetMainBusy' | 'mainBusyMs';
+
+// Calls a dev tool of the native module (as a method: Nitro needs `this`), or throws an error that says why it is missing: it is
+// not compiled into a release build.
+const callDevTool = <K extends DevToolName>(
+  name: K
+): ReturnType<NonNullable<RawMethods[K]>> => {
+  const native = getNative();
+
+  if (typeof native[name] !== 'function') {
+    throw new Error(
+      `[shadewind] ${name}() is not in this native build: it exists in debug builds, or in a release build made with ` +
+        'SHADEWIND_DEV_TOOLS=1 (pod install) / shadewindDevTools=true (gradle.properties)'
+    );
+  }
+
+  return (native[name] as () => ReturnType<NonNullable<RawMethods[K]>>).call(
+    native
+  );
+};
+
 export const ShadewindEngine = {
   /** Experimental: native tailwind-merge compatible class merge (see docs/ARCHITECTURE.md section 13). */
   loadClassTable(text: string): boolean {
@@ -480,12 +502,15 @@ export const ShadewindEngine = {
       getNative().unregister(node);
     }
   },
-  /** Applies a theme to every registered view without rendering any React component. */
+  /**
+   * Applies a theme to every registered view without rendering any React component. Returns the timings of the switch in a build
+   * with the dev tools (debug, or a release that opts in: cpp/DevTools.hpp), undefined otherwise.
+   */
   setTheme(
     name: string,
     strategy: ThemeStrategy = 'hookAsync',
     transition?: NativeThemeTransition
-  ): ThemeTimings {
+  ): ThemeTimings | undefined {
     flushRegistrations();
 
     // no third argument without a transition: the instant switch is exactly the call it always was
@@ -493,13 +518,34 @@ export const ShadewindEngine = {
       ? getNative().setTheme(name, strategy, transition)
       : getNative().setTheme(name, strategy);
   },
+  /** setTheme for a benchmark: the timings, or an error when this native build has none (a release without the dev tools). */
+  setThemeTimed(
+    name: string,
+    strategy: ThemeStrategy = 'hookAsync',
+    transition?: NativeThemeTransition
+  ): ThemeTimings {
+    const timings = ShadewindEngine.setTheme(name, strategy, transition);
+
+    if (!timings) {
+      throw new Error(
+        '[shadewind] setTheme returned no timings: this native build has no dev tools (a release build made without ' +
+          'SHADEWIND_DEV_TOOLS=1 / shadewindDevTools=true)'
+      );
+    }
+
+    return timings;
+  },
+  /** Whether this native build has inspect / resetMainBusy / mainBusyMs and the setTheme timings (cpp/DevTools.hpp). */
+  hasDevTools(): boolean {
+    return typeof getNative().inspect === 'function';
+  },
   /** Measurement: clears the longest main-thread busy period (iOS only; starts the run loop observer on first call). */
   resetMainBusy(): void {
-    getNative().resetMainBusy();
+    callDevTool('resetMainBusy');
   },
   /** Measurement: longest main-thread run loop busy period in ms since resetMainBusy (iOS only). */
   mainBusyMs(): number {
-    return getNative().mainBusyMs();
+    return callDevTool('mainBusyMs');
   },
   /** Kept for compatibility; does nothing. */
   prepare(): void {
@@ -509,7 +555,7 @@ export const ShadewindEngine = {
   inspect(): InspectReport {
     flushRegistrations();
 
-    return getNative().inspect();
+    return callDevTool('inspect');
   },
   getTheme(): string {
     return getNative().getTheme();

@@ -324,7 +324,7 @@ export default function BenchScreen() {
     const after1500 = ShadewindEngine.mainBusyMs();
 
     pacing.current = { before, after, after1500, remount };
-    const t = ShadewindEngine.setTheme('light', strat);
+    const t = ShadewindEngine.setThemeTimed('light', strat);
 
     await wait(500);
 
@@ -381,7 +381,7 @@ export default function BenchScreen() {
     const nextTheme = () => (themeRef.current === 'light' ? 'dark' : 'light');
     const switchOnce = () => {
       const next = nextTheme();
-      const t = ShadewindEngine.setTheme(next, 'hookAsync');
+      const t = ShadewindEngine.setThemeTimed(next, 'hookAsync');
 
       themeRef.current = next;
       setTheme(next);

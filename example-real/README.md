@@ -22,6 +22,9 @@ npm pack --pack-destination example-real/vendor
 cd example-real && rm -rf node_modules/shadewind && npm install && cd ios && bundle exec pod install && cd ..
 ```
 
+The app measures in Release, so it keeps Shadewind's dev tools there (`inspect`, the switch timings): `ios/Podfile` sets
+`SHADEWIND_DEV_TOOLS=1` for `pod install` and `android/gradle.properties` has `shadewindDevTools=true`. A release app does not.
+
 `npm install` (not `npm ci`: the lockfile is older than npm 10's resolution of one transitive package). Check that
 `node_modules/shadewind/metro-babel-transformer.cjs` exists: otherwise the app runs an old package.
 

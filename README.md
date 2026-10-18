@@ -143,6 +143,15 @@ only (`SHADEWIND_DIAGNOSTICS`, set by the podspec for the Debug configuration an
 build type, which is what a debug variant uses). An app configuration with another name (`Staging`, say) gets no recorder.
 Compiled in but not enabled, it costs one atomic load per commit.
 
+### Release builds carry no debug code
+
+What exists only to inspect and measure the engine is compiled out of release builds (`SHADEWIND_DEV_TOOLS`, `cpp/DevTools.hpp`):
+`inspect()`, the timings `setTheme` returns, the main-thread busy probe (`resetMainBusy` / `mainBusyMs`), the Paragraph clone
+counters and the timers in the commit hook, and the extra main-thread hop that measured a `hookAsync` switch. Debug builds have them.
+An app that measures in release (as `example-real` and `example` do) opts in with `SHADEWIND_DEV_TOOLS=1` in the environment of
+`pod install` (iOS) and `shadewindDevTools=true` in `android/gradle.properties`. Without them those `shadewind/internal`
+functions throw an error that says so, and `ShadewindEngine.setTheme` returns `undefined`.
+
 ## Benchmarks
 
 Three kinds of numbers, not comparable with each other: on the iOS simulator (whole app), in the native harness (React Native's

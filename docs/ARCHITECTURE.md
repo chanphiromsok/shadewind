@@ -785,3 +785,11 @@ Profiled and left alone:
 - **Candidate, not done (cannot be measured here):** the resolver's JSI glue creates a `jsi::PropNameID` from a C string for every
   key of every result (`setProperty(rt, const char*, ...)`). Caching them per runtime is the usual JSI practice, but the cache must
   die with the runtime (reload) or it crashes; measure `__swResolve` calls per second in a Hermes release build first.
+
+Release gating (same day): everything that exists to inspect or measure is now compiled only with `SHADEWIND_DEV_TOOLS`
+(`cpp/DevTools.hpp`; on in Debug, opt-in for measuring release builds). Checked in the harness: a release-configuration build
+(`-DHARNESS_RELEASE_CONFIG=ON`) passes 21 tests and skips the 10 that read stats or the recorder, by name; its binary has no
+`gReasons` / `gRecolored` symbols of the engine and no clock call in `ThemeHook::shadowTreeWillCommit` (the remaining ones belong to
+the frozen baseline engine); the hook runs 215.96 M instructions against 216.14 M with the tools in (the timers and counters were
+cheap, the point is that they do not ship). `HybridShadewind.cpp` and `ShadewindNative.cpp` compile with `-Wall` in both settings.
+Not measurable here: the iOS main-thread hop per hookAsync switch that only measured `visualMs`, now gone from release.

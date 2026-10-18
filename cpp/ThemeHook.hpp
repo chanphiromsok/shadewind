@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DevTools.hpp"
 #include "Diagnostics.hpp"
 
 #include <atomic>
@@ -74,7 +75,9 @@ struct RecoloredParagraph {
   int reason = 0; // 0 ok, 1 children replaced, 2 no state, 3 not a Paragraph, 4 not Yoga/dirty, 5 state type mismatch, 6 no fragments, 7 no props, 8 no fragment carried the old colour
 };
 
+#if SHADEWIND_DEV_TOOLS
 inline std::atomic<int> gReasons[9];
+#endif
 
 inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const SharedColor& color, bool childrenReplaced) {
   RecoloredParagraph out;
@@ -173,10 +176,12 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
   return out;
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Debug counters: how many Paragraph clones took the no-layout path, and why the others did not.
 inline std::atomic<int> gRecolored{0};
 inline std::atomic<int> gRecolorSkipDirty{0};
 inline std::atomic<int> gRecolorSkipState{0};
+#endif
 
 // Clone `node` with the theme's props. A text colour change keeps the layout clean (see recolorParagraph).
 inline std::shared_ptr<ShadowNode> cloneThemed(
@@ -195,6 +200,7 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
 
   auto result = node.clone({.props = props, .children = children, .state = recolored.state});
 
+#if SHADEWIND_DEV_TOOLS
   if (delta.text && std::strcmp(node.getComponentName(), ParagraphComponentName) == 0) {
     ++gReasons[recolored.reason];
 
@@ -206,6 +212,7 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
       ++gRecolorSkipState;
     }
   }
+#endif
 
   if (textWithoutLayout != nullptr) {
     *textWithoutLayout = recolored.keepClean;
@@ -517,6 +524,7 @@ public:
     }
   }
 
+#if SHADEWIND_DEV_TOOLS
   // Debug (inspect): what the hook believes about one view, next to the props the committed tree holds for it.
   std::string describe(const ShadowNodeFamily* family, const Props* current) {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -553,12 +561,14 @@ public:
 
     return result;
   }
+#endif
 
   size_t size() {
     std::lock_guard<std::mutex> lock(_mutex);
     return _entries.size();
   }
 
+  // The last commit's counts and times. Filled only with SHADEWIND_DEV_TOOLS (zeros otherwise).
   HookStats stats() {
     std::lock_guard<std::mutex> lock(_mutex);
     return _stats;
@@ -569,8 +579,10 @@ public:
       const RootShadowNode::Shared& oldRoot,
       const RootShadowNode::Unshared& newRoot,
       const ShadowTreeCommitOptions&) noexcept override {
+#if SHADEWIND_DEV_TOOLS || SHADEWIND_DIAGNOSTICS
     using Clock = std::chrono::steady_clock;
-    const auto t0 = Clock::now();
+    const auto t0 = Clock::now(); // the stats and the diagnostics' commit event report how long the commit took
+#endif
 
     // One pass over the new tree, under one lock hold: decide per registered view, clone it and record what was applied.
     std::unique_lock<std::mutex> lock(_mutex);
@@ -612,8 +624,13 @@ public:
 
     remember(result);
 
-    const auto t1 = Clock::now();
-    const double elapsed = std::chrono::duration<double, std::milli>(t1 - t0).count();
+#if SHADEWIND_DEV_TOOLS || SHADEWIND_DIAGNOSTICS
+    const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+#else
+    constexpr double elapsed = 0; // a release build times nothing
+#endif
+
+#if SHADEWIND_DEV_TOOLS
 
     _stats.scanMs = cloned ? 0 : elapsed;
     _stats.cloneMs = cloned ? elapsed : 0;
@@ -627,6 +644,7 @@ public:
     _stats.visited = walk.visited;
     _stats.skipped = walk.skipped;
     _stats.hidden = walk.hidden;
+#endif
 
     if (walk.recordUpdates && walk.applied > 0) {
       bool themeChanged = false;
@@ -797,7 +815,9 @@ private:
   // Returns the replacement for `node`, or nullptr when nothing under it changed. `old` is the same view in a proven previous
   // tree (or null). Caller holds _mutex.
   std::shared_ptr<ShadowNode> walkTree(const ShadowNode& node, const ShadowNode* old, Walk& walk) {
+#if SHADEWIND_DEV_TOOLS
     using Clock = std::chrono::steady_clock;
+#endif
 
     if (old == &node) {
       ++walk.skipped;
@@ -906,10 +926,14 @@ private:
     } else {
       ++walk.missNotOurs;
 
+#if SHADEWIND_DEV_TOOLS
       const auto p0 = Clock::now();
+#endif
       auto props = buildProps(node, *delta);
 
+#if SHADEWIND_DEV_TOOLS
       walk.propsNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - p0).count();
+#endif
 
       result = cloneThemed(node, props, newChildren, *delta, textWithoutLayout);
       applied = props.get();

@@ -11,6 +11,7 @@ namespace margelo::nitro::shadewind {
 
 namespace {
 
+#if SHADEWIND_DEV_TOOLS
 // ARGB as the shadow tree stores it (uint32 widened to int64), so it compares with the tree and the expected colour.
 int64_t argbOf(UIColor* color) {
   if (color == nil) {
@@ -27,6 +28,7 @@ int64_t argbOf(UIColor* color) {
 
   return static_cast<int64_t>((byte(a) << 24) | (byte(r) << 16) | (byte(g) << 8) | byte(b));
 }
+#endif
 
 // Theme transition overlay. Main thread only: every function below runs from a block queued on the main queue (or from the mount
 // hook, which Fabric calls on the main thread).
@@ -209,6 +211,7 @@ void themeTransitionRun(uint64_t id) {
   }
 }
 
+#if SHADEWIND_DEV_TOOLS
 std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::react::Tag>& tags) {
   std::vector<UIKitBackground> result;
 
@@ -265,5 +268,6 @@ std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::r
 
   return result;
 }
+#endif
 
 } // namespace margelo::nitro::shadewind

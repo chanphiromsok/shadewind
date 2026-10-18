@@ -40,6 +40,15 @@ endforeach()
 # debug variant with CMAKE_BUILD_TYPE=Debug and a release variant with Release.
 target_compile_definitions(${PACKAGE_NAME} PRIVATE $<$<CONFIG:Debug>:SHADEWIND_DIAGNOSTICS=1>)
 
+# The dev tools (cpp/DevTools.hpp: inspect, setTheme timings, the busy probe): debug builds, or a release build whose app sets
+# shadewindDevTools=true in gradle.properties (build.gradle passes it here), for measuring.
+option(SHADEWIND_DEV_TOOLS "the dev tools in release builds too" OFF)
+if(SHADEWIND_DEV_TOOLS)
+  target_compile_definitions(${PACKAGE_NAME} PRIVATE SHADEWIND_DEV_TOOLS=1)
+else()
+  target_compile_definitions(${PACKAGE_NAME} PRIVATE $<$<CONFIG:Debug>:SHADEWIND_DEV_TOOLS=1>)
+endif()
+
 find_library(LOG_LIB log)
 
 # Link all libraries together

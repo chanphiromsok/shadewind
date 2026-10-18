@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DevTools.hpp"
+
 #include <react/renderer/graphics/Color.h>
 #include <react/renderer/core/ReactPrimitives.h>
 #include <functional>
@@ -9,6 +11,7 @@
 
 namespace margelo::nitro::shadewind {
 
+#if SHADEWIND_DEV_TOOLS
 // Debug (iOS only): what UIKit really holds. For each tag, the UIView's backgroundColor
 // and the colour its layer was painted with (set by RCTViewComponentView when the mount finalizes). -1 = view not found or
 // no colour; -2 = not a Fabric view. Blocks the caller until the main thread answered. Elsewhere returns -1 for both.
@@ -19,6 +22,7 @@ struct UIKitBackground {
 };
 
 std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::react::Tag>& tags);
+#endif
 
 // Animated theme change (ThemeTransition.hpp drives these; iOS: ios/ShadewindNative.mm, Android: ThemeTransitionOverlay.kt through JNI,
 // elsewhere they do nothing). Both are callable from any thread and return at once; the work happens on the main / UI thread.

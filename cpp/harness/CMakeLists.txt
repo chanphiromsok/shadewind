@@ -124,7 +124,14 @@ target_link_libraries(rn_renderer PUBLIC yoga folly_runtime glog atomic)
 add_library(harness_support INTERFACE)
 target_include_directories(harness_support INTERFACE "${ENGINE}" "${CMAKE_CURRENT_SOURCE_DIR}")
 # the development diagnostics recorder, as the app's Debug builds compile it (cpp/Diagnostics.hpp)
-target_compile_definitions(harness_support INTERFACE SHADEWIND_DIAGNOSTICS=1)
+# HARNESS_RELEASE_CONFIG: the engine as a release build compiles it (no recorder, no dev tools); tests that read what only those
+# provide skip themselves. Default: both in, as in a debug build.
+option(HARNESS_RELEASE_CONFIG "build the engine as in a release app (SHADEWIND_DIAGNOSTICS=0, SHADEWIND_DEV_TOOLS=0)" OFF)
+if(HARNESS_RELEASE_CONFIG)
+  target_compile_definitions(harness_support INTERFACE SHADEWIND_DIAGNOSTICS=0 SHADEWIND_DEV_TOOLS=0)
+else()
+  target_compile_definitions(harness_support INTERFACE SHADEWIND_DIAGNOSTICS=1 SHADEWIND_DEV_TOOLS=1)
+endif()
 target_link_libraries(harness_support INTERFACE rn_renderer)
 
 add_executable(harness_tests tests.cpp class_merge_tests.cpp style_resolver_tests.cpp)

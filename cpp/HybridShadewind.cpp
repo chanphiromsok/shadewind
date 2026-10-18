@@ -28,6 +28,7 @@ using namespace facebook::react;
 
 namespace {
 
+#if SHADEWIND_DEV_TOOLS
 // Main-thread busy probe: how long the main run loop stays awake without going back to sleep. A mount of 1500 updated views
 // shows up here as one long busy period (it is what a user sees as a dropped frame); nothing in JS can see it.
 // Only iOS feeds it (run loop observer); elsewhere mainBusyMs() reports 0.
@@ -67,8 +68,10 @@ int64_t colorValueBits(const ColorT& value) {
 int64_t colorBits(const SharedColor& color) {
   return colorValueBits(*color);
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 #if defined(__APPLE__)
+#if SHADEWIND_DEV_TOOLS
 void runOnMain(std::function<void()> work) {
   auto* task = new std::function<void()>(std::move(work));
 
@@ -79,6 +82,7 @@ void runOnMain(std::function<void()> work) {
     delete function;
   });
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 void runInBackground(std::function<void()> work, qos_class_t qos) {
   auto* task = new std::function<void()>(std::move(work));
@@ -91,6 +95,7 @@ void runInBackground(std::function<void()> work, qos_class_t qos) {
   });
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Main-thread busy probe (iOS only): see below.
 std::atomic<bool> gBusyObserverInstalled{false};
 
@@ -109,8 +114,10 @@ void runLoopActivity(CFRunLoopObserverRef, CFRunLoopActivity activity, void*) {
     }
   }
 }
+#endif // SHADEWIND_DEV_TOOLS
 #endif
 
+#if SHADEWIND_DEV_TOOLS
 // Results of the last background / main-thread pass, read by the next setTheme call (they finish after it returned).
 [[maybe_unused]] std::atomic<double> gLastAsyncCommitMs{0};
 // setTheme call -> main thread done mounting (the screen update), of the last switch
@@ -121,6 +128,14 @@ using Clock = std::chrono::steady_clock;
 double ms(Clock::time_point from, Clock::time_point to) {
   return std::chrono::duration<double, std::milli>(to - from).count();
 }
+#endif // SHADEWIND_DEV_TOOLS
+
+// When setTheme was called, for its timings; empty in a release build (local to this file, so its layout may differ).
+struct SwitchClock {
+#if SHADEWIND_DEV_TOOLS
+  Clock::time_point start = Clock::now();
+#endif
+};
 
 // An (almost) empty commit: the commit hook does the real work on it. Same trick as RN's animation backend.
 void commitTick(UIManager& ui, bool mountSynchronously = true) {
@@ -131,6 +146,7 @@ void commitTick(UIManager& ui, bool mountSynchronously = true) {
   });
 }
 
+#if SHADEWIND_DEV_TOOLS
 // The hook's last commit, as the JS timing object (`ThemeTimings` in src/internal.tsx).
 jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs, double totalMs) {
   auto result = jsi::Object(rt);
@@ -155,6 +171,7 @@ jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs,
 
   return result;
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 } // namespace
 
@@ -169,11 +186,8 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("register", 4, &HybridShadewind::registerNode);
     prototype.registerRawHybridMethod("registerMany", 4, &HybridShadewind::registerMany);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
-    prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
     prototype.registerRawHybridMethod("flushPending", 0, &HybridShadewind::flushPending);
     prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
-    prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
-    prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
     prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
     prototype.registerRawHybridMethod("loadClassTable", 1, &HybridShadewind::loadClassTable);
     prototype.registerRawHybridMethod("mergeClasses", 0, &HybridShadewind::mergeClasses);
@@ -182,6 +196,12 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("setTheme", 1, &HybridShadewind::setTheme);
     prototype.registerRawHybridMethod("setDiagnostics", 1, &HybridShadewind::setDiagnostics);
     prototype.registerRawHybridMethod("drainDiagnostics", 0, &HybridShadewind::drainDiagnostics);
+#if SHADEWIND_DEV_TOOLS
+    // inspect and measure: not in a release build (src/internal.tsx says so when they are called)
+    prototype.registerRawHybridMethod("inspect", 0, &HybridShadewind::inspect);
+    prototype.registerRawHybridMethod("resetMainBusy", 0, &HybridShadewind::resetMainBusy);
+    prototype.registerRawHybridMethod("mainBusyMs", 0, &HybridShadewind::mainBusyMs);
+#endif
   });
 }
 
@@ -337,6 +357,7 @@ jsi::Value HybridShadewind::unregisterNode(jsi::Runtime& rt, const jsi::Value&, 
   return jsi::Value::undefined();
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Debug: for every registered view compare the background colour of
 //   - the node in the committed shadow tree,
 //   - what UIKit holds for it (iOS),
@@ -453,6 +474,7 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 
   return report;
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 // Kept for API compatibility: registerMany flushes what this used to. A view registered alone (register) is themed here.
 jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
@@ -468,6 +490,7 @@ jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi:
   return jsi::Value::undefined();
 }
 
+#if SHADEWIND_DEV_TOOLS
 // Starts (once) the main run loop observer and clears the longest busy period seen so far.
 jsi::Value HybridShadewind::resetMainBusy(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
 #if defined(__APPLE__)
@@ -498,6 +521,7 @@ jsi::Value HybridShadewind::mainBusyMs(jsi::Runtime&, const jsi::Value&, const j
 
   return jsi::Value(busy);
 }
+#endif // SHADEWIND_DEV_TOOLS
 
 static css::ClassMerge gClassMerge;
 // Uniwind's class resolution from the table src/uniwind/styleTable.ts builds; JS thread only (loaded and read there)
@@ -816,7 +840,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     throw jsi::JSError(rt, "Shadewind.setTheme: Fabric UIManager is not available (New Architecture only)");
   }
 
-  const auto t0 = Clock::now();
+  [[maybe_unused]] const SwitchClock clock;
 
   _engine.setTheme(name);
 
@@ -838,29 +862,40 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     std::weak_ptr<UIManagerBinding> weakBinding = UIManagerBinding::getBinding(rt);
 
     runInBackground(
-        [weakBinding, t0]() {
+        [weakBinding, clock]() {
+          (void)clock; // empty in a release build
           auto locked = weakBinding.lock();
 
           if (!locked) {
             return;
           }
 
+#if SHADEWIND_DEV_TOOLS
           const auto c0 = Clock::now();
+#endif
 
           // `mountSynchronously = false` would queue a rendering update on the RuntimeScheduler, whose queues only the JS thread
           // may touch. `true` is what React Native uses for commits made off the JS thread: on iOS the mount itself is still
           // dispatched asynchronously to the main queue.
           commitTick(locked->getUIManager(), true);
+
+#if SHADEWIND_DEV_TOOLS
           gLastAsyncCommitMs = ms(c0, Clock::now());
 
           // The commit queued its mount on the main queue; this block queues behind it, so when it runs the views are mounted
-          // (the next vsync presents them). That is the time from the setTheme call to the screen update.
-          runOnMain([t0]() { gLastVisualMs = ms(t0, Clock::now()); });
+          // (the next vsync presents them). That is the time from the setTheme call to the screen update. A measurement only:
+          // a release build makes no such main-thread hop.
+          runOnMain([clock]() { gLastVisualMs = ms(clock.start, Clock::now()); });
+#endif
         },
         QOS_CLASS_USER_INTERACTIVE);
 
+#if SHADEWIND_DEV_TOOLS
     // the stats and the commit time are those of the previous run (this one finishes after the call returns)
-    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(t0, Clock::now()));
+    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
+#else
+    return jsi::Value::undefined();
+#endif
   }
 #else
   (void)async; // Android commits on the JS thread for now
@@ -872,9 +907,13 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   // (views React re-renders, e.g. LinearGradient colours, changed 4-8 frames after the engine-bound ones).
   commitTick(*ui, !deferred);
 
-  const double elapsed = ms(t0, Clock::now());
+#if SHADEWIND_DEV_TOOLS
+  const double elapsed = ms(clock.start, Clock::now());
 
   return timingsOf(rt, _engine.hook().stats(), elapsed, elapsed);
+#else
+  return jsi::Value::undefined(); // timings exist only with SHADEWIND_DEV_TOOLS
+#endif
 }
 
 // setDiagnostics(flags): which events the hook records (Diagnostics.hpp: 1 mounts, 2 unmounts, 4 updates); 0 turns it off.
