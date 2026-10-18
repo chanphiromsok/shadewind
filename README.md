@@ -15,17 +15,30 @@ React Native 0.86 · New Architecture (Fabric) · iOS & Android · MIT · experi
 
 </div>
 
+## 📊 Benchmark
 
-![Theme switch of 2003 views, JS thread idle: Uniwind 1.12.0 100.69 ms, with shadewind 2.53 ms](docs/assets/benchmark.png)
+![One theme switch of 2003 views, frame by frame: plain Uniwind against hookAsync, from 0 to 150 ms](docs/assets/benchmark-frames.png)
 
-Measured with the example from [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks), thank you to the Uniwind team
-for publishing it. The example is unmodified apart from the setup in the [quick start](#-quick-start-with-uniwind). This is JS-thread
-time on one iOS simulator, not a frame-accurate measure and not a device; how it was run and what it does not show is in
-[docs/BENCHMARK.md](docs/BENCHMARK.md). Want to try it yourself? [Run the 2003-view demo](docs/DEMO.md).
+Thank you to the Uniwind team for publishing [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks): we used its
+2003-view screen, switched between light and dark. Here is what one switch costs, one strategy at a time:
 
-> 💚 **A note from the author.** I'm not a React Native internals expert. shadewind is vibe-coded with Claude Code by a developer who
-> cares about the craft and enjoys programming. Please take the code and numbers with a pinch of salt, and tell me kindly where I
-> went wrong. Thank you!
+| | JS thread busy | New theme on screen after |
+|---|---|---|
+| **Uniwind (plain)** | 107.94 ms | 111 ms |
+| **`hookDeferred`** (what `Uniwind.setTheme` uses with shadewind) | 3.05 ms | 57 ms |
+| **`hookAsync`** | **0.11 ms** | **57 ms** |
+
+How to read it, step by step:
+
+1. **Plain Uniwind** re-renders every component on the JS thread: busy for about 108 ms, and the cells show the new theme about 111 ms after the page background flips.
+2. **`hookDeferred`** writes the new theme into the views that are already mounted: about 3 ms on the JS thread, and the cells show it at about 57 ms.
+3. **`hookAsync`** gives the work to other threads: the JS thread is free after 0.11 ms. On screen it is not earlier: the cells show the new theme at about 57 ms, the same as `hookDeferred`. In a separate run (an earlier build) the main thread was busy for about 72 ms per switch with either strategy, so the remaining time looks like native work, not JavaScript. We have not traced it further.
+
+So `hookAsync` frees the JS thread *when you switch*; it does not make the screen update sooner. For all engine runs we also checked that all 2003 views ended in the new theme.
+
+All rows run the same 2003-view screen from this repository's `example-real` app (a port of the Uniwind benchmark, iOS simulator, Release build with dev tools on). "JS thread busy" is the median of six warm launches. "On screen" is measured from a screen recording: the time from the first frame that changes (the page background, taken as the moment of the `setTheme` call) to the frame where the cells change; one recording per row, median of its 10 switches. It is one simulator, not a device. One more caveat: with a component that reads the theme (`useCSSVariable`), `hookAsync` took about 12 ms of JS time on an earlier build; we did not re-measure that on the latest code. Details and how to repeat it: [docs/BENCHMARK.md](docs/BENCHMARK.md), or [run the 2003-view demo](docs/DEMO.md) yourself.
+
+> 💚 **A note from the author.** Shadewind is vibe-coded with Claude Code by a dev who finds joy in programming. Take the code and numbers with a grain of salt, and kindly roast me where I’m wrong. 🤝
 
 > **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android has less testing
 > (one emulator, no physical device). Uniwind support is verified against Uniwind 1.12.x.
@@ -89,6 +102,14 @@ That's it: your `className` code does not change. No Uniwind? shadewind also wor
 </div>
 
 The Account screen of the example app flipping between light and dark.
+
+<div align="center">
+
+<img src="docs/assets/benchmark-demo.gif" width="300" alt="The benchmark screen running ten switches and showing its result" />
+
+</div>
+
+The benchmark screen running ten switches of the 2003 views and showing its result.
 
 ## 🤝 Contributing
 
