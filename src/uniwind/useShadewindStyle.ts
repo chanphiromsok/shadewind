@@ -250,6 +250,36 @@ export const nonThemeDeps = (current: Resolved, theme: number): number[] => {
   return deps;
 };
 
+// The subscription of a view with an accent className (Text's selectionColorClassName): the non-theme dependencies of its style plus
+// every dependency of the accent, the theme included (Uniwind's useAccentColor re-renders on a theme change, so does this). One array
+// per pair of resolutions, so the layout effect does not subscribe again on every render.
+const accentDepsCache = new WeakMap<object, WeakMap<object, number[]>>();
+const accentDeps = (
+  current: Resolved,
+  accent: Resolved,
+  theme: number
+): number[] => {
+  let byAccent = accentDepsCache.get(current);
+
+  if (!byAccent) {
+    byAccent = new WeakMap();
+    accentDepsCache.set(current, byAccent);
+  }
+
+  let deps = byAccent.get(accent);
+
+  if (!deps) {
+    deps = [
+      ...new Set([...nonThemeDeps(current, theme), ...accent.dependencies]),
+    ];
+    byAccent.set(accent, deps);
+  }
+
+  return deps;
+};
+
+let warnedAccent = false;
+
 const warnUnbound = () => {
   if (debugOn()) {
     console.warn(
@@ -270,7 +300,10 @@ const useContext = () =>
 export const useShadewindStyle = (
   className: string | undefined,
   props: Record<string, any>,
-  state?: State
+  state?: State,
+  // Text's selectionColorClassName, resolved here rather than with Uniwind's useAccentColor: that is three more hooks and a layout
+  // effect for every Text, used or not
+  accentClassName?: string
 ) => {
   'use no memo';
 
@@ -301,7 +334,27 @@ export const useShadewindStyle = (
   const planned = active
     ? cachedPlan(className, props, state, context, current, hasInlineOverlap)
     : NO_PLAN;
-  const deps = nonThemeDeps(current, StyleDependency!.Theme);
+  const accent = accentClassName
+    ? UniwindStore!.getStyles(accentClassName, props, state, context)
+    : null;
+  const deps = accent
+    ? accentDeps(current, accent, StyleDependency!.Theme)
+    : nonThemeDeps(current, StyleDependency!.Theme);
+  const accentColor = accent
+    ? (accent.styles as { accentColor?: string }).accentColor
+    : undefined;
+
+  if (
+    __DEV__ &&
+    accentClassName?.trim() &&
+    accentColor === undefined &&
+    !warnedAccent
+  ) {
+    warnedAccent = true;
+    console.warn(
+      `[shadewind] selectionColorClassName '${accentClassName}' has no accent colour (use an accent-* class)`
+    );
+  }
 
   useLayoutEffect(
     () =>
@@ -314,6 +367,7 @@ export const useShadewindStyle = (
     style: current.styles,
     themed: planned.themed,
     onRegisterFailed: warnUnbound,
+    accentColor,
   };
 };
 

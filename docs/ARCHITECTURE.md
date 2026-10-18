@@ -576,6 +576,9 @@ pass-through `MountingOverrideDelegate` probe is the way to split the ~43 ms int
 `className`, inside the noise of a single launch; the 13 ms down to the static-host floor is not removed by it. Do not advertise `aot` or
 `LightPressable` as performance features. Not measured: several launches, a device, the JS-thread-only time.
 
+Removed on 2026-10-18 (`src/uniwind/aot.ts`, `shadewind/uniwind/aot`, example-real's `aot` variant): a second code path with no
+measured gain.
+
 ### 17d. Where the remaining mount time is, and the lighter Pressable (2026-10-15)
 
 Timers inside the adapter (a measurement build, not shipped), 30 cards, `className` path, app state before `freezeOnBlur`: React
@@ -910,3 +913,19 @@ Uniwind (not fixed yet).
 Before that run: the owner's run with this build decides how much of the 3 ms is gone. To split what is left, run three
 arms with the same protocol (`docs/LOCAL_TESTING.md` step 7): plain Uniwind, shadewind with `__SHADEWIND_ENGINE_OFF__` (the adapter
 alone; arm 3 minus arm 2 is then everything the engine adds, not only the registration), shadewind with the engine on.
+
+Adapter trim (2026-10-18), mount and re-render only (a switch renders no component, so none of this changes the time from a switch
+to the screen):
+
+- Text no longer calls Uniwind's `useAccentColor` (its `useStyle`: a context read, a reducer, a layout effect and a `getStyles` per
+  Text, used or not). `useShadewindStyle` resolves `selectionColorClassName` in the same render and adds the accent's dependencies,
+  the theme included, to its one subscription, so a Text with a theme-dependent accent still re-renders on a switch as with Uniwind.
+  Hooks per Text: 8 -> 5 (View: 4). One import of Uniwind internals less (`components/native/useAccentColor`).
+- The resolved style goes to the host as the single object Uniwind caches per className when there is no `style` prop, instead of
+  a new `[style, props.style]` array per render (View, Text, TouchableOpacity, the Pressable, `withUniwind`).
+- `shadewind/uniwind/aot` removed (section 17c).
+
+Checked: the JS check tool runs `useShadewindStyle` against a fake Uniwind store (one reducer and one layout effect with or without
+an accent, the theme in the subscription only with a theme-dependent accent, the same subscription array across renders; mutants
+dropping the accent's theme or rebuilding the array each render fail), typecheck, example-real Metro bundles of both arms and a
+Hermes compile. Not measured: the effect on mounting, which needs the rendering benchmark on a simulator.

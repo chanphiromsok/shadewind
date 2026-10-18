@@ -2,7 +2,12 @@ import type { ComponentType } from 'react';
 import { View as RNView, type ViewProps } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import { use } from 'react';
-import { NativeView, TextAncestorContext, viewIsPlain } from './native';
+import {
+  NativeView,
+  TextAncestorContext,
+  viewIsPlain,
+  withUserStyle,
+} from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
 
 type Props = ViewProps & { className?: string };
@@ -23,10 +28,18 @@ export const View: ComponentType<Props> = copyComponentProperties(
 
     // inside a Text, or with props View.js rewrites: React Native's own View. Otherwise the host component directly.
     if (!use(TextAncestorContext) && viewIsPlain(props)) {
-      return <NativeView {...props} ref={ref} style={[style, props.style]} />;
+      return (
+        <NativeView
+          {...props}
+          ref={ref}
+          style={withUserStyle(style, props.style)}
+        />
+      );
     }
 
-    return <RNView {...props} ref={ref} style={[style, props.style]} />;
+    return (
+      <RNView {...props} ref={ref} style={withUserStyle(style, props.style)} />
+    );
   }
 );
 

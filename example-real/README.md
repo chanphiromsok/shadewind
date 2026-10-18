@@ -34,8 +34,8 @@ that one line, not the rest of npm's rewrite of the lockfile.
 
 ## Arms
 
-`scripts/arm.sh engine` (the committed state) or `scripts/arm.sh plain` writes `src/boot.ts`, `src/engineReport.ts`, `src/cn*.ts`,
-`src/aotImpl.ts` and `src/transitionArm.ts` for that arm. The plain arm also needs plain Metro: `REAL_PLAIN=1` when bundling or starting Metro.
+`scripts/arm.sh engine` (the committed state) or `scripts/arm.sh plain` writes `src/boot.ts`, `src/engineReport.ts`, `src/cn*.ts`
+and `src/transitionArm.ts` for that arm. The plain arm also needs plain Metro: `REAL_PLAIN=1` when bundling or starting Metro.
 
 ## Run
 

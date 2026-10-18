@@ -71,10 +71,28 @@ ok('driver removed: setTheme is engine-only again', () => { api.setTheme('dark')
 // src/uniwind/useShadewindStyle.ts's engine ref (useEngineRef), compiled the same way, against a fake engine: a plain ref for views,
 // pause() / resume() only on a pausable one, and the render theme claimed on a node's first attach only.
 const engineCalls = [];
+// a fake Uniwind store for useShadewindStyle: one cached result per className, as Uniwind's getStyles returns
+const THEME = 1, RTL = 6;
+const resolved = {
+  'bg-card': { styles: { backgroundColor: 'white' }, dependencies: [THEME, RTL], dependencySum: 66, hasDataAttributes: false },
+  'accent-brand': { styles: { accentColor: 'green' }, dependencies: [THEME], dependencySum: 2, hasDataAttributes: false },
+  'accent-red-500': { styles: { accentColor: 'red' }, dependencies: [], dependencySum: 0, hasDataAttributes: false },
+};
+const fakeInternals = {
+  UniwindStore: { getStyles: (className) => resolved[className], vars: { light: {}, dark: {} }, runtime: { currentThemeName: 'light' } },
+  UniwindListener: { subscribe: () => () => {} },
+  StyleDependency: { Theme: THEME },
+};
+const hooks = { reducers: 0, effects: [] };
 const refStubs = {
-  react: { useLayoutEffect() {}, useReducer: () => [0, () => {}], useRef: (v) => ({ current: v }) },
+  react: {
+    useLayoutEffect: (fn, deps) => { hooks.effects.push(deps); },
+    useReducer: () => { hooks.reducers++; return [0, () => {}]; },
+    useRef: (v) => ({ current: v }),
+  },
   'react-native': { StyleSheet: { flatten: (s) => s } },
-  './install': { getInternals: () => null, installUniwind: () => ({ active: true }) },
+  './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: true }) },
+  'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
   'shadewind/internal': {
     ShadewindEngine: {
       register: (...a) => { engineCalls.push(['register', ...a]); return true; },
@@ -88,7 +106,7 @@ const refOut = ts.transpileModule(refSrc, { compilerOptions: { module: 'commonjs
 const rm = new Module('useShadewindStyle'); rm.paths = [];
 rm.require = (name) => { if (name in refStubs) return refStubs[name]; throw new Error('unexpected import ' + name); };
 rm._compile(refOut.replace(/require\(/g, 'module.require('), 'useShadewindStyle.js');
-const { useEngineRef, renderThemeOf } = rm.exports;
+const { useEngineRef, renderThemeOf, useShadewindStyle } = rm.exports;
 const themedA = { light: { backgroundColor: 1 }, dark: { backgroundColor: 2 } };
 const themedB = { light: { color: 1 }, dark: { color: 2 } };
 renderThemeOf.set(themedA, 'light');
@@ -100,5 +118,14 @@ ok('engine ref: another holder on an attached node claims no render theme (re-at
 ok('engine ref: a pausable ref unbinds on pause and binds again on resume', () => { const ref = useEngineRef(themedA, undefined, undefined, true); const node = {}; ref(node); engineCalls.length = 0; ref.pause(); ref.resume(); assert.deepStrictEqual(engineCalls, [['unregister', node], ['register', node, themedA]]); });
 ok('engine ref: the user ref still receives the node', () => { const user = { current: null }; const node = {}; useEngineRef(themedA, user, undefined)(node); assert.strictEqual(user.current, node); });
 ok('engine ref: no themed styles, the user ref is returned unchanged', () => { const user = () => {}; assert.strictEqual(useEngineRef(null, user, undefined), user); });
+
+// useShadewindStyle and Text's selection colour (an accent className): no extra hooks without one, the theme in the subscription with one
+const render = (accent) => { hooks.reducers = 0; hooks.effects.length = 0; const out = useShadewindStyle('bg-card', {}, undefined, accent); return { out, deps: hooks.effects[0], reducers: hooks.reducers, effects: hooks.effects.length }; };
+const warn = console.warn; console.warn = () => {};
+ok('style: no accent, one reducer and one layout effect, subscribed to the non-theme dependencies only', () => { const r = render(undefined); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 1); assert.deepStrictEqual(r.deps, [[RTL]]); assert.strictEqual(r.out.accentColor, undefined); });
+ok('style: a theme-dependent accent keeps the hook count, returns its colour and subscribes to the theme too', () => { const r = render('accent-brand'); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 1); assert.strictEqual(r.out.accentColor, 'green'); assert.ok(r.deps[0].includes(THEME) && r.deps[0].includes(RTL)); });
+ok('style: an accent that does not depend on the theme leaves the theme out', () => { const r = render('accent-red-500'); assert.strictEqual(r.out.accentColor, 'red'); assert.ok(!r.deps[0].includes(THEME)); });
+ok('style: the subscription array is the same object across renders (the effect does not subscribe again)', () => { assert.strictEqual(render('accent-brand').deps[0], render('accent-brand').deps[0]); assert.strictEqual(render(undefined).deps[0], render(undefined).deps[0]); });
+console.warn = warn;
 
 console.log(n + ' checks passed');

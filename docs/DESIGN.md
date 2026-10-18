@@ -583,7 +583,7 @@ Cause: after a freeze the ref re-attaches and registers again with `renderTheme`
 theme, so `ThemeHook::add(... renderedWithCurrentTheme = true)` marks the view applied with `base = the props the tree holds now`. Those props
 were re-themed by the hook before the freeze, so the claim is false and no later commit touches the view.
 
-Fix (src/uniwind/useShadewindStyle.ts `renderThemeFor`, used by the holder ref and by aot.ts): pass the render theme only on a node's first attach.
+Fix (src/uniwind/useShadewindStyle.ts `renderThemeFor`, used by the holder ref; also by aot.ts until it was removed): pass the render theme only on a node's first attach.
 A re-attach registers without it, so the next commit applies the current theme.
 
 After: the same sequence, run twice, `treeOK=174 viewOK=174`, correct colours on screen.

@@ -21,6 +21,10 @@ First public release. Experimental: New Architecture only, React Native 0.86.x, 
   gradients) that were reported changing after the engine's views. The likely cause, inferred from the React and React Native sources
   and not reproduced: a switch from outside a press handler (system appearance, effects, timers) lets React render in a later task
   than the engine's own commit. Harness-tested; not verified on a device.
+- Removed: `shadewind/uniwind/aot` (an undocumented ahead-of-time `className` path). It measured no faster than the adapter's
+  components (docs/ARCHITECTURE.md section 17c) and was a second code path to keep right.
+- The adapter's components pass the resolved `className` style as a single object when there is no `style` prop, instead of a
+  new two-element array per render.
 - `shadewind/diagnostics` (development only): `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })` logs every view
   bound to the engine, every bound view released or unbound (with the live count, for leak hunting), and every commit that themed
   views with the props each one got. Recorded by the commit hook natively, compiled into Debug builds only.

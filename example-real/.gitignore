@@ -78,5 +78,4 @@ build-out/
 dd/
 src/cnImpl.ts
 src/cnTable.ts
-src/aotImpl.ts
 src/transitionArm.ts
