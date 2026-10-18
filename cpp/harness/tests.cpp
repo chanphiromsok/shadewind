@@ -235,6 +235,27 @@ TEST_F(Current, ReactCommitAfterSwitchReusesProps) {
   EXPECT_EQ(app.lastReactCommit().stale, 0);
 }
 
+TEST_F(Current, SwitchBackReusesTheRenderedPropsWithoutACopy) {
+  // React rendered the card with the current theme: those props are that theme's, so prewarm must not build a copy of them and a
+  // switch back must put React's own object back
+  App app(engine, kThemes, "light");
+  auto* card = app.view(styles.card, {}, folly::dynamic::object("padding", 8));
+
+  app.mount({app.plainView({card})});
+
+  const auto rendered = card->node()->getProps();
+
+  engine.prewarm();
+  app.setTheme("dark");
+
+  ASSERT_NE(card->node()->getProps(), rendered) << "the switch did not reach the card (or its handle)";
+
+  app.setTheme("light");
+
+  EXPECT_EQ(card->node()->getProps(), rendered) << "switching back used a copy of the props React rendered";
+  EXPECT_EQ(app.check().stale, 0);
+}
+
 TEST_F(Current, UnrelatedReactCommitSkipsUnchangedSubtrees) {
   App app(engine, kThemes, "light");
   auto* leaf = app.plainView({}, folly::dynamic::object("height", 1));

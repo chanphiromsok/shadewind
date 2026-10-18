@@ -750,3 +750,38 @@ requires the colour each Java view holds to be the theme's. All 18 tests pass in
 Not checked: the NDK compile of this version, JNI, Java, a device or emulator (`docs/LOCAL_TESTING.md` step 9). The class resolver's
 Android bundle is built and compiled by `hermesc` (section 19), not run. example-real's launch-argument benches use `Settings`,
 which is iOS-only.
+
+## 21. Performance review of the C++ paths, measured with callgrind (2026-10-18)
+
+Method: `BENCH_PROFILE=1 cpp/harness/build/harness_bench --runs 3` (the current engine on the 2003-view screen, one process) under
+`valgrind --tool=callgrind`, with `--toggle-collect` on one function at a time; instruction counts are stable on a noisy VM, wall
+times are medians of 3 runs (x86 Linux VM; a phone is slower). A temporary micro-benchmark timed the class resolver.
+
+Changed: **prewarm reuses the props React rendered.** A view registered with the theme React rendered it with already holds that
+theme's props (`ThemeHook::add`, `renderedWithCurrentTheme`), yet prewarm built a second copy of them through React Native's props
+parser (`copyProps`: the `Props(context, source, rawProps)` constructor walks every prop key with string comparisons; its copy
+constructor is deleted). Now `produced[currentTheme] = base` there, and only there (props React gives later may carry an older
+theme). Harness test `SwitchBackReusesTheRenderedPropsWithoutACopy`; a mutant without the guard fails
+`ThemeChangeBeforeRefAttachIsAppliedByTheFlush`.
+
+| | before | after |
+|---|---|---|
+| prewarm instructions (5 mounts) | 948.6 M | 480.3 M (-49 %) |
+| props copies View / Text (5 mounts) | 10,010 / 10,030 | 5,005 / 5,015 |
+| prewarm wall time, median | 18.8-19.4 ms | 10.3-10.7 ms |
+| mount: refs attach + flush | 4.6-5.4 ms | 4.3-4.6 ms |
+| peak RSS of the run | 65.6 MB | 55.5 MB |
+| commit hook instructions (all commits of the run) | 216.25 M | 216.08 M (unchanged) |
+| switch, sync | 5.4-6.3 ms | 5.4-6.7 ms (unchanged: the cache hit either way) |
+
+Profiled and left alone:
+
+- **Class resolver** (`cpp/css/StyleResolver.hpp`): 0.155 us per `resolve` (about 340 instructions) over the 1531 class names of the
+  parity fixture, no allocation (F14's heterogeneous lookup takes the `string_view` tokens). Nothing worth changing.
+- **Theme switch commit**: about a third of the hook's instructions are React Native's own clone work, `yoga::Style::operator==`
+  in `YogaLayoutableShadowNode::updateYogaProps` (every clone with new props compares the whole Yoga style) and
+  `updateYogaChildren` for the ancestors cloned with new child lists. The engine's walk is about 5 %, `cloneThemed` under 1 %.
+- **Registration**: about 4 M instructions per mount, mostly freeing the entries of the previous mount (fewer props objects now).
+- **Candidate, not done (cannot be measured here):** the resolver's JSI glue creates a `jsi::PropNameID` from a C string for every
+  key of every result (`setProperty(rt, const char*, ...)`). Caching them per runtime is the usual JSI practice, but the cache must
+  die with the runtime (reload) or it crashes; measure `__swResolve` calls per second in a Hermes release build first.

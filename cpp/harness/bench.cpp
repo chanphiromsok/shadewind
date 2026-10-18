@@ -9,6 +9,9 @@
 //
 //   build/harness_bench            all scenarios, a table
 //   build/harness_bench --json     the same as JSON lines
+//   BENCH_PROFILE=1 build/harness_bench --runs 3
+//                                  the current engine on the 2003-view screen only, in this process (no fork): for callgrind,
+//                                  e.g. valgrind --tool=callgrind --toggle-collect='*ThemeHook::prewarm*' ...
 
 #include "App.hpp"
 
@@ -460,6 +463,12 @@ int main(int argc, char** argv) {
     } else if (std::strcmp(argv[i], "--runs") == 0 && i + 1 < argc) {
       runs = std::atoi(argv[++i]);
     }
+  }
+
+  if (std::getenv("BENCH_PROFILE")) { // profiling: the current engine only, in this process (see the header)
+    theirBenchmark<CurrentEngine>(1000, runs);
+    print();
+    return 0;
   }
 
   isolated([&] { theirBenchmark<NoEngine>(1000, runs); });

@@ -354,6 +354,13 @@ public:
     if (renderedWithCurrentTheme && _theme != kNoTheme) {
       entry.appliedEpoch = _epoch;
       entry.appliedProps = entry.base.get();
+
+      // and they are this theme's props: prewarm builds only the other themes, a switch back reuses React's own object (one
+      // props object less per view, and half the prewarm work with two themes). Only here: props React gives later may carry an
+      // older theme (the engine switches without React rendering).
+      if (entry.style->byTheme[_theme]) {
+        entry.produced[_theme] = entry.base;
+      }
     } else if (_theme != kNoTheme) {
       // registered with props of another theme (a re-attach, a switch between render and attach): the next commit must look
       // at it, so the previous tree no longer proves anything
