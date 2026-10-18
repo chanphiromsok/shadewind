@@ -61,6 +61,7 @@ npx react-native run-android --mode release
 | `-theirBench theme` | instead of the app: the uniwind-benchmarks theme scenario with `className`s (2003 views, 10 `Uniwind.setTheme` changes, each timed until the JS thread is idle), result in `their-result` (`src/bench/TheirBench.tsx`) |
 | `-uniwindStrategy hookAsync` | with `-theirBench`: the engine applies Uniwind's switches with `hookAsync` instead of `hookDeferred` (measuring only) |
 | `-theirBenchReader 1` | with `-theirBench`: adds one `Text` coloured with `useCSSVariable`, a component React re-renders on a switch |
+| `-theirBenchNoText 1` | with `-theirBench`: the cells without their number (1003 views), to see how much of the time to the screen is text redrawing |
 
 ```sh
 xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -resolveBench 1

@@ -8,6 +8,8 @@
 //   -uniwindStrategy hookAsync        the engine's strategy on the Uniwind path (measuring only, __SHADEWIND_UNIWIND_STRATEGY__)
 //   -theirBenchReader 1               adds one Text whose colour comes from useCSSVariable: a component React re-renders on a
 //                                     switch, as almost every app has (status bar, navigation theme, icon colours)
+//   -theirBenchNoText 1               the 1000 cells without their number (1003 views): how much of the time to the screen is
+//                                     redrawing text, which a colour change forces on the main thread
 //
 // What it reports is the JavaScript thread only. The commit on a background thread (hookAsync) and the main thread's mount are not
 // in it: see docs/BENCHMARK.md, "Uniwind with hookAsync".
@@ -15,6 +17,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ScrollView, Settings, Text, View } from 'react-native';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { ShadewindEngine } from 'shadewind/internal';
+import { status } from '../engineReport';
 
 const RUNS = 10;
 const ITEMS_COUNT = 1000;
@@ -27,6 +30,9 @@ if (Settings.get('theirBench') && typeof strategy === 'string') {
 }
 
 const withReader = Boolean(Settings.get('theirBenchReader'));
+const noText = Boolean(Settings.get('theirBenchNoText'));
+// scripts/arm.sh writes this for the arm; the plain arm still links the native module, whose inspect() then reports nothing
+const plainArm = status() === 'plain arm: no engine';
 
 const now = () => (globalThis as unknown as { performance: { now(): number } }).performance.now();
 const avg = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
@@ -39,7 +45,7 @@ const med = (v: number[]) => {
 function Item({ index }: { index: number }) {
   return (
     <View className="h-25 w-[32%] items-center justify-center rounded-2xl bg-bench-primary">
-      <Text className="text-2xl font-bold text-bench-typo">{index}</Text>
+      {noText ? null : <Text className="text-2xl font-bold text-bench-typo">{index}</Text>}
     </View>
   );
 }
@@ -57,12 +63,20 @@ function Reader() {
 
 // the engine's view of the tree after the run (dev tools build, engine arm); the plain arm has no engine
 function treeCheck(): string {
+  if (plainArm) {
+    return 'no engine report (plain arm)';
+  }
+
   try {
     const r = ShadewindEngine.inspect();
 
+    if (r.registered === undefined) {
+      return 'no engine report (engine not active)';
+    }
+
     return `registered=${r.registered} treeOK=${r.treeMatchesExpected} viewOK=${r.nativePropsMatchExpected} layerOK=${r.layerMatchesExpected}`;
   } catch {
-    return 'no engine report (plain arm, or no dev tools)';
+    return 'no engine report (no dev tools in this build)';
   }
 }
 
@@ -113,8 +127,9 @@ export function TheirBench() {
   }, [run]);
 
   const running = run < RUNS;
-  const engineStrategy =
-    (globalThis as { __SHADEWIND_UNIWIND_STRATEGY__?: string }).__SHADEWIND_UNIWIND_STRATEGY__ ?? 'default (hookDeferred)';
+  const engineStrategy = plainArm
+    ? 'none (plain Uniwind)'
+    : ((globalThis as { __SHADEWIND_UNIWIND_STRATEGY__?: string }).__SHADEWIND_UNIWIND_STRATEGY__ ?? 'hookDeferred (default)');
 
   return (
     <View className="mt-15 flex-1 px-3">
@@ -126,7 +141,7 @@ export function TheirBench() {
         </Text>
         {result ? (
           <Text testID="their-result" className="text-center text-[13px] font-semibold text-bench-typo">
-            {`JS idle avg ${avg(result.js).toFixed(2)} ms, median ${med(result.js).toFixed(2)} ms, min ${Math.min(...result.js).toFixed(2)}, max ${Math.max(...result.js).toFixed(2)}\n${result.tree}\nstrategy ${engineStrategy}${withReader ? ', with a useCSSVariable reader' : ''}\n${ITEMS_COUNT * 2 + 3} views x ${RUNS} theme changes`}
+            {`JS idle avg ${avg(result.js).toFixed(2)} ms, median ${med(result.js).toFixed(2)} ms, min ${Math.min(...result.js).toFixed(2)}, max ${Math.max(...result.js).toFixed(2)}\n${result.tree}\nstrategy ${engineStrategy}${withReader ? ', with a useCSSVariable reader' : ''}${noText ? ', cells without text' : ''}\n${noText ? ITEMS_COUNT + 3 : ITEMS_COUNT * 2 + 3} views x ${RUNS} theme changes`}
           </Text>
         ) : null}
       </View>
