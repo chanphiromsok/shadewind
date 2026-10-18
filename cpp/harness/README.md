@@ -77,6 +77,10 @@ Three checks, because they find different things:
 - **Memory kept but no longer needed** (the usual leak with smart pointers: a cache or a map that holds what unmounted views left):
   the test `MemoryStaysFlatAcrossMountSwitchUnmountCycles` mounts, prewarms, switches twice and unmounts 900 times and fails if the
   live heap grows by 64 KB over the last 300 cycles or the registry passes its purge threshold.
+- **Data races** (the commit hook runs on the JS thread and, for iOS hookAsync, on a background thread): `-DHARNESS_TSAN=ON` in its
+  own build directory, then `TSAN_OPTIONS=history_size=7 build-tsan/harness_tests`. The longer history matters: with the default,
+  a race against an access made millions of accesses earlier in a long walk is not reported (checked: a non-atomic copy of the
+  theme setTheme publishes is reported only with it).
 - **The JSI glue and its per-runtime cache:** `GLUE_QUICK=1 valgrind --leak-check=full build/hermes_glue` (two runtimes created and
   destroyed).
 

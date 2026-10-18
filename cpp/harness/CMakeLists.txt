@@ -20,6 +20,14 @@ if(HARNESS_SANITIZE)
   add_link_options(-fsanitize=address,undefined -fno-sanitize=vptr)
 endif()
 
+# HARNESS_TSAN: ThreadSanitizer (data races: the commit hook runs on the JS thread and on background threads). Its own build
+# directory; not together with HARNESS_SANITIZE.
+option(HARNESS_TSAN "build with ThreadSanitizer" OFF)
+if(HARNESS_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
+
 set(DEPS "${CMAKE_CURRENT_SOURCE_DIR}/.deps" CACHE PATH "fetch-deps.sh output")
 set(RN "${DEPS}/react-native/ReactCommon")
 set(ENGINE "${CMAKE_CURRENT_SOURCE_DIR}/..")
@@ -42,7 +50,7 @@ set(FOLLY_SRC
   json/json.cpp lang/CString.cpp lang/Exception.cpp lang/SafeAssert.cpp lang/ToAscii.cpp memory/detail/MallocImpl.cpp
   net/NetOps.cpp portability/SysUio.cpp synchronization/SanitizeThread.cpp synchronization/ParkingLot.cpp
   system/AtFork.cpp system/ThreadId.cpp)
-if(HARNESS_SANITIZE)
+if(HARNESS_SANITIZE OR HARNESS_TSAN)
   list(APPEND FOLLY_SRC memory/SanitizeLeak.cpp) # folly annotates for the sanitizers when it sees them
 endif()
 list(TRANSFORM FOLLY_SRC PREPEND "${DEPS}/folly/folly/")

@@ -323,6 +323,7 @@ public:
       SurfaceId surface,
       bool renderedWithCurrentTheme = false) {
     std::lock_guard<std::mutex> lock(_mutex);
+    syncTheme(); // "the current theme" is the one setTheme published last, also when no commit has run since
     const uint32_t diagnostics = _log.flags();
 
     // before the insert: a new view can take the address of a released one, whose unmount would then never be reported
@@ -405,17 +406,27 @@ public:
     return _log;
   }
 
+  // Publishes the theme for the next commit without taking _mutex, which a background (hookAsync) commit holds for its whole walk:
+  // the JS thread used to wait for it here. A walk already running keeps the theme it started with; the commit that follows the
+  // switch picks the new one up (syncTheme).
   void setTheme(const std::string& theme) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _theme = internTheme(theme);
-    ++_epoch;
-    _startedEpoch.store(_epoch, std::memory_order_release);
+    // Only the JS thread writes the theme names (declareThemes, makeStyle, an undeclared name here), so it may look a declared
+    // name up without the lock; commits only read them, under the lock.
+    ThemeId id = findTheme(theme);
+
+    if (id == kNoTheme) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      id = internTheme(theme);
+    }
+
+    const uint64_t epoch = (_requested.load(std::memory_order_relaxed) >> 8) + 1;
+
+    _requested.store((epoch << 8) | id, std::memory_order_release);
   }
 
-  // The epoch `setTheme` last started (see rootCarries). Lock-free: _mutex is held for a whole commit walk, and the JS thread
-  // calls this right after setTheme, when a background (hookAsync) commit may be walking.
+  // The epoch `setTheme` last started (see rootCarries).
   uint64_t epoch() const {
-    return _startedEpoch.load(std::memory_order_acquire);
+    return _requested.load(std::memory_order_acquire) >> 8;
   }
 
   // Theme transitions: from now on the hook records which epoch each tree it returns was themed for. Idle (and free) until the
@@ -445,6 +456,7 @@ public:
   // A view registered with another theme's props since the last commit: the caller commits once so it is themed now.
   bool hasStale() {
     std::lock_guard<std::mutex> lock(_mutex);
+    syncTheme();
     return _stale && _theme != kNoTheme;
   }
 
@@ -528,6 +540,7 @@ public:
   // Debug (inspect): what the hook believes about one view, next to the props the committed tree holds for it.
   std::string describe(const ShadowNodeFamily* family, const Props* current) {
     std::lock_guard<std::mutex> lock(_mutex);
+    syncTheme();
     const auto it = _entries.find(family);
 
     if (it == _entries.end()) {
@@ -549,6 +562,7 @@ public:
 
   std::vector<Registered> registered() {
     std::lock_guard<std::mutex> lock(_mutex);
+    syncTheme();
     std::vector<Registered> result;
 
     result.reserve(_entries.size());
@@ -586,6 +600,10 @@ public:
 
     // One pass over the new tree, under one lock hold: decide per registered view, clone it and record what was applied.
     std::unique_lock<std::mutex> lock(_mutex);
+
+    // once, here: the walk, remember() and provenTree() must all see the theme and epoch this tree is themed for, even when
+    // setTheme publishes another one meanwhile
+    syncTheme();
     const uint32_t diagnostics = _log.flags();
 
     // diagnostics: released views are dropped (and reported) at every commit, so the registered count is the live one
@@ -705,6 +723,25 @@ private:
     bool recordUpdates = false; // diagnostics: record every view cloned
     std::vector<DiagnosticUpdate> updates;
   };
+
+  // A declared theme's slot, or kNoTheme. Reads only: see setTheme.
+  ThemeId findTheme(const std::string& name) const {
+    for (size_t i = 0; i < _themeNames.size(); i++) {
+      if (_themeNames[i] == name) {
+        return static_cast<ThemeId>(i);
+      }
+    }
+
+    return kNoTheme;
+  }
+
+  // Caller holds _mutex: the theme and epoch setTheme published last become the hook's.
+  void syncTheme() {
+    const uint64_t requested = _requested.load(std::memory_order_acquire);
+
+    _epoch = requested >> 8;
+    _theme = static_cast<ThemeId>(requested & 0xFF);
+  }
 
   // Caller holds _mutex. Returns kNoTheme when more than kMaxThemes distinct themes exist.
   ThemeId internTheme(const std::string& name) {
@@ -1094,7 +1131,9 @@ private:
   ThemeId _theme = kNoTheme;
   std::vector<std::string> _themeNames;
   uint64_t _epoch = 0;
-  std::atomic<uint64_t> _startedEpoch{0}; // _epoch, readable without _mutex (epoch())
+  // What setTheme published: (epoch << 8) | theme, one word so the two are never seen apart. _theme and _epoch follow it under
+  // _mutex (syncTheme).
+  std::atomic<uint64_t> _requested{kNoTheme};
   uint64_t _registrationGeneration = 0; // bumped by every registration with another theme's props
   bool _stale = false;                  // such a registration happened since the last walk
   uint64_t _commits = 0;

@@ -21,6 +21,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <thread>
+
 #include <algorithm>
 #include <cstring>
 #include <set>
@@ -281,6 +285,71 @@ TEST_F(Current, SwitchBackReusesTheRenderedPropsWithoutACopy) {
 
   EXPECT_EQ(card->node()->getProps(), rendered) << "switching back used a copy of the props React rendered";
   EXPECT_EQ(app.check().stale, 0);
+}
+
+TEST_F(Current, SetThemeDoesNotWaitForABackgroundWalk) {
+  // iOS hookAsync: the switch's commit walks on a background thread while holding the hook's lock. A setTheme meanwhile (a rapid
+  // toggle) must publish its theme and return, not wait for that walk; the commit after it applies the new theme.
+  using Clock = std::chrono::steady_clock;
+  App app(engine, kThemes, "light");
+
+  app.mount({screen(app, styles, 6000)});
+  engine.engine().setTheme("dark"); // nothing committed yet: the next commit themes 12002 views, a long walk
+  app.assumeTheme("dark");
+
+  std::atomic<bool> started{false}, done{false};
+  Clock::time_point walkStart, walkEnd;
+  std::thread background([&] {
+    walkStart = Clock::now();
+    started = true;
+    app.react().commitTick();
+    walkEnd = Clock::now();
+    done = true;
+  });
+
+  while (!started) {
+  }
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(3));
+
+  const bool walkingBefore = !done;
+  const auto t0 = Clock::now();
+
+  engine.engine().setTheme("light");
+
+  const auto latency = Clock::now() - t0;
+  const bool walkingAfter = !done;
+
+  background.join();
+
+  ASSERT_TRUE(walkingBefore) << "inconclusive: the background walk had ended before setTheme was called";
+  EXPECT_TRUE(walkingAfter) << "setTheme returned only after the background walk";
+  EXPECT_LT(latency, (walkEnd - walkStart) / 10) << "setTheme took "
+                                                 << std::chrono::duration<double, std::micro>(latency).count() << " us";
+
+  // that walk themed dark; the commit after the second switch themes light
+  app.assumeTheme("light");
+  app.react().commitTick();
+  EXPECT_EQ(app.check().stale, 0);
+}
+
+TEST_F(Current, ViewRegisteredAfterAnUncommittedSwitchIsFiledUnderThatTheme) {
+  // setTheme publishes the theme; nothing commits before a view React rendered with it registers. The registration must count
+  // as that theme's (its props become that theme's cached props), not as the theme of the last commit.
+  App app(engine, kThemes, "light");
+
+  app.mount({screen(app, styles, 2)});
+  app.assumeTheme("dark");
+
+  auto* late = app.view(styles.card, {}, folly::dynamic::object("padding", 4)); // React rendered it dark
+
+  app.mountCommit({app.plainView({late})}); // React's commit: the engine is still on light
+  engine.engine().setTheme("dark");         // published, nothing committed since
+  app.attachRefs();                         // registers `late`
+  app.react().commitTick();
+  app.setTheme("light");
+
+  EXPECT_EQ(app.lastThemeCommit().stale, 0) << "dark props were filed as the light theme's";
 }
 
 TEST_F(Current, UnrelatedReactCommitSkipsUnchangedSubtrees) {

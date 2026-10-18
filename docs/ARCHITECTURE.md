@@ -814,3 +814,12 @@ Memory profile (valgrind massif, x86 VM, same day):
 - Leak checks: valgrind --leak-check=full over harness_tests and hermes_glue: 0 bytes lost; AddressSanitizer + LeakSanitizer + UBSan
   (`-DHARNESS_SANITIZE=ON`) over all harness tests and the current engine's bench: clean, after fixing a test that destroyed a commit
   hook before the fake React's last commit (stack-use-after-scope in test code, not in the engine).
+
+`setTheme` no longer takes the hook's lock (same day). It publishes `(epoch << 8) | theme` in one atomic word; a commit folds it in
+once, at the start of its walk, and registration folds it in before it reads the theme. A background (iOS hookAsync) walk holds
+the lock for its whole duration, and setTheme used to wait for it: under continuous background commits on 2003 views, p99 6.5-7.1 ms,
+max 16.7-18.0 ms, about 350 of 1500 calls over 1 ms; now p99 1.6-2.1 us, max 25-57 us, none over 1 ms. Only iOS hookAsync gains:
+hookDeferred (the Uniwind adapter) and Android commit on the JS thread, which takes the lock anyway; registration and
+`flushPending` still wait for a background walk. Tests: `SetThemeDoesNotWaitForABackgroundWalk` (fails with the lock put back:
+setTheme took 122 ms), `ViewRegisteredAfterAnUncommittedSwitchIsFiledUnderThatTheme` (fails if registration does not fold the
+published theme in). ThreadSanitizer over all tests: no race (a non-atomic mutant of the published word is reported).
