@@ -128,4 +128,13 @@ ok('style: an accent that does not depend on the theme leaves the theme out', ()
 ok('style: the subscription array is the same object across renders (the effect does not subscribe again)', () => { assert.strictEqual(render('accent-brand').deps[0], render('accent-brand').deps[0]); assert.strictEqual(render(undefined).deps[0], render(undefined).deps[0]); });
 console.warn = warn;
 
+// src/uniwind/native.ts withUserStyle: the cached className style alone when there is no user style
+const nm = new Module('native'); nm.paths = [];
+nm.require = (name) => ({ default: function Host() {}, NativeText: function NativeText() {} }); // the React Native host components
+nm._compile(ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'native.ts'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText.replace(/require\(/g, 'module.require('), 'native.js');
+const { withUserStyle } = nm.exports;
+const cached = { backgroundColor: 'white' };
+ok('withUserStyle: no style prop (undefined, null, false): the cached object itself, no array', () => { assert.strictEqual(withUserStyle(cached, undefined), cached); assert.strictEqual(withUserStyle(cached, null), cached); assert.strictEqual(withUserStyle(cached, false), cached); });
+ok('withUserStyle: with a style prop, the user style comes after the className style', () => { const user = { padding: 4 }; assert.deepStrictEqual(withUserStyle(cached, user), [cached, user]); });
+
 console.log(n + ' checks passed');

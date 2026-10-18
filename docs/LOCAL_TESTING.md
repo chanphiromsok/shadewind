@@ -83,7 +83,7 @@ this branch removes.
 ## 5. Theme switch and mount on `example-real` (A/B with the baseline)
 
 Launch argument `-realBench 1` runs the benchmark by itself 15 s after launch and shows the result on top of the app
-(mount of 30 feed cards in four variants, then idle and stall of 12 switches):
+(mount of 30 feed cards in three variants: className, no Pressable, static host; then idle and stall of 12 switches):
 
 ```sh
 xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -realBench 1

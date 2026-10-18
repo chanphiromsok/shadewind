@@ -87,7 +87,7 @@ How to reproduce the checks: build tovtam with `shadewind` from the tarball (`no
 -PreactNativeArchitectures=arm64-v8a` with the debug keystore passed by `-PMYAPP_RELEASE_*`), record the Account > Theme sheet switch with the argent
 screen recorder (`trimStatic: false`) and compare the frame where each region changes (`ffmpeg ... signalstats`). Recordings are
 in `.argent/recordings` (git-ignored). Environment: `ASDF_RUBY_VERSION=3.2.0` for `pod` in `example-real/ios`; example-real needs
-`bash scripts/arm.sh engine` (writes git-ignored `src/aotImpl.ts` etc.); the emulator was nearly full (use `adb shell pm uninstall -k <app>`
+`bash scripts/arm.sh engine` (writes git-ignored `src/cnImpl.ts` etc.); the emulator was nearly full (use `adb shell pm uninstall -k <app>`
 then `adb install` to keep app data).
 
 ## What was done

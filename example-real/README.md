@@ -52,7 +52,7 @@ npx react-native run-android --mode release
 
 | Argument | What it does |
 |---|---|
-| `-realBench 1` | 15 s after launch: mount of 30 feed cards in four variants, then idle and stall of 12 theme switches |
+| `-realBench 1` | 15 s after launch: mount of 30 feed cards in three variants (className, no Pressable, static host), then idle and stall of 12 theme switches |
 | `-resolveBench 1` | 5 s after launch: where the class table came from, `getStyles` misses resolved natively vs by Uniwind, first feed layout, parity and per-resolution timing of the native resolver against Uniwind's own |
 | `-resolverOff 1` | Uniwind's own class resolution only (no table loaded or built), for A/B launches of one build |
 | `-themeTransition 250` | theme switches animate over 250 ms, plus the test row on Account (see Theme transition below) |
