@@ -979,11 +979,26 @@ nothing, `useRegistration` calls `useEngineRef`).
 
 The engine paints the styles a view is bound with over whatever props React commits for it (`ThemeHook`, "React replaced the props"). A
 view bound at an earlier switch whose next render has other styles (a conditional className) or none would be painted with the old
-ones until the next switch. So on a render where `themed` differs from the previous render's, `useSwitchRef` returns a one-shot ref. When
-React attaches it, `ShadewindEngine.rebindHost` binds the view to the new styles (no render theme, so the next commit themes it) or unbinds
-it, and only if the walk had bound it. A first render and a render with the same styles attach nothing. One `useRef` per View / Text
-holds the previous `themed` (written during render, like `useEngineRef`'s holder; a discarded concurrent render can hide a change, and
-the next walk corrects it).
+ones. So on a render where `themed` differs from the previous render's, `useSwitchRef` returns a one-shot ref, and when React
+attaches it `ShadewindEngine.rebindHost` acts, only if the walk had bound the view:
+
+- other theme-dependent styles (A -> B): the view is bound to B with no render theme, so C++ marks it stale and `registerMany`'s
+  `commitTick` themes it right after. The same outcome as the old holder.
+- no styles (B -> a class that does not depend on the theme, a pressed Text): bound to **this render's values, the same in every
+  theme** (`pinned`: the keys it was bound with, read from the style the host is rendered with; an unset background is `transparent`),
+  not unbound. The next walk finds the view without `$sw` and unbinds it. Unbound only when a key cannot be pinned (an unset text or
+  border colour).
+
+Why pinned and not unbound: React attaches refs in the layout phase, after `completeRoot` (the native commit) at the end of the mutation
+phase (`commitMutationEffectsOnFiber`, HostRoot, then `flushLayoutEffects`; read in `ReactFabric-prod.js`). The old engine ref detached in
+the mutation phase, before `completeRoot`, so it unbound the view before the hook could paint it. The new ref runs after the hook has
+painted the old styles over React's new props, and `unregisterView` only drops the entry, it repaints nothing: a view going from
+`bg-card` to `bg-red-500` would have kept `bg-card`. Pinning has the engine paint React's own values. This ordering is from reading the
+renderer, not from a run.
+
+A first render and a render with the same styles attach nothing. One `useRef` per View / Text holds the previous `themed` (written
+during render, like `useEngineRef`'s holder; a discarded concurrent render can hide a change, and the next walk corrects it). Each pin
+is a new styles object with its own style id, so every such transition adds one entry to the native style cache.
 
 ### Deviations from the original design, and why
 
@@ -1020,21 +1035,23 @@ the next walk corrects it).
 
 ### Checked
 
-`node tools/theme-transition-js-check.cjs` (58 checks: the 40 that existed, 18 for this). The real `atSwitch.ts`, `internal.tsx` and
+`node tools/theme-transition-js-check.cjs` (61 checks: the 40 that existed, 21 for this). The real `atSwitch.ts`, `internal.tsx` and
 `useShadewindStyle.ts` are compiled and run against a fake fiber tree and a fake native module. The tree has two copies of every fiber
 (stale `$sw` and stale shadow nodes on the alternate copy), `return` pointers that point at the alternate parent, and a root view
 whose handle is the alternate HostRoot. It checks: only the committed tree's views are registered, in tree order, with their render
 theme; `registerMany` goes out before the native `setTheme`; a second switch registers nothing; changed styles are registered again; a
 lost `$sw` is unregistered; a hidden (Offscreen) subtree is included; two roots, and a root that unmounted is dropped; no root warns and
 binds nothing; the wrapper composes with a provider set later; flag on means no ref at mount, none for the same styles, one when they
-change, and it rebinds, unbinds or ignores correctly; flag off keeps `useEngineRef`. Eight mutants must fail by an assertion (not by a
-crash): walking the alternate tree; starting from the HostRoot fiber the handle reached instead of `FiberRoot.current`; no dedupe;
+change, and it rebinds, pins, unbinds or ignores correctly; flag off keeps `useEngineRef`. Eleven mutants must fail by an assertion (not by a
+crash); eight on the walk and the engine: walking the alternate tree; starting from the HostRoot fiber the handle reached instead of `FiberRoot.current`; no dedupe;
 no unbind; no render theme; no walk before the switch; registrations sent after the switch; skipping Offscreen; losing siblings after a
-subtree.
+subtree; and three on the rebinding ref: unbinding a view that leaves the engine instead of pinning it, pinning without the transparent
+background, pinning only the first theme.
 
-Walk time: 0.083 ms for a synthetic tree of 5,000 fibers (1,000 cells of a view and a text, with function and raw-text fibers between),
+Walk time: 0.07-0.08 ms for a synthetic tree of 5,000 fibers (1,000 cells of a view and a text, with function and raw-text fibers between),
 measured in Node 22 (V8), not Hermes and not a real React tree. The design note's 0.42 ms for 8,013 fibers was Hermes `-O` on a VM. The
 two are not comparable; neither is a device number.
 
-Not done: any run in React Native; the C++ harness (no native code changed); a Metro or Hermes build of the new code; Android;
+Also run: `yarn prepare` (bob build: Babel, type definitions, nitrogen), which succeeds. Not done: any run in React Native; the C++ harness
+(no native code changed); a Metro bundle of example-real or a Hermes compile of the new code; Android;
 the mount and switch measurements (docs/LOCAL_TESTING.md step 10 lists them).

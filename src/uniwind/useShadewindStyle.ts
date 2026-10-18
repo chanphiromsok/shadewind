@@ -505,12 +505,49 @@ export const useEngineRef = (
 };
 
 // Register at switch (atSwitch.ts): the view carries its styles as `$sw` and the walk before a switch binds it, so there is no ref to
-// attach at mount. A render that changes the view's styles needs a ref once, because the engine keeps painting what it was bound
-// with over React's new props until it is told otherwise: on that render the ref rebinds the view (or unbinds it) when it attaches.
-// The ref only fires for a view the walk has bound; a first render, and every render with the same styles, attach nothing.
+// attach at mount. A render that changes the styles of a view the walk bound needs a ref once, because the engine keeps painting what
+// the view was bound with over React's new props: the ref rebinds the view when it attaches. The ref only does anything for a view the
+// walk has bound; a first render, and every render with the same styles, attach nothing.
+//
+// Refs attach in React's layout phase, AFTER the native commit (completeRoot runs at the end of the mutation phase), while the old
+// engine ref detached BEFORE it. So a view that leaves the engine (a class that does not depend on the theme, a pressed state) has
+// already been painted with its old styles when the ref runs, and unbinding does not repaint it. It is bound to what this render gave it,
+// the same in every theme, instead: that commit paints exactly React's values, and the next walk unbinds it.
+const pinned = (
+  before: ThemedStyles,
+  rendered: unknown
+): ThemedStyles | null => {
+  const style = (StyleSheet.flatten(rendered as never) ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const out: ThemedStyles = {};
+
+  for (const theme of Object.keys(before)) {
+    const pin: Record<string, unknown> = {};
+
+    for (const key of Object.keys(before[theme]!)) {
+      // an unset background is transparent, as in plan(); an unset colour or border colour has platform defaults: not folded
+      const value =
+        style[key] ?? (key === 'backgroundColor' ? 'transparent' : undefined);
+
+      if (value === undefined) {
+        return null;
+      }
+
+      pin[key] = value;
+    }
+
+    out[theme] = pin;
+  }
+
+  return out;
+};
+
 const useSwitchRef = (
   themed: ThemedStyles | null,
-  userRef: Ref<unknown> | undefined
+  userRef: Ref<unknown> | undefined,
+  rendered: unknown
 ): any => {
   const last = useRef<ThemedStyles | null | undefined>(undefined);
   const before = last.current;
@@ -521,9 +558,11 @@ const useSwitchRef = (
     return userRef;
   }
 
+  const bind = themed ?? (before ? pinned(before, rendered) : null);
+
   return (node: unknown) => {
     if (node) {
-      engine().rebindHost(node, themed);
+      engine().rebindHost(node, bind);
     }
 
     if (typeof userRef === 'function') {
@@ -541,10 +580,12 @@ const useSwitchRef = (
 export const useRegistration = (
   themed: ThemedStyles | null,
   userRef: Ref<unknown> | undefined,
-  onRegisterFailed?: () => void
+  onRegisterFailed: (() => void) | undefined,
+  // the style the host element is rendered with (the className style and the user's), for a view that leaves the engine
+  rendered: unknown
 ): any =>
   atSwitchEnabled()
     ? // eslint-disable-next-line react-hooks/rules-of-hooks
-      useSwitchRef(themed, userRef)
+      useSwitchRef(themed, userRef, rendered)
     : // eslint-disable-next-line react-hooks/rules-of-hooks
       useEngineRef(themed, userRef, onRegisterFailed);

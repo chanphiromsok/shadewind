@@ -68,22 +68,23 @@ Branch `claude/brave-mccarthy-yr9vaz`, from `main` at `5f2d555`. Flag `globalThi
 - `src/internal.tsx`: `bindHost` / `unbindHost` / `rebindHost` / `isHostBound` (keyed by `stateNode.canonical`, reuse `nativeOf` =
   the old `nativeByStyles` code, and `styleIdOf`), `setBeforeSwitch` (called first thing in `setTheme`, before the flush and the native switch).
 - `View` and `Text` use `useRegistration` and spread `swProps(themed)`; `install.ts` starts the root tracking and the walk when the flag is on.
-- `tools/register-at-switch-js-check.cjs` (run by `theme-transition-js-check.cjs`): 58 checks pass (40 old + 18 new), 8 mutants fail by assertion.
+- `tools/register-at-switch-js-check.cjs` (run by `theme-transition-js-check.cjs`): 61 checks pass (40 old + 21 new), 11 mutants fail by assertion.
 
 Where it differs from the plan you were given, and what that means:
 - Only `View` and `Text` skip the ref. `TouchableOpacity` drops unknown props (its `render` lists the props it passes), the Pressable's
   plan does not go null while pressed (so it needs `pause()` before the pressed commit, which needs a node) and `withUniwind` cannot
   promise a wrapped component forwards `$sw`. They keep `useEngineRef`; so does everything the plan said to delete. The mount saving
   is therefore for View / Text (the 2003-view benchmark has nothing else). Section 22 has the reasoning and a way forward for each.
-- A render that changes a bound view's styles gets a one-shot ref that rebinds or unbinds it (without it a conditional className is
-  painted with its old colours until the next switch).
+- A render that changes a bound view's styles gets a one-shot ref that rebinds it. A view that leaves the engine (a static class, a
+  pressed Text) is bound to that render's values for every theme rather than unbound: refs attach after the native commit, so unbinding
+  would leave the old paint (section 22 has the ordering; read in the renderer source, not run).
 - The render theme passed is `renderThemeOf.get(themed)`, not a theme read at the walk.
 
 Verified: the JS checks above; `tsc --noEmit`: 35 errors before and after, none in `src/` (24 in `spikes/`, 11 in `example/`; you
-mentioned 34 in `spikes/`); `eslint` clean on the files changed (the errors it reports in `LightPressable.tsx` / `Pressable.tsx` were there). Walk time
-0.083 ms for a synthetic 5,000-fiber tree in Node (V8), which is not the Hermes figure.
+mentioned 34 in `spikes/`); `eslint` clean on the files changed (the errors it reports in `LightPressable.tsx` / `Pressable.tsx` were there). `yarn prepare` (bob build: Babel,
+type definitions, nitrogen) succeeds with the new files. Walk time 0.07-0.08 ms for a synthetic 5,000-fiber tree in Node (V8), which is not the Hermes figure.
 
-NOT verified: anything in React Native, a simulator or a device; the Metro bundle or a Hermes compile of the new files; Android; any
+NOT verified: anything in React Native, a simulator or a device; a Metro bundle of example-real or a Hermes compile of the new files; Android; any
 mount or switch timing (so no claim that it removes the ~6 ms); the C++ harness (not run: no native code changed); that `$sw`
 raises no dev warning when running (only that `ReactFabric-dev.js` has none); the real wrapper view's effect on layout and touches
 (`flex: 1`, `pointerEvents: 'box-none'`, one extra host view per root); the concurrent-render race in section 22.

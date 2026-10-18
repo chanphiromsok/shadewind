@@ -35,10 +35,12 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       state,
       props.selectionColorClassName
     );
+    const rendered = withUserStyle(style, props.style);
     const ref = useRegistration(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed
+      onRegisterFailed,
+      rendered
     );
 
     // plain text (primitive children, no press handlers or accessibility props, no clamp): the host component directly, with the
@@ -55,7 +57,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
         <NativeText
           {...props}
           ref={ref}
-          style={withUserStyle(style, props.style)}
+          style={rendered}
           accessible={Platform.OS === 'ios'}
           allowFontScaling
           ellipsizeMode={props.ellipsizeMode ?? 'tail'}
@@ -68,7 +70,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       <RNText
         {...props}
         ref={ref}
-        style={withUserStyle(style, props.style)}
+        style={rendered}
         selectionColor={props.selectionColor ?? selectionColor}
         numberOfLines={
           (style as { WebkitLineClamp?: number }).WebkitLineClamp ??

@@ -218,7 +218,8 @@ install, interleaved, in one session on one simulator (iPhone 17 Pro, iOS 26.5, 
 Each item with the flag on; do the same with the flag off when it says "compare".
 1. Dev build, flag on, open the app and switch the theme once: the console shows no `[shadewind] register at switch: no app root is
    known` warning, no "could not start", and no red box or yellow warning about an unknown prop `$sw`. (Release builds are silent: the
-   absence of a wrong colour is the check there.)
+   absence of a wrong colour is the check there. A dev build is not representative for performance or for how often views rebind: in
+   development the plan cache is off, so every render makes new styles. Time Release builds only.)
 2. After the switch `-theirBench theme` ends with `registered=2003 treeOK=2003 viewOK=2003 layerOK=2003`, as the flag-off arm. A lower
    `registered` means the walk missed views.
 3. Before any switch the same inspect reports `registered=0` with the flag on: views are registered at the first switch. That is
@@ -229,8 +230,10 @@ Each item with the flag on; do the same with the flag off when it says "compare"
    no stale colour after the reveal.
 6. Sequence 4 of step 4 (hold a card while switching from a second finger), and a press on a `TouchableOpacity`, after a switch: the
    pressed style shows while held, the theme colour after release (both use the ref path with the flag on).
-7. Change a `className` of a mounted `View` between two theme-dependent classes (a selected / unselected state) after a switch: the new
-   class's colour is on screen, not the old one.
+7. After a switch, change a mounted `View`'s `className`: (a) between two theme-dependent classes (selected / unselected); (b) from a
+   theme-dependent class to one that is not (`bg-card` to `bg-red-500`) and back; also a `Text` whose `color` class changes the same
+   way. The new class's colour is on screen each time, not the previous one, and (b) stays right after the next switch. This is the
+   case the rebinding ref and the pinned styles exist for (docs/ARCHITECTURE.md section 22); compare with the flag off.
 8. System appearance change (`xcrun simctl ui booted appearance dark`) with the flag on: follows, no stale view.
 
 If any of 1-8 fails, stop and report it with the probe line; do not time a path that is wrong.

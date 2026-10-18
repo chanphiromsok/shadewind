@@ -21,10 +21,12 @@ export const View: ComponentType<Props> = copyComponentProperties(
       props.className,
       props
     );
+    const rendered = withUserStyle(style, props.style);
     const ref = useRegistration(
       themed,
       (props as { ref?: any }).ref,
-      onRegisterFailed
+      onRegisterFailed,
+      rendered
     );
 
     // inside a Text, or with props View.js rewrites: React Native's own View. Otherwise the host component directly.
@@ -33,19 +35,14 @@ export const View: ComponentType<Props> = copyComponentProperties(
         <NativeView
           {...props}
           ref={ref}
-          style={withUserStyle(style, props.style)}
+          style={rendered}
           {...swProps(themed)}
         />
       );
     }
 
     return (
-      <RNView
-        {...props}
-        ref={ref}
-        style={withUserStyle(style, props.style)}
-        {...swProps(themed)}
-      />
+      <RNView {...props} ref={ref} style={rendered} {...swProps(themed)} />
     );
   }
 );

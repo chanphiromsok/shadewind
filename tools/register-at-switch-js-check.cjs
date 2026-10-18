@@ -100,8 +100,12 @@ module.exports = function registerAtSwitchChecks(ts, root, ok) {
     global.__SHADEWIND_REGISTER_AT_SWITCH__ = flagOn;
 
     const log = [];
+    const sentProps = [];
     const native = {
-      registerMany: (nodes, props, ids, themes) => log.push(['registerMany', nodes.map((n) => n.id), ids.slice(), themes.slice()]),
+      registerMany: (nodes, props, ids, themes) => {
+        sentProps.push(props.slice());
+        log.push(['registerMany', nodes.map((n) => n.id), ids.slice(), themes.slice()]);
+      },
       unregister: (node) => log.push(['unregister', node.id]),
       setTheme: (name, strategy) => log.push(['setTheme', name, strategy]),
     };
@@ -140,7 +144,7 @@ module.exports = function registerAtSwitchChecks(ts, root, ok) {
       return { element, unmount: () => element.props.ref(null) };
     };
 
-    return { log, engine, atSwitch, appRegistry, renderThemeOf, mount };
+    return { log, sentProps, engine, atSwitch, appRegistry, renderThemeOf, mount };
   };
 
   const ids = (tree, ...names) => names.map((name) => tree.cur[name].stateNode.node.id);
@@ -293,28 +297,32 @@ module.exports = function registerAtSwitchChecks(ts, root, ok) {
   });
 
   // ---- the ref of a View or Text: nothing at mount, one rebind when the styles change ----
-  const refWorld = (flagOn) => {
+  const refWorld = (flagOn, mutate) => {
     const world = makeWorld({ flagOn });
     const slots = [];
     const legacy = [];
-    const useShadewind = compile('src/uniwind/useShadewindStyle.ts', {
-      react: { useLayoutEffect() {}, useReducer: () => [0, () => {}], useRef: () => slots[slots.length - 1] },
-      'react-native': { StyleSheet: { flatten: (s) => s } },
-      './atSwitch': world.atSwitch,
-      './install': { getInternals: () => ({}), installUniwind: () => ({ active: true }) },
-      'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
-      'shadewind/internal': {
-        ShadewindEngine: { ...world.engine, register: (...a) => (legacy.push(['register', ...a]), true), unregister: (...a) => legacy.push(['unregister', ...a]), label() {} },
+    const useShadewind = compile(
+      'src/uniwind/useShadewindStyle.ts',
+      {
+        react: { useLayoutEffect() {}, useReducer: () => [0, () => {}], useRef: () => slots[slots.length - 1] },
+        'react-native': { StyleSheet: { flatten: (s) => s } },
+        './atSwitch': world.atSwitch,
+        './install': { getInternals: () => ({}), installUniwind: () => ({ active: true }) },
+        'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
+        'shadewind/internal': {
+          ShadewindEngine: { ...world.engine, register: (...a) => (legacy.push(['register', ...a]), true), unregister: (...a) => legacy.push(['unregister', ...a]), label() {} },
+        },
       },
-    });
-    // one view = one useRef slot, as React keeps it across that view's renders
+      mutate
+    );
+    // one view = one useRef slot, as React keeps it across that view's renders; `rendered` is the style the host gets
     const view = () => {
       const slot = { current: undefined };
 
-      return (themed, user) => {
+      return (themed, user, rendered) => {
         slots.push(slot);
 
-        return useShadewind.useRegistration(themed, user);
+        return useShadewind.useRegistration(themed, user, undefined, rendered);
       };
     };
 
@@ -326,61 +334,122 @@ module.exports = function registerAtSwitchChecks(ts, root, ok) {
     const render = view();
     const user = () => {};
 
-    assert.strictEqual(render(A, undefined), undefined, 'first render: no ref, so no registration at mount');
-    assert.strictEqual(render(A, undefined), undefined);
-    assert.strictEqual(render(A, user), user, 'the user ref passes through untouched');
-    assert.strictEqual(typeof render(A2, undefined), 'function', 'other styles: a rebinding ref');
-    assert.strictEqual(render(A2, undefined), undefined, 'and not again once they are the same');
+    assert.strictEqual(render(A, undefined, {}), undefined, 'first render: no ref, so no registration at mount');
+    assert.strictEqual(render(A, undefined, {}), undefined);
+    assert.strictEqual(render(A, user, {}), user, 'the user ref passes through untouched');
+    assert.strictEqual(typeof render(A2, undefined, {}), 'function', 'other styles: a rebinding ref');
+    assert.strictEqual(render(A2, undefined, {}), undefined, 'and not again once they are the same');
     assert.deepStrictEqual(legacy, []);
     assert.deepStrictEqual(world.log, []);
   });
 
-  ok('register at switch: the rebinding ref rebinds a bound view, unbinds it without styles, ignores one the walk never bound, and forwards to the user ref', () => {
-    const { view, world } = refWorld(true);
-    const { log, engine, atSwitch, mount } = world;
+  // React attaches this ref after the native commit, so a view that leaves the engine has been painted with its old styles by then
+  // and unbinding would leave them: it is bound to what the render gave it, for every theme, instead.
+  const refScenario = (mutate) => {
+    const { view, world } = refWorld(true, mutate);
+    const { log, sentProps, engine, atSwitch, mount } = world;
 
     atSwitch.installRootTracking();
 
     const tree = buildRoot({ A, B, C, stale });
 
     mount(tree);
-    engine.setTheme('dark', 'hookDeferred'); // binds h1..h5 of the tree
+    engine.setTheme('dark', 'hookDeferred'); // binds h1 (A), h2 (B), h3 (A), h5 (C)
     log.length = 0;
+    sentProps.length = 0;
 
     const instanceOf = (name) => ({ __internalInstanceHandle: tree.cur[name] });
-    const render = view();
     const seen = [];
     const user = (node) => seen.push(node);
 
-    render(A, undefined);
-    tree.cur.h1.memoizedProps = { $sw: A2 }; // what React committed with the new styles
+    // 1. other theme-dependent styles: rebound, no render theme (the next commit themes it), the user ref still told
+    const render = view();
 
-    // styles change to others: rebound without a render theme (the next commit themes it)
-    render(A2, user)(instanceOf('h1'));
+    render(A, undefined, { backgroundColor: '#fff' });
+    tree.cur.h1.memoizedProps = { $sw: A2 }; // what React committed with the new styles
+    render(A2, user, { backgroundColor: '#eee' })(instanceOf('h1'));
     engine.setTheme('light', 'hookDeferred');
     assert.deepStrictEqual(log.slice(0, 1).map((c) => c[0]), ['registerMany']);
     assert.deepStrictEqual(log[0][3], [undefined]);
     assert.strictEqual(seen.length, 1);
 
-    // styles go away: unbound
+    // 2. no longer theme dependent (a static class): bound to this render's value in every theme, not unbound
     log.length = 0;
+    sentProps.length = 0;
+    tree.cur.h3.memoizedProps = {};
+
+    const render3 = view();
+
+    render3(A, undefined, { backgroundColor: '#fff' });
+    render3(null, undefined, { backgroundColor: '#e11d48' })(instanceOf('h3'));
+    engine.setTheme('dark', 'hookDeferred'); // flushes the rebinding; the walk then finds h3 without $sw and unbinds it
+    assert.strictEqual(log[0][0], 'registerMany');
+    assert.deepStrictEqual(log[0][1], ids(tree, 'h3'));
+    assert.deepStrictEqual(sentProps[0][0], { light: { backgroundColor: '#e11d48' }, dark: { backgroundColor: '#e11d48' } });
+    assert.deepStrictEqual(log[1], ['unregister', ids(tree, 'h3')[0]]);
+
+    // an unset background is transparent
+    log.length = 0;
+    sentProps.length = 0;
+
+    const render4 = view();
+
+    render4(A, undefined, {});
+    render4(null, undefined, {})(instanceOf('h1'));
+    assert.deepStrictEqual(sentProps.length, 0, 'queued, not sent yet');
+    engine.setTheme('light', 'hookDeferred');
+    assert.deepStrictEqual(sentProps[0][0], { light: { backgroundColor: 'transparent' }, dark: { backgroundColor: 'transparent' } });
+
+    // 3. a style that cannot be pinned (an unset text colour has platform defaults): unbound
+    log.length = 0;
+
     const render2 = view();
 
-    render2(A, undefined);
-    render2(null, undefined)(instanceOf('h2'));
+    render2(B, undefined, {});
+    render2(null, undefined, {})(instanceOf('h2'));
     assert.deepStrictEqual(log, [['unregister', ids(tree, 'h2')[0]]]);
 
-    // a host the walk never bound: nothing
+    // 4. a host the walk never bound: nothing
     log.length = 0;
-    render2(A, undefined)(instanceOf('h4'));
+
+    const render5 = view();
+
+    render5(A, undefined, {});
+    render5(A2, undefined, {})(instanceOf('h4'));
     assert.deepStrictEqual(log, []);
+  };
+
+  ok('register at switch: the rebinding ref rebinds, pins a view that leaves the engine, unbinds what cannot be pinned, ignores unbound hosts', () => {
+    refScenario();
   });
+
+  const refMutants = {
+    'unbinds a view that leaves the engine instead of pinning it': replace('const bind = themed ?? (before ? pinned(before, rendered) : null);', 'const bind = themed;'),
+    'pins without the transparent background': replace("key === 'backgroundColor' ? 'transparent' : undefined", 'undefined'),
+    'pins only the first theme': replace('for (const theme of Object.keys(before)) {\n    const pin', 'for (const theme of Object.keys(before).slice(0, 1)) {\n    const pin'),
+  };
+
+  for (const [name, mutation] of Object.entries(refMutants)) {
+    ok(`register at switch, ref mutant must fail: ${name}`, () => {
+      let failure;
+
+      try {
+        refScenario(mutation);
+      } catch (error) {
+        failure = error;
+      }
+
+      assert.ok(failure, `the mutant "${name}" passed the scenario`);
+      assert.strictEqual(failure.code, 'ERR_ASSERTION', `the mutant "${name}" failed by crashing: ${failure.message}`);
+      assert.ok(!/mutant does not apply/.test(failure.message), failure.message);
+    });
+  }
 
   ok('register at switch: flag off, a View keeps the engine ref that registers at mount', () => {
     const { view } = refWorld(false);
     const render = view();
 
-    assert.strictEqual(typeof render(A, undefined), 'function', 'useEngineRef');
+    assert.strictEqual(typeof render(A, undefined, {}), 'function', 'useEngineRef');
   });
 
   // The walk's cost on a synthetic tree the size of the 2003-view benchmark (8,013 fibers). Node, not Hermes, not React: indicative.
