@@ -55,7 +55,7 @@ export default function Account() {
           </Pressable>
           <Pressable
             testID="fade-engine"
-            onPress={() => setEngineTheme(getTheme() === 'dark' ? 'light' : 'dark', { transition: { type: 'fade', durationMs: 250 } })}
+            onPress={() => setEngineTheme(getTheme() === 'dark' ? 'light' : 'dark', { transition: { type: Settings.get('themeTransitionType') === 'blur' ? 'blur' : 'fade', durationMs: 250 } })}
             className="flex-1 items-center py-4 active:opacity-70"
           >
             <Text className="text-sm font-semibold text-primary">Fade (engine)</Text>

@@ -40,6 +40,15 @@ from `shadewind`.
    mounts until the first transition is requested.
 7. **Hidden tab.** Switch while a frozen tab is hidden, reveal it: no stale frame (HANDOFF "freeze sequences").
 
+## Blur preset (`type: 'blur'`, example-real `-themeTransitionType blur`)
+
+Not run on a device. Check: the old screen blurs for the first half of `durationMs`, then snapshot and blur fade out together, with
+no jump when the blur ends. iOS: a `UIVisualEffectView` over the snapshot, its effect animated nil -> system material -> nil (its alpha
+is never animated: an effect view with alpha < 1 renders wrongly). Risks: the material tints with the SYSTEM appearance, so an app
+theme opposite to the OS appearance (dark theme on a light OS) may flash a light tint; a snapshot taken while a previous blur is
+still on screen may not contain the blur. Android 12+: `RenderEffect` blur of the overlay view, radius 20 dp, animated per frame;
+below 12 it is a plain fade (check with an API 30 emulator).
+
 ## Risks to check explicitly
 
 - **Fade starts late (about 1 s).** Symptom: the theme flips, the overlay stays, then fades about 30 frames later. Cause: the

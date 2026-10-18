@@ -107,7 +107,8 @@ Design: [docs/API.md](docs/API.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/UNIW
 ### Animated switch (optional, default instant)
 
 `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })`, or once for everything (Uniwind too):
-`setDefaultTransition({ type: 'fade', durationMs: 250 })`. A snapshot of the window is laid over the app, the theme is
+`setDefaultTransition({ type: 'fade', durationMs: 250 })`. `type: 'blur'` blurs the old screen for the first half of the time and
+then fades it (Android below 12: plain fade). A snapshot of the window is laid over the app, the theme is
 switched underneath, and the snapshot fades out once Fabric reports the new theme mounted. The overlay takes no touches. It is
 skipped (instant switch) with reduce motion on, with the app in the background or without a window, and when the picture cannot
 be taken. Android's snapshot does not include `SurfaceView` / `TextureView` content (maps, video). Without the option nothing runs.

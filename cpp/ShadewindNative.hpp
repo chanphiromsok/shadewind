@@ -25,7 +25,7 @@ std::vector<UIKitBackground> readBackgroundsOnMain(const std::vector<facebook::r
 // A transition is a snapshot of the window laid over the app, which fades out once the new theme is mounted.
 // JS sends the preset by name (ThemeTransitionPreset in src/internal.tsx, mapped in HybridShadewind::setTheme); keep these numbers
 // in step with PRESET_* in ThemeTransitionOverlay.kt.
-enum class ThemeTransitionPreset : int { Fade = 0 };
+enum class ThemeTransitionPreset : int { Fade = 0, Blur = 1 };
 
 // Queues the snapshot on the main thread. Call BEFORE the commit that themes the views: the mount is queued on the main thread after
 // this, so the snapshot shows the old theme. A new `id` replaces the previous transition: its snapshot (which includes whatever is

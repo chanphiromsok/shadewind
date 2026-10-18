@@ -1,7 +1,13 @@
 package com.margelo.nitro.shadewind
 
 import android.graphics.Bitmap
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.graphics.Canvas
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -31,6 +37,9 @@ object ThemeTransitionOverlay {
 
   // keep in step with ThemeTransitionPreset in cpp/ShadewindNative.hpp
   private const val PRESET_FADE = 0
+  private const val PRESET_BLUR = 1
+
+  private const val BLUR_RADIUS_DP = 20f
 
   // If the mount never reports (nothing visible changed, so Fabric mounts nothing), do not leave a frozen picture on top.
   private const val FAILSAFE_MS = 1000L
@@ -41,6 +50,8 @@ object ThemeTransitionOverlay {
   private var overlay: ImageView? = null
   private var overlayId = 0L
   private var overlayMs = 0L
+  private var overlayPreset = PRESET_FADE
+  private var overlayAnimator: ValueAnimator? = null // the 'blur' preset; 'fade' uses the view's own property animator
   private var fading = false
 
   // The newest transition whose mount was reported. The mount notification is posted at the front of the queue, so it can
@@ -88,7 +99,7 @@ object ThemeTransitionOverlay {
       val activity = NitroModules.applicationContext?.currentActivity
       val decor = activity?.window?.decorView
 
-      if (preset != PRESET_FADE ||
+      if ((preset != PRESET_FADE && preset != PRESET_BLUR) ||
         activity == null ||
         decor == null ||
         activity.isFinishing ||
@@ -125,6 +136,7 @@ object ThemeTransitionOverlay {
       overlay = view
       overlayId = id
       overlayMs = durationMs
+      overlayPreset = preset
       fading = false
 
       main.postDelayed({ if (overlay === view) fade(view) }, FAILSAFE_MS)
@@ -156,6 +168,13 @@ object ThemeTransitionOverlay {
 
     fading = true
 
+    if (overlayPreset == PRESET_BLUR && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      blurOut(view)
+
+      return
+    }
+
+    // 'fade', and 'blur' below Android 12 (no RenderEffect): a plain fade
     view
       .animate()
       .alpha(0f)
@@ -165,6 +184,32 @@ object ThemeTransitionOverlay {
       .start()
   }
 
+  // The old screen blurs for the first half of the time, then fades out (still blurred) over the second half.
+  private fun blurOut(view: ImageView) {
+    val maxRadius = BLUR_RADIUS_DP * view.resources.displayMetrics.density
+    val animator = ValueAnimator.ofFloat(0f, 1f)
+
+    animator.duration = overlayMs
+    animator.interpolator = LinearInterpolator()
+    animator.addUpdateListener {
+      val progress = it.animatedValue as Float
+      val radius = maxRadius * minOf(1f, progress * 2f)
+
+      view.setRenderEffect(if (radius > 0.5f) RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP) else null)
+      view.alpha = 1f - maxOf(0f, progress * 2f - 1f)
+    }
+    animator.addListener(
+      object : AnimatorListenerAdapter() {
+        override fun onAnimationEnd(animation: Animator) {
+          remove(view) // also called when cancelled: remove() is idempotent
+        }
+      }
+    )
+
+    overlayAnimator = animator
+    animator.start()
+  }
+
   // By identity: a stale end action or timer can never remove a newer overlay.
   private fun remove(view: ImageView?) {
     if (view == null) {
@@ -172,6 +217,14 @@ object ThemeTransitionOverlay {
     }
 
     view.animate().cancel()
+
+    if (overlay === view) {
+      val animator = overlayAnimator
+
+      overlayAnimator = null // before cancel(): its end listener calls remove() again
+      animator?.cancel()
+    }
+
     (view.parent as? ViewGroup)?.removeView(view)
     view.setImageDrawable(null)
 

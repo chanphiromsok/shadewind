@@ -77,12 +77,13 @@ export class ShadewindError extends Error {
 
 /**
  * An animated theme change: a snapshot of the old screen is laid over the app, the theme is switched underneath it, and the
- * snapshot fades out once the new theme is mounted. It never takes touches. Skipped (instant switch) when the OS asks for reduced
+ * snapshot fades out once the new theme is mounted ('fade'), or first blurs for half the time and then fades ('blur'; Android
+ * below 12 fades without the blur). It never takes touches. Skipped (instant switch) when the OS asks for reduced
  * motion, when the app is in the background or has no window. Default: no transition.
  */
 export type ThemeTransition = {
   type: ThemeTransitionPreset;
-  /** Length of the fade in ms (default 250, at most 2000). 0 or less: instant. */
+  /** Length of the whole transition in ms (default 250, at most 2000). 0 or less: instant. */
   durationMs?: number;
 };
 
@@ -224,10 +225,10 @@ const nativeTransition = (
 
   const { type, durationMs = DEFAULT_TRANSITION_MS } = transition;
 
-  if (type !== 'fade') {
+  if (type !== 'fade' && type !== 'blur') {
     throw new ShadewindError(
       'UNKNOWN_TRANSITION',
-      `unknown transition '${String(type)}' (fade)`
+      `unknown transition '${String(type)}' (fade, blur)`
     );
   }
 
@@ -275,7 +276,8 @@ const applyTheme = (
 
 /**
  * Switches every bound view without rendering React components. Rapid calls: the last one wins.
- * `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })` cross-fades instead of switching at once.
+ * `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })` cross-fades instead of switching at once; `type: 'blur'`
+ * blurs the old screen first.
  */
 export function setTheme(name: ThemeName, options?: SetThemeOptions): void {
   stopFollowing?.();

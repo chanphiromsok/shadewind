@@ -126,7 +126,7 @@ export type ThemeTimings = {
 export type ThemeStrategy = 'hook' | 'hookAsync' | 'hookDeferred';
 
 /** Preset names of an animated theme change. Add a name here and to `ThemeTransitionPreset` in cpp/ShadewindNative.hpp. */
-export type ThemeTransitionPreset = 'fade';
+export type ThemeTransitionPreset = 'fade' | 'blur';
 
 /** What the native overlay is asked for: a preset and its length. */
 export type NativeThemeTransition = {

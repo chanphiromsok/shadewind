@@ -36,6 +36,7 @@ UIView* gOverlay = nil;      // the snapshot on screen, if any
 uint64_t gOverlayId = 0;     // the transition it belongs to
 NSTimeInterval gOverlaySeconds = 0;
 bool gOverlayFading = false;
+UIVisualEffectView* gOverlayBlur = nil; // 'blur' preset: an effect view over the snapshot, its effect still nil
 
 // The key window of the foreground scene (an app with several windows: the one the user is looking at).
 UIWindow* visibleAppWindow() {
@@ -70,7 +71,11 @@ void removeOverlay(UIView* overlay) {
   [overlay removeFromSuperview];
 
   if (gOverlay == overlay) {
+    [gOverlayBlur.layer removeAllAnimations];
+    [gOverlayBlur removeFromSuperview];
+
     gOverlay = nil;
+    gOverlayBlur = nil;
     gOverlayId = 0;
     gOverlayFading = false;
   }
@@ -83,21 +88,57 @@ void fadeOutOverlay(UIView* overlay) {
 
   gOverlayFading = true;
 
-  [UIView animateWithDuration:gOverlaySeconds
-                        delay:0
-                      options:UIViewAnimationOptionCurveLinear | UIViewAnimationOptionAllowUserInteraction
-                   animations:^{
-                     overlay.alpha = 0;
-                   }
-                   completion:^(BOOL finished) {
-                     (void)finished;
-                     removeOverlay(overlay);
-                   }];
+  UIVisualEffectView* blur = gOverlayBlur;
+  const NSTimeInterval seconds = gOverlaySeconds;
+  const UIViewAnimationOptions options = UIViewAnimationOptionCurveLinear | UIViewAnimationOptionAllowUserInteraction;
+
+  if (blur == nil) {
+    [UIView animateWithDuration:seconds
+                          delay:0
+                        options:options
+                     animations:^{
+                       overlay.alpha = 0;
+                     }
+                     completion:^(BOOL finished) {
+                       (void)finished;
+                       removeOverlay(overlay);
+                     }];
+
+    return;
+  }
+
+  // 'blur': the old screen blurs for the first half, then snapshot and blur fade away together (an effect view must keep alpha 1,
+  // so its effect is what is animated back to nil, never its alpha or a superview's)
+  [UIView animateWithDuration:seconds / 2
+      delay:0
+      options:options
+      animations:^{
+        blur.effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial];
+      }
+      completion:^(BOOL finished) {
+        (void)finished;
+
+        if (overlay != gOverlay) {
+          return; // replaced or removed meanwhile
+        }
+
+        [UIView animateWithDuration:seconds / 2
+            delay:0
+            options:options
+            animations:^{
+              overlay.alpha = 0;
+              blur.effect = nil;
+            }
+            completion:^(BOOL done) {
+              (void)done;
+              removeOverlay(overlay);
+            }];
+      }];
 }
 
 } // namespace
 
-void themeTransitionBegin(uint64_t id, ThemeTransitionPreset, double durationMs) {
+void themeTransitionBegin(uint64_t id, ThemeTransitionPreset preset, double durationMs) {
   // Queued on the main queue ahead of the mount of the theme commit (RN dispatches the mount to the main queue after this call
   // returns, from any strategy), so the snapshot shows the old theme.
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -125,10 +166,22 @@ void themeTransitionBegin(uint64_t id, ThemeTransitionPreset, double durationMs)
     snapshot.accessibilityElementsHidden = YES;
     [window addSubview:snapshot];
 
+    UIVisualEffectView* blur = nil;
+
+    if (preset == ThemeTransitionPreset::Blur) {
+      blur = [[UIVisualEffectView alloc] initWithEffect:nil];
+      blur.frame = window.bounds;
+      blur.userInteractionEnabled = NO;
+      blur.isAccessibilityElement = NO;
+      blur.accessibilityElementsHidden = YES;
+      [window addSubview:blur]; // above the snapshot
+    }
+
     // the new snapshot already contains what is left of the previous overlay: only now is it safe to take that away
     removeOverlay(previous);
 
     gOverlay = snapshot;
+    gOverlayBlur = blur;
     gOverlayId = id;
     gOverlaySeconds = durationMs / 1000.0;
     gOverlayFading = false;

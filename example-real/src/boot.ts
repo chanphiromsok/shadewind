@@ -12,11 +12,12 @@ if (Settings.get('resolverOff')) {
   nativeResolver.setEnabled(false);
 }
 
-// -themeTransition 250: Uniwind.setTheme cross-fades over 250 ms (the default of the Uniwind adapter)
+// -themeTransition 250: Uniwind.setTheme animates over 250 ms (the default of the Uniwind adapter); -themeTransitionType blur
+// blurs the old screen first (default fade)
 const transitionMs = Number(Settings.get('themeTransition'));
 
 if (transitionMs > 0) {
-  setDefaultTransition({ type: 'fade', durationMs: transitionMs });
+  setDefaultTransition({ type: Settings.get('themeTransitionType') === 'blur' ? 'blur' : 'fade', durationMs: transitionMs });
 }
 
 installUniwind();
