@@ -21,6 +21,10 @@
       --color-divider: oklch(0.9401 0 0);
       --color-inactive: oklch(0.7984 0 0);
       --color-error: oklch(0.5771 0.2152 27.33);
+      /* src/bench/TheirBench.tsx: the colours of uniwind-benchmarks' theme scenario */
+      --color-bench-primary: #00a8ff;
+      --color-bench-gray: #f0f0f0;
+      --color-bench-typo: #000000;
     }
 
     @variant dark {
@@ -40,6 +44,9 @@
       --color-divider: oklch(0.3 0 0);
       --color-inactive: oklch(0.45 0 0);
       --color-error: oklch(0.6368 0.2078 25.33);
+      --color-bench-primary: #273c75;
+      --color-bench-gray: #353b48;
+      --color-bench-typo: #ffffff;
     }
   }
 }

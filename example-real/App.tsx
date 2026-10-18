@@ -12,6 +12,7 @@ import { FeedSampleAot } from './src/bench/FeedSampleAot';
 import { FeedSampleNoPress } from './src/bench/FeedSampleNoPress';
 import { runIdle, runStall, type IdleResult, type StallResult } from './src/bench/stall';
 import { ResolveBench } from './src/bench/ResolveBench';
+import { TheirBench } from './src/bench/TheirBench';
 
 type Kind = 'class' | 'static' | 'aot' | 'nopress';
 const KINDS: Kind[] = ['class', 'aot', 'nopress', 'static'];
@@ -118,6 +119,11 @@ function Probe() {
 }
 
 export default function App() {
+  // `-theirBench theme`: the uniwind-benchmarks theme scenario with className, instead of the app (src/bench/TheirBench.tsx)
+  if (Settings.get('theirBench')) {
+    return <TheirBench />;
+  }
+
   return (
     <SafeAreaProvider>
       <RootNavigator />

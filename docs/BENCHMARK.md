@@ -67,7 +67,9 @@ The Uniwind adapter switches the engine with `hookDeferred`. `hookAsync` can be 
 Uniwind behind: `Uniwind.setTheme` still drives the switch, only the engine's strategy changes. Do not call
 `ShadewindEngine.setTheme(name, 'hookAsync')` directly for this: Uniwind then stays on the old theme, and so does everything it renders.
 
-1. App: `uniwind-benchmarks/apps/uniwind` with the two shadewind lines (above), Release, the same simulator for every arm.
+1. App: `uniwind-benchmarks/apps/uniwind` with the two shadewind lines (above), Release, the same simulator for every arm. Or, in this
+   repository, example-real's port of the same scenario with `className`s: `-theirBench theme` (plain arm: `scripts/arm.sh plain` and
+   `REAL_PLAIN=1`; `-uniwindStrategy hookAsync` for the third arm; `-theirBenchReader 1` for step 5; `example-real/README.md`).
 2. Arms, built back to back, one cold launch discarded, six warm launches each, median:
    - plain Uniwind;
    - shadewind as is (`hookDeferred`);

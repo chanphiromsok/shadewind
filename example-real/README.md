@@ -58,6 +58,9 @@ npx react-native run-android --mode release
 | `-themeTransition 250` | theme switches animate over 250 ms, plus the test row on Account (see Theme transition below) |
 | `-themeTransitionType blur` | with `-themeTransition`: blur instead of fade |
 | `-realDebug 1` | records why each className was or was not handed to the engine (Account > Engine report) |
+| `-theirBench theme` | instead of the app: the uniwind-benchmarks theme scenario with `className`s (2003 views, 10 `Uniwind.setTheme` changes, each timed until the JS thread is idle), result in `their-result` (`src/bench/TheirBench.tsx`) |
+| `-uniwindStrategy hookAsync` | with `-theirBench`: the engine applies Uniwind's switches with `hookAsync` instead of `hookDeferred` (measuring only) |
+| `-theirBenchReader 1` | with `-theirBench`: adds one `Text` coloured with `useCSSVariable`, a component React re-renders on a switch |
 
 ```sh
 xcrun simctl launch --terminate-running-process booted org.reactjs.native.example.RealWorld -resolveBench 1
