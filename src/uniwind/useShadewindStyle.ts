@@ -184,7 +184,10 @@ const plan = (
   }
 
   renderThemeOf.set(themed, UniwindStore.runtime.currentThemeName);
-  engine().label(themed, `className: "${className}"`);
+
+  if (__DEV__) {
+    engine().label(themed, `className: "${className}"`);
+  }
 
   return decide(themed as unknown as ThemedStyles, 'engine');
 };

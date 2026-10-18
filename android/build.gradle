@@ -56,8 +56,7 @@ android {
 
         buildTypes {
           debug {
-            // shadewind/diagnostics: the native recorder exists in debug builds only (cpp/Diagnostics.hpp)
-            cppFlags "-O1 -g -DSHADEWIND_DIAGNOSTICS=1"
+            cppFlags "-O1 -g"
           }
           release {
             cppFlags "-O2"

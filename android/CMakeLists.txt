@@ -36,6 +36,10 @@ foreach(dir IN LISTS RN_INCLUDE_DIRS)
   endforeach()
 endforeach()
 
+# shadewind/diagnostics: the native recorder exists in debug builds only (cpp/Diagnostics.hpp). The Android Gradle plugin builds a
+# debug variant with CMAKE_BUILD_TYPE=Debug and a release variant with Release.
+target_compile_definitions(${PACKAGE_NAME} PRIVATE $<$<CONFIG:Debug>:SHADEWIND_DIAGNOSTICS=1>)
+
 find_library(LOG_LIB log)
 
 # Link all libraries together

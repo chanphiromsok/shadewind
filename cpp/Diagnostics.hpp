@@ -2,7 +2,8 @@
 
 // Development diagnostics (`shadewind/diagnostics`): what the commit hook registers, drops and updates, recorded natively and read by
 // JS with drainDiagnostics(). Compiled in only when SHADEWIND_DIAGNOSTICS is 1, which the podspec (Debug configuration) and
-// build.gradle (debug build type) define: a release build has no recorder, and flags() is a constant 0 the compiler folds away.
+// android/CMakeLists.txt (CMAKE_BUILD_TYPE Debug) define: a release build has no recorder, and flags() is a constant 0 the compiler
+// folds away.
 // Compiled in, it is off until JS turns it on; while off the hook pays one relaxed atomic load per commit and per registration.
 
 #ifndef SHADEWIND_DIAGNOSTICS

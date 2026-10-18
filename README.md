@@ -139,7 +139,8 @@ their views, so leaving a tab does not lower the count. An update line notes `Re
 view React re-rendered, and `text without layout` when a text colour changed without a layout pass.
 
 Development only, on both sides: the functions do nothing outside `__DEV__`, and the native recorder is compiled into Debug builds
-only (`SHADEWIND_DIAGNOSTICS`, set by the podspec for the Debug configuration and by `build.gradle` for the debug build type).
+only (`SHADEWIND_DIAGNOSTICS`, set by the podspec for the Debug configuration and by `android/CMakeLists.txt` for CMake's Debug
+build type, which is what a debug variant uses). An app configuration with another name (`Staging`, say) gets no recorder.
 Compiled in but not enabled, it costs one atomic load per commit.
 
 ## Benchmarks

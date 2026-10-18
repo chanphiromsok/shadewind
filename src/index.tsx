@@ -478,7 +478,9 @@ const nativeFor = (key: string, styles: ThemedStyles) => {
         toNativeProps(style as ThemedStyle),
       ])
     );
-    ShadewindEngine.label(native, `useThemed: ${key}`);
+    if (__DEV__) {
+      ShadewindEngine.label(native, `useThemed: ${key}`);
+    }
     nativeByKey.set(key, native);
   }
 
@@ -641,7 +643,9 @@ export function useThemedProps<T extends Record<string, unknown>>(
       ])
     );
 
-    ShadewindEngine.label(converted, `useThemedProps: ${key}`);
+    if (__DEV__) {
+      ShadewindEngine.label(converted, `useThemedProps: ${key}`);
+    }
 
     return converted;
   }, [stable]); // eslint-disable-line react-hooks/exhaustive-deps
