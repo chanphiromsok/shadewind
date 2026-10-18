@@ -345,12 +345,13 @@ public:
     std::lock_guard<std::mutex> lock(_mutex);
     _theme = internTheme(theme);
     ++_epoch;
+    _startedEpoch.store(_epoch, std::memory_order_release);
   }
 
-  // The epoch `setTheme` last started (see rootCarries).
-  uint64_t epoch() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    return _epoch;
+  // The epoch `setTheme` last started (see rootCarries). Lock-free: _mutex is held for a whole commit walk, and the JS thread
+  // calls this right after setTheme, when a background (hookAsync) commit may be walking.
+  uint64_t epoch() const {
+    return _startedEpoch.load(std::memory_order_acquire);
   }
 
   // Theme transitions: from now on the hook records which epoch each tree it returns was themed for. Idle (and free) until the
@@ -942,6 +943,7 @@ private:
   ThemeId _theme = kNoTheme;
   std::vector<std::string> _themeNames;
   uint64_t _epoch = 0;
+  std::atomic<uint64_t> _startedEpoch{0}; // _epoch, readable without _mutex (epoch())
   uint64_t _registrationGeneration = 0; // bumped by every registration with another theme's props
   bool _stale = false;                  // such a registration happened since the last walk
   uint64_t _commits = 0;
