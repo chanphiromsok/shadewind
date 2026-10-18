@@ -1,5 +1,54 @@
 # Theme-change benchmark: this engine vs Uniwind
 
+## Mount, engine only (2026-10-19, uniwind-benchmarks render scenario)
+
+The `uniwind-benchmarks` render screen (2003 views, re-mounted 10 times per launch; the app reports the average time from the
+re-mount until the JS thread is idle), its `apps/uniwind` app with `withShadewind` + `installUniwind()`, Release builds,
+iPhone 17 Pro simulator (iOS 26.5). Runner: a small script on top of the repository's `scripts/bench/measure.py` (same install,
+launch, screen read and memory reading) without the StyleSheet controls: per arm and sweep one cold launch (dropped) and three warm
+launches, two sweeps in alternating order; the number is the median of the six warm launches. Memory is `phys_footprint` after one
+simulated memory warning.
+
+Same session, the build before this work against this version:
+
+| Build | Mount (median) | Spread | Memory after GC |
+|---|---|---|---|
+| `d171749` | 55.19 ms | 54.25-55.61 | 124.9 MiB |
+| this version | **47.92 ms** | 47.29-48.39 | 124.0 MiB |
+
+-7.27 ms (-13 %). The three changes, each measured against the one before it (separate sessions, so the session baselines differ
+by a few ms and the deltas do not add up exactly):
+
+| Change | Before | After | Delta |
+|---|---|---|---|
+| Text: a numeric `fontWeight` (Uniwind resolves `font-bold` to 700) stays on the direct host path, as a string like Text.js; Text.js's default `overflow: hidden` added there | 59.06 ms | 52.41 ms | -6.65 ms |
+| One shared Uniwind subscription per dependency list; adapter imports read once instead of Metro's inline `require` per render; constant Text state objects | 55.17 ms | 54.61 ms | -0.56 ms (within the spread) |
+| Subscription from the view's ref instead of a layout effect (`withUniwind` keeps the effect: its component may ignore `ref`) | 50.73 ms | 48.66 ms | -2.07 ms |
+
+Where the remaining time goes (one re-mount, Release estimate: the native parts from an Instruments trace of the Release build, the
+JS parts from a Hermes sampling profile of the production bundle, 30 re-mounts in one launch; the Text-fix build):
+
+| Part | ms |
+|---|---|
+| React (fibers and hooks 9.2, delete the previous tree 3.4, complete + commit + effects 3.5, other 1.4) | 17.5 |
+| React Native (C++ `createNode` props parsing 7.6, Yoga 6.5, JS props payload 4.2, commit 1.5) | 19.8 |
+| Hermes GC | 7.3 |
+| Shadewind (adapter JS 5.1, `registerMany` 1.1) | 6.2 |
+
+What is left for Shadewind, measured with throwaway builds that remove one per-view piece (they cannot switch themes; same session
+as each other, against the build with the first two changes at 51.31 ms): without the per-view ref and registration 45.42 ms
+(-5.89 ms, -31 MiB), without the layout effect 47.04 ms, without the reducer and the effect 45.39 ms; without all of them (another
+session) 42.14 ms against 54.84 ms. Removing the ref means registering the views at theme-switch time instead of at mount
+(docs/HANDOFF.md); it is not done because a view whose className changes would keep its old binding until the next switch.
+
+For scale: StyleSheet's own median on the same screen was 37.28 ms (measure.py, 2026-10-18); plain Uniwind 1.12 61.86 ms in the
+owner's run (docs/HANDOFF.md, another protocol). One simulator, not a device.
+
+Correctness of this version: a theme switch, a className change on a bound view after a switch, and `Uniwind.updateCSSVariables` on the
+benchmark screen each end with all 2007 views right (`inspect()`: tree, native props and layer) and nothing stale; the `example-real`
+freeze sequences 1-3 of docs/LOCAL_TESTING.md step 4 (Release) end with `STALE` empty and `treeOK == inTree` on every screen. Not run:
+sequence 4 (pressed card), a frame-by-frame recording of the reveals, the theme scenario, Android.
+
 ## On screen, frame by frame (2026-10-18, latest code)
 
 ![One theme switch of 2003 views, frame by frame](assets/benchmark-frames.png)

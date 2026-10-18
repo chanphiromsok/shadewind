@@ -59,16 +59,14 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
     // inside a Text React Native's View renders differently: keep its Pressable there
     const light = !use(TextAncestorContext) && isLight(props);
     const disabled = Boolean(props.disabled);
-    const { style, themed, onRegisterFailed } = useShadewindStyle(
-      props.className,
-      props,
-      { isDisabled: disabled }
-    );
+    const styled = useShadewindStyle(props.className, props, {
+      isDisabled: disabled,
+    });
+    const { style } = styled;
     const context = useUniwindContext();
     const ref = useEngineRef(
-      themed,
+      styled,
       (props as { ref?: any }).ref,
-      onRegisterFailed,
       true // pause() / resume() around a press (below)
     );
     const [pressed, setPressed] = useState(false);
@@ -142,7 +140,9 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
         accessible={props.accessible !== false}
         focusable={props.focusable !== false}
         accessibilityState={
-          props.disabled != null ? { disabled: Boolean(props.disabled) } : undefined
+          props.disabled != null
+            ? { disabled: Boolean(props.disabled) }
+            : undefined
         }
         // a Pressable has to stay a native view: without this the view can be flattened away and nothing receives the touch
         collapsable={false}

@@ -38,6 +38,10 @@ So `hookAsync` frees the JS thread *when you switch*; it does not make the scree
 
 All rows run the same 2003-view screen from this repository's `example-real` app (a port of the Uniwind benchmark, iOS simulator, Release build with dev tools on). "JS thread busy" is the median of six warm launches. "On screen" is measured from a screen recording: the time from the first frame that changes (the page background, taken as the moment of the `setTheme` call) to the frame where the cells change; one recording per row, median of its 10 switches. It is one simulator, not a device. One more caveat: with a component that reads the theme (`useCSSVariable`), `hookAsync` took about 12 ms of JS time on an earlier build; we did not re-measure that on the latest code. Details and how to repeat it: [docs/BENCHMARK.md](docs/BENCHMARK.md), or [run the 2003-view demo](docs/DEMO.md) yourself.
 
+**Mounting the same 2003 views** (the `uniwind-benchmarks` render screen, Release, engine-only A/B in one session, median of six warm
+launches): **47.9 ms** with this version against 55.2 ms before it (`d171749`). For scale, StyleSheet alone took about 37 ms on the
+same screen. Where the time goes and what changed: [docs/BENCHMARK.md](docs/BENCHMARK.md#mount-engine-only-2026-10-19-uniwind-benchmarks-render-scenario).
+
 > 💚 **A note from the author.** Shadewind is vibe-coded with Claude Code by a dev who finds joy in programming. Take the code and numbers with a grain of salt, and kindly roast me where I’m wrong. 🤝
 
 > **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android has less testing

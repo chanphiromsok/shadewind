@@ -90,7 +90,12 @@ const childrenArePrimitive = (children: unknown): boolean => {
   return false;
 };
 
-export const styleIsPlain = (style: unknown): boolean => {
+// `numericWeight`: a numeric fontWeight is fine, the caller passes the style through `nativeTextStyle` (the resolved className
+// style only; the user's `style` keeps the strict check, converting it would be a new object per render)
+export const styleIsPlain = (
+  style: unknown,
+  numericWeight = false
+): boolean => {
   if (style == null) {
     return true;
   }
@@ -103,11 +108,69 @@ export const styleIsPlain = (style: unknown): boolean => {
 
   // Text.js rewrites these, and a line clamp sets numberOfLines in the Uniwind adapter
   return (
-    typeof s.fontWeight !== 'number' &&
+    (numericWeight || typeof s.fontWeight !== 'number') &&
     s.userSelect == null &&
     s.verticalAlign == null &&
     s.WebkitLineClamp == null
   );
+};
+
+// What Text.js (0.86) does to the style before the host component, for the direct path:
+// - a numeric fontWeight (Uniwind resolves `font-bold` to 700) becomes a string (`String(fontWeight)`); without this every `font-*`
+//   Text took the full Text.js path (one more component, two closures per render)
+// - with the `defaultTextToOverflowHidden` flag (on by default) its default style `overflow: 'hidden'` goes first, so a className
+//   overflow still wins. Missing it left every direct Text with visible overflow (unlike Text.js), measured +17 MiB native memory
+//   on the 2003-view screen
+// One copy per resolved style object, so the style stays the same object across renders.
+const textStyles = new WeakMap<object, object>();
+let overflowHidden: boolean | undefined;
+const TEXT_DEFAULT = { overflow: 'hidden' };
+
+const defaultOverflowHidden = (): boolean => {
+  if (overflowHidden === undefined) {
+    try {
+      overflowHidden = (
+        require('react-native/src/private/featureflags/ReactNativeFeatureFlags') as {
+          defaultTextToOverflowHidden: () => boolean;
+        }
+      ).defaultTextToOverflowHidden();
+    } catch {
+      overflowHidden = true;
+    }
+  }
+
+  return overflowHidden;
+};
+
+export const nativeTextStyle = (style: unknown): unknown => {
+  const hidden = defaultOverflowHidden();
+
+  if (style == null || typeof style !== 'object') {
+    return hidden ? TEXT_DEFAULT : style;
+  }
+
+  const numeric =
+    typeof (style as { fontWeight?: unknown }).fontWeight === 'number';
+
+  if (!hidden && !numeric) {
+    return style;
+  }
+
+  let copy = textStyles.get(style);
+
+  if (!copy) {
+    copy = { ...(hidden ? TEXT_DEFAULT : null), ...style };
+
+    if (numeric) {
+      (copy as { fontWeight: string }).fontWeight = String(
+        (style as { fontWeight: number }).fontWeight
+      );
+    }
+
+    textStyles.set(style, copy);
+  }
+
+  return copy;
 };
 
 export const textIsPlain = (
@@ -122,7 +185,7 @@ export const textIsPlain = (
 
   return (
     childrenArePrimitive(props.children) &&
-    styleIsPlain(resolved) &&
+    styleIsPlain(resolved, true) &&
     styleIsPlain(props.style)
   );
 };
