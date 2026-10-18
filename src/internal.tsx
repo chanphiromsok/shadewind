@@ -339,6 +339,38 @@ const styleIdOf = (native: object, label: string | undefined): number => {
 const styleLabels = new WeakMap<object, string>();
 const labelById = new Map<number, string>();
 
+// The native form of a styles object, converted once per object (every view of one className shares it).
+const nativeOf = (styles: ThemedStyles) => {
+  let native = nativeByStyles.get(styles);
+
+  if (!native) {
+    native = Object.fromEntries(
+      Object.entries(styles).map(([theme, style]) => [
+        theme,
+        toNativeProps(style),
+      ])
+    );
+    nativeByStyles.set(styles, native);
+  }
+
+  return native;
+};
+
+// Register at switch (src/uniwind/atSwitch.ts): views found in React's committed tree by their fiber, not through a ref. The key
+// is the host instance's `canonical` object, which React keeps across every clone of the instance (updates, hide and show), and the
+// value is the native styles the view is bound with.
+const boundHosts = new WeakMap<object, object>();
+let beforeSwitch: (() => void) | undefined;
+
+// `canonical` of a public instance (what a ref receives): its fiber's host instance
+const hostKeyOf = (ref: unknown): object | null => {
+  const handle = (
+    ref as { __internalInstanceHandle?: { stateNode?: { canonical?: object } } }
+  ).__internalInstanceHandle;
+
+  return handle?.stateNode?.canonical ?? null;
+};
+
 const registerNative = (
   ref: unknown,
   native: Record<string, Record<string, unknown>>,
@@ -435,20 +467,13 @@ export const ShadewindEngine = {
    * Fabric host view.
    */
   register(ref: unknown, styles: ThemedStyles, renderTheme?: string) {
-    // the same `styles` object is registered by every view of one className: convert it once
-    let native = nativeByStyles.get(styles);
-
-    if (!native) {
-      native = Object.fromEntries(
-        Object.entries(styles).map(([theme, style]) => [
-          theme,
-          toNativeProps(style),
-        ])
-      );
-      nativeByStyles.set(styles, native);
-    }
-
-    return registerNative(ref, native, renderTheme, styleLabels.get(styles));
+    // the same `styles` object is registered by every view of one className: converted once
+    return registerNative(
+      ref,
+      nativeOf(styles),
+      renderTheme,
+      styleLabels.get(styles)
+    );
   },
   /** Registers with props already converted by toNativeProps (used by the public useThemed). */
   registerRaw(
@@ -457,6 +482,75 @@ export const ShadewindEngine = {
     renderTheme?: string
   ) {
     return registerNative(ref, native, renderTheme, styleLabels.get(native));
+  },
+  /**
+   * Register at switch: binds the view of a committed host fiber. `key` is the host instance's `canonical`, `node` its shadow node
+   * (`stateNode.node`), `renderTheme` the theme React rendered its props with. Queued like register(); a view already bound to
+   * these styles costs one lookup. Returns whether it was queued.
+   */
+  bindHost(
+    key: object,
+    node: unknown,
+    styles: ThemedStyles,
+    renderTheme?: string
+  ): boolean {
+    const native = nativeOf(styles);
+
+    if (boundHosts.get(key) === native) {
+      return false;
+    }
+
+    boundHosts.set(key, native);
+    pendingNodes.push(node);
+    pendingProps.push(native);
+    pendingIds.push(styleIdOf(native, styleLabels.get(styles)));
+    pendingThemes.push(renderTheme);
+    scheduleFlush();
+
+    return true;
+  },
+  /** Whether a host instance (by `canonical`) is bound through bindHost. */
+  isHostBound(key: object): boolean {
+    return boundHosts.has(key);
+  },
+  /** Unbinds a host bound through bindHost: React's props are right for it from now on. */
+  unbindHost(key: object, node: unknown): void {
+    if (!boundHosts.delete(key)) {
+      return;
+    }
+
+    // keep the native order: a queued registration of this view goes first
+    flushRegistrations();
+
+    if (node) {
+      getNative().unregister(node);
+    }
+  },
+  /**
+   * A mounted view whose styles changed after a render (a ref callback sees it with the view's public instance): a view bound by an
+   * earlier switch is bound to the new styles (no render theme: the next commit themes it), or unbound when it has none. A view the
+   * walk never bound is left to the next switch.
+   */
+  rebindHost(ref: unknown, styles: ThemedStyles | null): void {
+    const key = hostKeyOf(ref);
+    const node = getShadowNode(ref);
+
+    if (!key || !node || !boundHosts.has(key)) {
+      return;
+    }
+
+    if (styles) {
+      ShadewindEngine.bindHost(key, node, styles);
+    } else {
+      ShadewindEngine.unbindHost(key, node);
+    }
+  },
+  /**
+   * Register at switch: a function setTheme calls first, before it sends the queued registrations and switches. The Uniwind adapter
+   * walks React's committed tree there and binds what it finds. Pass undefined to remove it.
+   */
+  setBeforeSwitch(fn: (() => void) | undefined): void {
+    beforeSwitch = fn;
   },
   /** Development only: names a styles object (as passed to register / registerRaw) in shadewind/diagnostics. */
   label(styles: object, label: string): void {
@@ -512,6 +606,17 @@ export const ShadewindEngine = {
     strategy: ThemeStrategy = 'hookAsync',
     transition?: NativeThemeTransition
   ): ThemeTimings | undefined {
+    // while the engine is still on the old theme: a view bound here was rendered with it, so it is not themed twice
+    if (beforeSwitch) {
+      try {
+        beforeSwitch();
+      } catch (error) {
+        if (__DEV__) {
+          console.warn('[shadewind] register at switch failed', error);
+        }
+      }
+    }
+
     flushRegistrations();
 
     // no third argument without a transition: the instant switch is exactly the call it always was

@@ -33,7 +33,9 @@ the engine.
 1. **Fourth arm (no code).** The engine build with `-resolverOff 1` added to the TheirBench render launch args, same protocol, same
    session as the other three. Arm 3 minus arm 4 = the resolver's mount cost. If it costs, the cheap fix is to keep it off for the
    first mount.
-2. **Register at switch time instead of at mount (the real fix; not started).** Remove the per-view ref and registration:
+2. **Register at switch time instead of at mount (the real fix; prototype written, behind a flag, NOT run in React Native).** See
+   "Register at switch: what was built" below and `docs/ARCHITECTURE.md` section 22; the simulator arms are `docs/LOCAL_TESTING.md`
+   step 10. The original plan, for reference (the prototype differs where section 22 says so): remove the per-view ref and registration:
    - the component passes the per-theme colours as an extra prop on the host element (e.g. `$sw={themed}`). React Native filters props
      through the view config before they reach native (`createAttributePayload(newProps, validAttributes)`,
      `ReactFabric-prod.js:7099`), so it costs nothing natively. It stays on the fiber (`memoizedProps`,
@@ -55,6 +57,40 @@ the engine.
    with the Hermes sampling profiler before changing anything.
 4. **Switch tail (~60 ms to pixels).** Pending recordings: the example TheirBench without the adapter, and `-theirBenchNoText 1`.
    Hypothesis: main-thread mount and text redraw, not the engine.
+
+## Register at switch: what was built (2026-10-18, later)
+
+Branch `claude/brave-mccarthy-yr9vaz`, from `main` at `5f2d555`. Flag `globalThis.__SHADEWIND_REGISTER_AT_SWITCH__` (default off);
+`example-real` sets it from `-registerAtSwitch 1` (`src/boot.ts` and the heredoc in `scripts/arm.sh` that regenerates it).
+
+- `src/uniwind/atSwitch.ts` (new): the flag, `swProps`, the root wrapper (`AppRegistry.setWrapperComponentProvider`), the walk of
+  `FiberRoot.current` (explicit stack, no `return`), `bindCommitted`.
+- `src/internal.tsx`: `bindHost` / `unbindHost` / `rebindHost` / `isHostBound` (keyed by `stateNode.canonical`, reuse `nativeOf` =
+  the old `nativeByStyles` code, and `styleIdOf`), `setBeforeSwitch` (called first thing in `setTheme`, before the flush and the native switch).
+- `View` and `Text` use `useRegistration` and spread `swProps(themed)`; `install.ts` starts the root tracking and the walk when the flag is on.
+- `tools/register-at-switch-js-check.cjs` (run by `theme-transition-js-check.cjs`): 58 checks pass (40 old + 18 new), 8 mutants fail by assertion.
+
+Where it differs from the plan you were given, and what that means:
+- Only `View` and `Text` skip the ref. `TouchableOpacity` drops unknown props (its `render` lists the props it passes), the Pressable's
+  plan does not go null while pressed (so it needs `pause()` before the pressed commit, which needs a node) and `withUniwind` cannot
+  promise a wrapped component forwards `$sw`. They keep `useEngineRef`; so does everything the plan said to delete. The mount saving
+  is therefore for View / Text (the 2003-view benchmark has nothing else). Section 22 has the reasoning and a way forward for each.
+- A render that changes a bound view's styles gets a one-shot ref that rebinds or unbinds it (without it a conditional className is
+  painted with its old colours until the next switch).
+- The render theme passed is `renderThemeOf.get(themed)`, not a theme read at the walk.
+
+Verified: the JS checks above; `tsc --noEmit`: 35 errors before and after, none in `src/` (24 in `spikes/`, 11 in `example/`; you
+mentioned 34 in `spikes/`); `eslint` clean on the files changed (the errors it reports in `LightPressable.tsx` / `Pressable.tsx` were there). Walk time
+0.083 ms for a synthetic 5,000-fiber tree in Node (V8), which is not the Hermes figure.
+
+NOT verified: anything in React Native, a simulator or a device; the Metro bundle or a Hermes compile of the new files; Android; any
+mount or switch timing (so no claim that it removes the ~6 ms); the C++ harness (not run: no native code changed); that `$sw`
+raises no dev warning when running (only that `ReactFabric-dev.js` has none); the real wrapper view's effect on layout and touches
+(`flex: 1`, `pointerEvents: 'box-none'`, one extra host view per root); the concurrent-render race in section 22.
+
+Open: the arms in `docs/LOCAL_TESTING.md` step 10 (correctness 10a first). Then, if it holds: a ref-free path for the Pressable and
+`withUniwind`, and only then delete `useEngineRef`, the pause / resume and the two WeakMaps. Note the mount harness (61.86 / 56.25 /
+62.03 ms) is not in this repository; `example-real`'s TheirBench measures the theme switch only.
 
 ## Done in this session (2026-10-18)
 

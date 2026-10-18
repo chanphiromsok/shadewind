@@ -1,5 +1,10 @@
 import type { ThemedStyles } from '../internal';
 import {
+  atSwitchEnabled,
+  bindCommitted,
+  installRootTracking,
+} from './atSwitch';
+import {
   installNativeResolver,
   offerPrebuiltTable,
   type ResolverStore,
@@ -114,6 +119,28 @@ const probe = (): InstallResult => {
 
   // shadewind's own setTheme goes through Uniwind too: one source of truth, the listener above brings the engine along
   shadewind.setThemeDriver((name) => Uniwind.setTheme(name));
+
+  // register at switch (atSwitch.ts, off by default): wrap the app roots and walk the committed tree before every theme switch.
+  // The wrapper has to be set before runApplication, so the app calls installUniwind() while its bundle loads (a first render is
+  // too late for the first root); a view is never bound without a root, which development builds report at the first switch.
+  if (atSwitchEnabled()) {
+    try {
+      installRootTracking();
+
+      const { ShadewindEngine } =
+        require('shadewind/internal') as typeof import('../internal');
+      const { renderThemeOf } =
+        require('./useShadewindStyle') as typeof import('./useShadewindStyle');
+
+      ShadewindEngine.setBeforeSwitch(() =>
+        bindCommitted(ShadewindEngine, renderThemeOf)
+      );
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[shadewind] register at switch could not start', error);
+      }
+    }
+  }
 
   // cache misses of Uniwind's getStyles resolve natively once the class table is built (nativeResolver.ts)
   installNativeResolver(

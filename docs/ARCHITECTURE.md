@@ -929,3 +929,112 @@ Checked: the JS check tool runs `useShadewindStyle` against a fake Uniwind store
 an accent, the theme in the subscription only with a theme-dependent accent, the same subscription array across renders; mutants
 dropping the accent's theme or rebuilding the array each render fail), typecheck, example-real Metro bundles of both arms and a
 Hermes compile. Not measured: the effect on mounting, which needs the rendering benchmark on a simulator.
+
+## 22. Register at switch: a prototype behind a flag (2026-10-18)
+
+Goal: remove what the engine adds at mount, about 6 ms of 62 on the 2003-view render (engine on 62.03, engine off 56.25, plain
+Uniwind 61.86). Every themed view had a ref callback that registered it (`useEngineRef`), and the ref also makes React create the
+view's public instance (`getPublicInstance` in `ReactFabric-prod.js` runs on the first ref access). This replaces the ref with a prop
+and registers the views once, when the theme is about to change.
+
+**Status: written and checked off-device only (Linux, Node, fake fibers). Never run in React Native, on a simulator or on a device. No
+mount number exists for it.** Off by default; with the flag off no code path of the adapter changes (a `swProps()` call returns
+nothing, `useRegistration` calls `useEngineRef`).
+
+### Design
+
+- Flag: `globalThis.__SHADEWIND_REGISTER_AT_SWITCH__ = true`, read once (`atSwitchEnabled`, `src/uniwind/atSwitch.ts`). Set it before
+  `installUniwind()` runs. `example-real` sets it from the launch argument `-registerAtSwitch 1` (`src/boot.ts` and the heredoc in
+  `scripts/arm.sh` that regenerates it).
+- `View` and `Text` (both the direct host path and the `RNView` / `RNText` fallback) put the plan's `themed` object on the host
+  element as `$sw` and attach no ref (`useRegistration` returns the user's ref unchanged).
+- React Native drops the prop before native: the payload code in `ReactNativeAttributePayload.js` (`if (!attributeConfig)` where it
+  looks a prop up in the view config's `validAttributes`; read at three places) skips any prop that has no entry. It stays on the fiber: `memoizedProps.$sw`. `ReactFabric-dev.js` has no
+  unknown-prop warning for host components (searched; not seen running in a dev app).
+- `installUniwind()` calls `installRootTracking()`: `AppRegistry.setWrapperComponentProvider` gets a provider that wraps every app root in
+  one host `View` (`flex: 1`, `pointerEvents: 'box-none'`, `collapsable: false`) with a ref. The ref receives a public instance; its
+  `__internalInstanceHandle` is a fiber; `return` up to the HostRoot (tag 3), `stateNode` is the FiberRoot. Roots are kept in a set and
+  dropped when the wrapper unmounts.
+- `ShadewindEngine.setBeforeSwitch(fn)`: `setTheme` calls `fn` first, then sends the queued registrations (one `registerMany`), then
+  switches. Every route goes through `ShadewindEngine.setTheme` (Uniwind's listener, `followSystem`, `setThemeTimed`). The adapter's
+  `fn` is `bindCommitted`: for each known root, walk `FiberRoot.current` (the committed tree; React builds the next one on the
+  alternate fibers) with an explicit child / sibling stack, and for every HostComponent fiber (tag 5):
+  - with `memoizedProps.$sw`: `ShadewindEngine.bindHost(canonical, stateNode.node, themed, renderThemeOf.get(themed))`;
+  - without it, but bound earlier: `unbindHost` (a className that left the engine).
+- Key: `stateNode.canonical`. React's persistent mode makes a new `{ node, canonical }` for each update of a host instance, but `canonical`
+  is the same object through updates, hide and show (the host update path in `completeWork` and `cloneHiddenInstance` copy it; read in
+  `ReactFabric-prod.js`, not run). A WeakMap
+  `canonical -> native styles` makes a second walk a lookup per view: a view bound to the same styles is not registered again, which
+  matters because C++ `addLocked` resets the whole entry of a family that is registered again.
+- Render theme: `renderThemeOf.get(themed)`, the theme the plan was resolved for, i.e. the theme React rendered that view's props
+  with. Not "the engine's theme before the switch" read at the walk: Uniwind's listener fires after `UniwindStore.runtime.currentThemeName`
+  already changed. For a view rendered since the last switch the two are the same; when they differ C++ marks the view stale and the next
+  commit themes it, which is the honest outcome.
+- Hidden subtrees (Activity, Suspense fallback, freezeOnBlur): their fibers stay in the committed tree, so the walk reaches them; the
+  engine skips them natively while they are `display: none` and themes them when they show, as before. A hidden host's
+  `stateNode.node` is React's `display: none` clone (`cloneHiddenInstance`).
+- Modals render inside the same fiber tree, so the same walk covers them. Several roots: one wrapper, one entry in the set, each.
+
+### A render that changes a bound view's styles
+
+The engine paints the styles a view is bound with over whatever props React commits for it (`ThemeHook`, "React replaced the props"). A
+view bound at an earlier switch whose next render has other styles (a conditional className) or none would be painted with the old
+ones until the next switch. So on a render where `themed` differs from the previous render's, `useSwitchRef` returns a one-shot ref. When
+React attaches it, `ShadewindEngine.rebindHost` binds the view to the new styles (no render theme, so the next commit themes it) or unbinds
+it, and only if the walk had bound it. A first render and a render with the same styles attach nothing. One `useRef` per View / Text
+holds the previous `themed` (written during render, like `useEngineRef`'s holder; a discarded concurrent render can hide a change, and
+the next walk corrects it).
+
+### Deviations from the original design, and why
+
+- **`TouchableOpacity` keeps the ref.** React Native's `TouchableOpacity.render` builds its `Animated.View` from an explicit prop list
+  (no `...props`), so `$sw` never reaches the host. Read in `Libraries/Components/Touchable/TouchableOpacity.js`.
+- **The Pressable (`LightPressable` and the `RNPressable` fallback) keeps the ref.** Its plan does not go null while pressed (it passes
+  `{ isDisabled }` only; the pressed style comes from a separate call), so it cannot "return no `$sw`" and be unbound by a re-render. Its
+  pressed commit must not be painted over, so the view has to be unbound before that commit, in `onPressIn`; that needs the node at
+  press time, and without a ref there is none (`event.currentTarget` would be the only other way: not tried).
+- **`withUniwind` keeps the ref.** An arbitrary wrapped component forwards `ref` and `style`, not necessarily unknown props: a component
+  that drops `$sw` would never be themed and would show the old colours after a switch, silently. (A walk that binds `$sw` on any fiber
+  to the first host below it would cover that, at the price of reading `memoizedProps` of every fiber.)
+- Consequence: the saving applies to `View` and `Text` only. The 2003-view benchmark renders nothing else; an app full of
+  `TouchableOpacity` and Pressables keeps their ref cost.
+- The design says the flag makes `useEngineRef`, Pressable pause / resume, `registeredWith` / `attachedNodes` and the render-theme
+  re-attach logic unnecessary. Not yet: they are what those three components still use. They go when those components have a ref-free path.
+
+### Known limits and risks (none measured)
+
+- `setWrapperComponentProvider` has no getter and keeps one provider. A provider an app set before `installUniwind()` ran is replaced
+  by ours (the setter is wrapped afterwards, so a later one is composed inside ours). Development builds warn at every switch while
+  no root is known. A root that started before the wrapper was installed (`installUniwind()` first called from a render) is not walked.
+- A view that React commits after the walk with props rendered before the switch (a concurrent render that straddles it: a
+  transition, an Activity pre-render) is not bound until the next walk. With the ref it was bound at its commit and healed. Not
+  reproduced; no mitigation yet (a second walk after the switch would cover it).
+- The first switch with the flag on registers every view, resets their entries and builds the other theme's props inside that commit;
+  today a background prewarm does the props after mount. So the first switch is slower and later ones should not be. Measure the first
+  one apart (docs/LOCAL_TESTING.md 10c).
+- `inspect()` before any switch reports no registered views with the flag on.
+- Plans are cached per resolved style (`planCache`), and the store hands out new resolved styles after a theme change, so `themed` changes identity at each theme: a view re-rendered after a switch gets a new `themed`, so
+  the rebinding ref fires once for it (the old holder logic re-registered such a view too). Comparing plans by content would avoid it.
+- React internals are a private API (tags 3 and 5, `child` / `sibling` / `return`, `stateNode`, `canonical`, `memoizedProps`,
+  `__internalInstanceHandle`). The engine already used the last one.
+
+### Checked
+
+`node tools/theme-transition-js-check.cjs` (58 checks: the 40 that existed, 18 for this). The real `atSwitch.ts`, `internal.tsx` and
+`useShadewindStyle.ts` are compiled and run against a fake fiber tree and a fake native module. The tree has two copies of every fiber
+(stale `$sw` and stale shadow nodes on the alternate copy), `return` pointers that point at the alternate parent, and a root view
+whose handle is the alternate HostRoot. It checks: only the committed tree's views are registered, in tree order, with their render
+theme; `registerMany` goes out before the native `setTheme`; a second switch registers nothing; changed styles are registered again; a
+lost `$sw` is unregistered; a hidden (Offscreen) subtree is included; two roots, and a root that unmounted is dropped; no root warns and
+binds nothing; the wrapper composes with a provider set later; flag on means no ref at mount, none for the same styles, one when they
+change, and it rebinds, unbinds or ignores correctly; flag off keeps `useEngineRef`. Eight mutants must fail by an assertion (not by a
+crash): walking the alternate tree; starting from the HostRoot fiber the handle reached instead of `FiberRoot.current`; no dedupe;
+no unbind; no render theme; no walk before the switch; registrations sent after the switch; skipping Offscreen; losing siblings after a
+subtree.
+
+Walk time: 0.083 ms for a synthetic tree of 5,000 fibers (1,000 cells of a view and a text, with function and raw-text fibers between),
+measured in Node 22 (V8), not Hermes and not a real React tree. The design note's 0.42 ms for 8,013 fibers was Hermes `-O` on a VM. The
+two are not comparable; neither is a device number.
+
+Not done: any run in React Native; the C++ harness (no native code changed); a Metro or Hermes build of the new code; Android;
+the mount and switch measurements (docs/LOCAL_TESTING.md step 10 lists them).

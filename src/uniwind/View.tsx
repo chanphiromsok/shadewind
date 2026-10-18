@@ -8,7 +8,8 @@ import {
   viewIsPlain,
   withUserStyle,
 } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import { swProps } from './atSwitch';
+import { useRegistration, useShadewindStyle } from './useShadewindStyle';
 
 type Props = ViewProps & { className?: string };
 
@@ -20,7 +21,7 @@ export const View: ComponentType<Props> = copyComponentProperties(
       props.className,
       props
     );
-    const ref = useEngineRef(
+    const ref = useRegistration(
       themed,
       (props as { ref?: any }).ref,
       onRegisterFailed
@@ -33,12 +34,18 @@ export const View: ComponentType<Props> = copyComponentProperties(
           {...props}
           ref={ref}
           style={withUserStyle(style, props.style)}
+          {...swProps(themed)}
         />
       );
     }
 
     return (
-      <RNView {...props} ref={ref} style={withUserStyle(style, props.style)} />
+      <RNView
+        {...props}
+        ref={ref}
+        style={withUserStyle(style, props.style)}
+        {...swProps(themed)}
+      />
     );
   }
 );

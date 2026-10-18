@@ -191,11 +191,99 @@ builds them, not the NDK compile, JNI or Java. First check that it builds and wo
    thread and prewarms on a background thread now (it was on the JS thread). Report with a same-run plain Uniwind number only; the
    emulator's absolute numbers are not comparable across sessions.
 
+## 10. Register at switch (the `-registerAtSwitch 1` flag): all arms in one session
+
+What it is: with `globalThis.__SHADEWIND_REGISTER_AT_SWITCH__ = true`, `View` and `Text` of the Uniwind adapter attach no ref at mount
+(so React creates no public instance for them and nothing is registered with the engine). They put their per-theme styles on the host
+element as `$sw`; the engine walks React's committed tree once, just before a theme switch, and registers what it finds. Design,
+limits and what was and was not checked: `docs/ARCHITECTURE.md` section 22. `TouchableOpacity`, the Pressable and `withUniwind` still
+register through a ref (section 22 says why), so the flag's saving is on `View` and `Text`.
+
+Where the flag is set:
+- `example-real`: the launch argument `-registerAtSwitch 1` (`src/boot.ts`, which `scripts/arm.sh engine` regenerates; it is read before
+  `installUniwind()`). With no argument the app behaves exactly as before.
+- The `uniwind-benchmarks` app (its render / mount scenario is where 61.86 / 56.25 / 62.03 ms came from; it has no launch-argument
+  code): put `globalThis.__SHADEWIND_REGISTER_AT_SWITCH__ = true;` on the first line of its `index.js`, above the `installUniwind()`
+  call, the way step 7 sets `__SHADEWIND_ENGINE_OFF__`. `installUniwind()` has to run while the bundle loads (not at the first render):
+  it wraps the app root for the walk, and a root that is already running cannot be wrapped afterwards.
+- `example-real`'s own `-theirBench theme` and `-realBench` do not measure a 2003-view mount, they are for the switch and for a smaller
+  mount (473 views). The 2003-view mount number comes from the app whose scenario you used for the earlier 61.86 / 56.25 / 62.03 ms
+  rows. Use the same app and protocol as those rows; say in the report which one it was.
+
+Build once (step 3, `scripts/arm.sh engine`, Release, `SHADEWIND_DEV_TOOLS=1`), install once, and run every arm below from that one
+install, interleaved, in one session on one simulator (iPhone 17 Pro, iOS 26.5, nothing else running). Terminate the app between launches.
+
+### 10a. Correctness first (nothing is timed until these pass)
+
+Each item with the flag on; do the same with the flag off when it says "compare".
+1. Dev build, flag on, open the app and switch the theme once: the console shows no `[shadewind] register at switch: no app root is
+   known` warning, no "could not start", and no red box or yellow warning about an unknown prop `$sw`. (Release builds are silent: the
+   absence of a wrong colour is the check there.)
+2. After the switch `-theirBench theme` ends with `registered=2003 treeOK=2003 viewOK=2003 layerOK=2003`, as the flag-off arm. A lower
+   `registered` means the walk missed views.
+3. Before any switch the same inspect reports `registered=0` with the flag on: views are registered at the first switch. That is
+   expected, not a failure. Do not use a before-the-first-switch `inspect()` to judge the flag.
+4. Freeze sequences 1-3 of step 4 with the flag on: `STALE` empty, `treeOK == inTree`, no wrong colour in the reveal frames. Compare
+   with the flag off.
+5. A modal open during a switch (the Account theme sheet is one), two different tabs frozen then revealed, a screen pushed over the tabs:
+   no stale colour after the reveal.
+6. Sequence 4 of step 4 (hold a card while switching from a second finger), and a press on a `TouchableOpacity`, after a switch: the
+   pressed style shows while held, the theme colour after release (both use the ref path with the flag on).
+7. Change a `className` of a mounted `View` between two theme-dependent classes (a selected / unselected state) after a switch: the new
+   class's colour is on screen, not the old one.
+8. System appearance change (`xcrun simctl ui booted appearance dark`) with the flag on: follows, no stale view.
+
+If any of 1-8 fails, stop and report it with the probe line; do not time a path that is wrong.
+
+### 10b. Mount, five arms
+
+1 cold launch (discarded) + 6 warm launches per arm, median of the six; arms interleaved (1, 2, 3, 4, 5, 1, 2, ...) so drift hits all.
+
+| Arm | What |
+|---|---|
+| 1 | plain Uniwind (no shadewind in the bundle: `REAL_PLAIN=1`, `scripts/arm.sh plain`, or the app's unmodified build) |
+| 2 | the adapter with the engine off (`__SHADEWIND_ENGINE_OFF__`, step 7) |
+| 3 | the engine, flag off (the current default) |
+| 4 | the engine, flag off, `-resolverOff 1` (Uniwind's own class resolution, no native class table) |
+| 5 | the engine, flag on (`-registerAtSwitch 1`) |
+
+Optional arm 6: flag on and `-resolverOff 1` together. Reading: 3 - 4 is the native class resolver's share of the mount time; 3 - 5 is
+what register-at-switch saves; the earlier 62.03 - 56.25 = 5.8 ms is the budget it can take from, and arm 5 near arm 2 is the best case
+the design allows (it does not reach Uniwind Pro's ~45 ms: the remaining gap is per-view component work).
+
+Also run `-realBench 1` (step 5, 473 views, `className - static`) for arms 3 and 5 as a second, smaller mount signal, in the same
+interleaved order.
+
+Report per arm: the six warm numbers, the median, and the spread (max - min). Claim a difference only when it is larger than the spread
+of the arms compared. Check every launch on screen (the header and "x 10 runs" text): a fixed sleep has captured a wrong screen before.
+
+### 10c. Theme switch, flag off vs on
+
+The filmstrip as in `docs/BENCHMARK.md` ("On screen, frame by frame"): `-theirBench theme`, a screen recording (`xcrun simctl io booted
+recordVideo`), the gap from the first changed frame to the cells changing, for each of the 10 switches. 1 cold + 6 warm launches per arm,
+arms interleaved, flag off and flag on. Plus the result line (`JS idle avg / median`) of each launch.
+
+Report the FIRST switch of each recording separately from the other nine, in both arms. With the flag on, the first switch does work
+the others do not: the walk, the registration of every view, and building the props of the other theme (today a background thread
+prewarms them after mount; with the flag nothing is registered until the first switch). `-theirBench` makes an unmeasured switch to
+light first, so its ten measured switches leave that cost out: the recording's first switch (the unmeasured one, if the video starts
+before it) is where it shows. With the debug timings (`ShadewindEngine.setThemeTimed`, a dev-tools build) report `propsMs`, `reused`,
+`cloneMs`, `totalMs` for the first switch and for a later one, flag on and off. Pass: later switches no slower with the flag than
+without, beyond the spread.
+
+### 10d. What to send back for this step
+
+- 10a: pass or fail per item, with the probe line and a frame for any failure.
+- 10b: the table (six numbers, median, spread per arm), which app and scenario, and the arm 3 - 4 and 3 - 5 differences next to the spread.
+- 10c: first switch and later switches, both arms, and the timings of the first switch.
+- anything that failed, with the full output. Say what was not run.
+
 ## What to send back
 
 - the harness tables (step 1)
 - the freeze sequences with the probe lines and whether a wrong colour was visible, current and baseline (step 4)
 - per-launch numbers for steps 5-8, with the spread, current and baseline side by side (step 6 on the current code only)
+- step 10 (register at switch), as listed in 10d
 - anything that failed, with the full output
 
 ## Release builds carry no debug code

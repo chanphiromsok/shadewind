@@ -13,6 +13,12 @@ if (Settings.get('resolverOff')) {
   nativeResolver.setEnabled(false);
 }
 
+// -registerAtSwitch 1: views are registered when the theme changes (a tree walk) instead of at mount (a ref per view); read before
+// installUniwind() below, which wraps the app roots for the walk
+if (Settings.get('registerAtSwitch')) {
+  (globalThis as { __SHADEWIND_REGISTER_AT_SWITCH__?: boolean }).__SHADEWIND_REGISTER_AT_SWITCH__ = true;
+}
+
 // the theme transition for Uniwind.setTheme, if one is asked for (src/transitionConfig.ts): the adapter's default
 if (TRANSITION) {
   setDefaultTransition(TRANSITION);

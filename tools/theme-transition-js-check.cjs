@@ -91,6 +91,7 @@ const refStubs = {
     useRef: (v) => ({ current: v }),
   },
   'react-native': { StyleSheet: { flatten: (s) => s } },
+  './atSwitch': { atSwitchEnabled: () => false },
   './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: hooks.active }) },
   'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
   'shadewind/internal': {
@@ -137,5 +138,8 @@ const { withUserStyle } = nm.exports;
 const cached = { backgroundColor: 'white' };
 ok('withUserStyle: no style prop (undefined, null, false): the cached object itself, no array', () => { assert.strictEqual(withUserStyle(cached, undefined), cached); assert.strictEqual(withUserStyle(cached, null), cached); assert.strictEqual(withUserStyle(cached, false), cached); });
 ok('withUserStyle: with a style prop, the user style comes after the className style', () => { const user = { padding: 4 }; assert.deepStrictEqual(withUserStyle(cached, user), [cached, user]); });
+
+// register at switch: the walk of React's committed tree, the engine's bindHost family, the View / Text ref (tools/register-at-switch-js-check.cjs)
+require('./register-at-switch-js-check.cjs')(ts, root, ok);
 
 console.log(n + ' checks passed');

@@ -1,6 +1,7 @@
 import { type Ref, useLayoutEffect, useReducer, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
+import { atSwitchEnabled } from './atSwitch';
 import { getInternals, installUniwind } from './install';
 
 // Uniwind's `useStyle`, plus: register the per-theme colours with the engine and stop re-rendering on a theme switch, for the
@@ -502,3 +503,48 @@ export const useEngineRef = (
 
   return h.ref;
 };
+
+// Register at switch (atSwitch.ts): the view carries its styles as `$sw` and the walk before a switch binds it, so there is no ref to
+// attach at mount. A render that changes the view's styles needs a ref once, because the engine keeps painting what it was bound
+// with over React's new props until it is told otherwise: on that render the ref rebinds the view (or unbinds it) when it attaches.
+// The ref only fires for a view the walk has bound; a first render, and every render with the same styles, attach nothing.
+const useSwitchRef = (
+  themed: ThemedStyles | null,
+  userRef: Ref<unknown> | undefined
+): any => {
+  const last = useRef<ThemedStyles | null | undefined>(undefined);
+  const before = last.current;
+
+  last.current = themed;
+
+  if (before === undefined || before === themed) {
+    return userRef;
+  }
+
+  return (node: unknown) => {
+    if (node) {
+      engine().rebindHost(node, themed);
+    }
+
+    if (typeof userRef === 'function') {
+      userRef(node);
+    } else if (userRef && typeof userRef === 'object') {
+      (userRef as { current: unknown }).current = node;
+    }
+  };
+};
+
+/**
+ * The ref of a View or Text: with register at switch (atSwitch.ts) none unless the styles changed, otherwise useEngineRef. The flag
+ * is fixed for the life of the app, so the hooks are the same on every render.
+ */
+export const useRegistration = (
+  themed: ThemedStyles | null,
+  userRef: Ref<unknown> | undefined,
+  onRegisterFailed?: () => void
+): any =>
+  atSwitchEnabled()
+    ? // eslint-disable-next-line react-hooks/rules-of-hooks
+      useSwitchRef(themed, userRef)
+    : // eslint-disable-next-line react-hooks/rules-of-hooks
+      useEngineRef(themed, userRef, onRegisterFailed);

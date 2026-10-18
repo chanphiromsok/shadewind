@@ -7,7 +7,8 @@ import {
   textIsPlain,
   withUserStyle,
 } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import { swProps } from './atSwitch';
+import { useRegistration, useShadewindStyle } from './useShadewindStyle';
 
 type Props = TextProps & {
   className?: string;
@@ -34,7 +35,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       state,
       props.selectionColorClassName
     );
-    const ref = useEngineRef(
+    const ref = useRegistration(
       themed,
       (props as { ref?: any }).ref,
       onRegisterFailed
@@ -58,6 +59,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
           accessible={Platform.OS === 'ios'}
           allowFontScaling
           ellipsizeMode={props.ellipsizeMode ?? 'tail'}
+          {...swProps(themed)}
         />
       );
     }
@@ -80,6 +82,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
           setIsPressed(false);
           props.onPressOut?.(event);
         }}
+        {...swProps(themed)}
       />
     );
   }
