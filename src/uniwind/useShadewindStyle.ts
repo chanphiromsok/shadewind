@@ -253,25 +253,30 @@ export const nonThemeDeps = (current: Resolved, theme: number): number[] => {
 // The subscription of a view with an accent className (Text's selectionColorClassName): the non-theme dependencies of its style plus
 // every dependency of the accent, the theme included (Uniwind's useAccentColor re-renders on a theme change, so does this). One array
 // per pair of resolutions, so the layout effect does not subscribe again on every render.
-const accentDepsCache = new WeakMap<object, WeakMap<object, number[]>>();
+type DepsCache = WeakMap<object, WeakMap<object, number[]>>;
+const accentDepsCache: DepsCache = new WeakMap();
+// engine inactive: the style's own theme dependency is kept too (a separate cache, the arrays differ)
+const inactiveAccentDepsCache: DepsCache = new WeakMap();
 const accentDeps = (
   current: Resolved,
   accent: Resolved,
-  theme: number
+  theme: number,
+  active = true
 ): number[] => {
-  let byAccent = accentDepsCache.get(current);
+  const cache = active ? accentDepsCache : inactiveAccentDepsCache;
+  let byAccent = cache.get(current);
 
   if (!byAccent) {
     byAccent = new WeakMap();
-    accentDepsCache.set(current, byAccent);
+    cache.set(current, byAccent);
   }
 
   let deps = byAccent.get(accent);
 
   if (!deps) {
-    deps = [
-      ...new Set([...nonThemeDeps(current, theme), ...accent.dependencies]),
-    ];
+    const own = active ? nonThemeDeps(current, theme) : current.dependencies;
+
+    deps = [...new Set([...own, ...accent.dependencies])];
     byAccent.set(accent, deps);
   }
 
@@ -294,9 +299,9 @@ const useContext = () =>
     require('uniwind-internal/core/context') as typeof import('uniwind-internal/core/context')
   ).useUniwindContext)();
 
-// Per styled view: 3 hooks, like Uniwind's useStyle (context, reducer, layout effect). A theme change never re-renders a view
-// (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and stale after a
-// later switch.
+// Per styled view: 3 hooks, like Uniwind's useStyle (context, reducer, layout effect). With the engine active a theme change never
+// re-renders a view (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and
+// stale after a later switch. With the engine inactive the view subscribes to the theme like Uniwind's own components.
 export const useShadewindStyle = (
   className: string | undefined,
   props: Record<string, any>,
@@ -337,9 +342,12 @@ export const useShadewindStyle = (
   const accent = accentClassName
     ? UniwindStore!.getStyles(accentClassName, props, state, context)
     : null;
+  // engine inactive: nothing re-themes the view natively, so it re-renders on a theme switch like Uniwind's own components
   const deps = accent
-    ? accentDeps(current, accent, StyleDependency!.Theme)
-    : nonThemeDeps(current, StyleDependency!.Theme);
+    ? accentDeps(current, accent, StyleDependency!.Theme, active)
+    : active
+      ? nonThemeDeps(current, StyleDependency!.Theme)
+      : current.dependencies;
   const accentColor = accent
     ? (accent.styles as { accentColor?: string }).accentColor
     : undefined;
