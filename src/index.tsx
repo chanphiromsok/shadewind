@@ -1,6 +1,5 @@
 import {
   createElement,
-  useCallback,
   useMemo,
   useSyncExternalStore,
   type ComponentType,
@@ -465,32 +464,103 @@ const checkStyles = (styles: ThemedStyles, themes: readonly string[]) => {
 
 const attachedNodes = new WeakSet<object>();
 
-// Native styles per styles content: every view with the same styles shares one object, so native parses them once and caches
-// one entry, however many views mount and unmount. Bounded: an app has few distinct themed styles, and inline objects that
-// change on every render start over past the limit.
-const nativeByKey = new Map<string, Record<string, Record<string, unknown>>>();
+type NativeByTheme = Record<string, Record<string, unknown>>;
 
-const nativeFor = (key: string, styles: ThemedStyles) => {
-  let native = nativeByKey.get(key);
+// One entry per styles content: every view with the same styles shares it, so native parses them once and caches one entry,
+// however many views mount and unmount. Bounded: an app has few distinct themed styles, and inline objects that change on every
+// render start over past the limit.
+const cachedByKey = <E,>(cache: Map<string, E>, key: string, make: () => E) => {
+  let entry = cache.get(key);
 
-  if (!native) {
-    if (nativeByKey.size >= 512) {
-      nativeByKey.clear();
+  if (!entry) {
+    if (cache.size >= 512) {
+      cache.clear();
     }
 
-    native = Object.fromEntries(
-      Object.entries(styles).map(([name, style]) => [
-        name,
-        toNativeProps(style as ThemedStyle),
-      ])
-    );
-    if (__DEV__) {
-      ShadewindEngine.label(native, `useThemed: ${key}`);
-    }
-    nativeByKey.set(key, native);
+    entry = make();
+    cache.set(key, entry);
   }
 
-  return native;
+  return entry;
+};
+
+type ThemedEntry = {
+  /** The first styles object seen with this content: inline objects are fine, identity is the content. */
+  styles: ThemedStyles;
+  /** Why the engine cannot take the styles, or null when it can. `config.themes` never changes after the first configure. */
+  reason: string | null;
+  native: NativeByTheme | null;
+  /** One ref per render theme, so a re-render keeps its ref (React attaches it again only when the ref changes). */
+  refs: Map<string, RefCallback<unknown>>;
+};
+
+const themedByKey = new Map<string, ThemedEntry>();
+
+const themedEntry = (
+  key: string,
+  styles: ThemedStyles,
+  themes: readonly string[]
+) =>
+  cachedByKey(themedByKey, key, (): ThemedEntry => {
+    const reason = checkStyles(styles, themes);
+    let native: NativeByTheme | null = null;
+
+    if (reason === null) {
+      native = Object.fromEntries(
+        Object.entries(styles).map(([name, style]) => [
+          name,
+          toNativeProps(style as ThemedStyle),
+        ])
+      );
+
+      if (__DEV__) {
+        ShadewindEngine.label(native, `useThemed: ${key}`);
+      }
+    }
+
+    return { styles, reason, native, refs: new Map() };
+  });
+
+// No cleanup on purpose: React runs ref cleanups when it hides a subtree (Suspense, Activity, freezeOnBlur), and the binding
+// must outlive that so the commit that shows the subtree again themes it. An unmount frees it with the view.
+const bindRef = (
+  native: NativeByTheme,
+  theme: string
+): RefCallback<unknown> => {
+  return (node) => {
+    if (!node) {
+      return;
+    }
+
+    // `theme` names the theme the render that handed out this ref used, which only describes the props of a node's first
+    // attach. A re-attach of a view whose styles changed finds props the commit hook may have re-themed meanwhile, so it passes
+    // none and the next commit applies the current theme.
+    const first = typeof node === 'object' && !attachedNodes.has(node);
+
+    if (typeof node === 'object') {
+      attachedNodes.add(node);
+    }
+
+    ShadewindEngine.registerRaw(node, native, first ? theme : undefined);
+  };
+};
+
+// the styles are no longer something the engine takes: React's props are right for this view from now on
+const unbindRef: RefCallback<unknown> = (node) => {
+  if (node && ShadewindEngine.isRegistered(node)) {
+    ShadewindEngine.unregister(node);
+  }
+};
+
+const themedRef = (entry: ThemedEntry, theme: string) => {
+  let ref = entry.refs.get(theme);
+
+  if (!ref) {
+    ref = bindRef(entry.native!, theme);
+    entry.refs.set(theme, ref);
+  }
+
+  return ref;
 };
 
 export type UseThemedResult<T extends object> = {
@@ -511,12 +581,16 @@ export function useThemed<T extends object = ViewStyle>(
   styles: ThemedStyles,
   options?: { forceFallback?: string }
 ): UseThemedResult<T> {
-  const cfg = assertConfigured();
-  // inline objects are fine: identity is the content
+  // The theme is module state read on every render (no subscription, see below); compiled, it would be memoized on the styles
+  // and go stale after a switch. The compiler skips hook-free functions by default; this keeps it so in compilationMode 'all'.
+  'use no memo';
+
+  // Calls no React hook: everything derived from the styles is cached per content (themedEntry), so a render costs one
+  // JSON.stringify and a map lookup.
+  const { themes } = assertConfigured();
   const key = JSON.stringify(styles);
-  const stable = useMemo(() => styles, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const reason = options?.forceFallback ?? checkStyles(stable, cfg.themes);
-  const engine = reason === null;
+  const entry = themedEntry(key, styles, themes);
+  const reason = options?.forceFallback ?? entry.reason;
 
   if (reason !== null) {
     unsupported(reason, key);
@@ -524,50 +598,20 @@ export function useThemed<T extends object = ViewStyle>(
 
   // No subscription (rule 1): the style is the current theme's at this render. An engine view is then kept right by the
   // commit hook; a fallback view is stale after a later switch until its next render (dev warning above).
-  const theme = getTheme();
-  const native = engine ? nativeFor(key, stable) : null;
-
-  // No cleanup on purpose: React runs ref cleanups when it hides a subtree (Suspense, Activity, freezeOnBlur), and the binding
-  // must outlive that so the commit that shows the subtree again themes it. An unmount frees it with the view.
-  const ref = useCallback<RefCallback<unknown>>(
-    (node) => {
-      if (!node) {
-        return;
-      }
-
-      if (!native) {
-        // the styles are no longer something the engine takes: React's props are right for this view from now on
-        if (ShadewindEngine.isRegistered(node)) {
-          ShadewindEngine.unregister(node);
-        }
-
-        return;
-      }
-
-      // `theme` names the theme this render used, which only describes the props of a node's first attach. A re-attach of a
-      // view whose styles changed finds props the commit hook may have re-themed meanwhile, so it passes none and the next
-      // commit applies the current theme.
-      const first = typeof node === 'object' && !attachedNodes.has(node);
-
-      if (typeof node === 'object') {
-        attachedNodes.add(node);
-      }
-
-      ShadewindEngine.registerRaw(node, native, first ? theme : undefined);
-    },
-    // `theme` is read at attach time only: it names the theme this render used; a later switch is applied by the hook
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [native]
-  );
+  const theme = current as string;
 
   return {
-    ref,
-    style: (stable[theme] ?? {}) as unknown as T,
-    engine,
+    ref: reason === null ? themedRef(entry, theme) : unbindRef,
+    style: (entry.styles[theme as ThemeName] ?? {}) as unknown as T,
+    engine: reason === null,
   };
 }
 
 const overlap = (style: StyleProp<object>, styles: ThemedStyles) => {
+  if (style == null) {
+    return undefined; // the common case: nothing to flatten
+  }
+
   const flat = (StyleSheet.flatten(style) ?? {}) as Record<string, unknown>;
   const registered = new Set<string>();
 
@@ -596,10 +640,15 @@ function makeThemed<
     const bound = useThemed(themed, {
       forceFallback: overlap(props.style, themed),
     });
+    // a new merged ref on every render would make React detach and attach both refs on every commit
+    const ref = useMemo(
+      () => mergeRefs(bound.ref, props.ref),
+      [bound.ref, props.ref]
+    );
 
     return createElement(Base, {
       ...(props as unknown as P),
-      ref: mergeRefs(bound.ref, props.ref),
+      ref,
       style: [bound.style, props.style],
     } as unknown as P);
   };
@@ -632,40 +681,59 @@ export type UseThemedPropsResult<T extends object> = {
  * `colorKeys` names the props that hold colours (a colour or an array of colours); they are converted to native colours.
  * The component re-renders for other reasons as usual and then simply reads the current theme again.
  */
-export function useThemedProps<T extends Record<string, unknown>>(
-  valuesByTheme: Readonly<Partial<Record<ThemeName, T>>>,
-  options: { colorKeys?: readonly string[] } = {}
-): UseThemedPropsResult<T> {
-  assertConfigured();
+type PropsEntry = {
+  /** The first values object seen with this content (with these colorKeys). */
+  values: Readonly<Partial<Record<ThemeName, Record<string, unknown>>>>;
+  ref: RefCallback<unknown>;
+};
 
-  const key = JSON.stringify([valuesByTheme, options.colorKeys]);
-  const stable = useMemo(() => valuesByTheme, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const colorKeys = options.colorKeys ?? [];
-  const native = useMemo(() => {
-    const converted = Object.fromEntries(
-      Object.entries(stable).map(([name, values]) => [
+const propsByKey = new Map<string, PropsEntry>();
+
+const propsEntry = (
+  key: string,
+  valuesByTheme: PropsEntry['values'],
+  colorKeys: readonly string[]
+) =>
+  cachedByKey(propsByKey, key, (): PropsEntry => {
+    const native: NativeByTheme = Object.fromEntries(
+      Object.entries(valuesByTheme).map(([name, values]) => [
         name,
         toNativePropsWith(values as Record<string, unknown>, colorKeys),
       ])
     );
 
     if (__DEV__) {
-      ShadewindEngine.label(converted, `useThemedProps: ${key}`);
+      ShadewindEngine.label(native, `useThemedProps: ${key}`);
     }
 
-    return converted;
-  }, [stable]); // eslint-disable-line react-hooks/exhaustive-deps
-  // no cleanup: the binding outlives a Suspense/Activity hide (see useThemed)
-  const ref = useCallback<RefCallback<unknown>>(
-    (node) => {
+    // no cleanup: the binding outlives a Suspense/Activity hide (see bindRef)
+    const ref: RefCallback<unknown> = (node) => {
       if (node) {
         ShadewindEngine.registerRaw(node, native);
       }
-    },
-    [native]
-  );
+    };
 
-  return { ref, props: (stable[getTheme() as ThemeName] ?? {}) as T };
+    return { values: valuesByTheme, ref };
+  });
+
+export function useThemedProps<T extends Record<string, unknown>>(
+  valuesByTheme: Readonly<Partial<Record<ThemeName, T>>>,
+  options?: { colorKeys?: readonly string[] }
+): UseThemedPropsResult<T> {
+  'use no memo'; // reads the theme on every render (see useThemed)
+
+  // Calls no React hook, like useThemed: the conversion, the label and the ref are made once per content and shared by every
+  // view with the same values.
+  assertConfigured();
+
+  const colorKeys = options?.colorKeys;
+  const key = JSON.stringify([valuesByTheme, colorKeys]);
+  const entry = propsEntry(key, valuesByTheme, colorKeys ?? []);
+
+  return {
+    ref: entry.ref,
+    props: (entry.values[current as ThemeName] ?? {}) as T,
+  };
 }
 
 // ---- cn: native, tailwind-merge compatible class merge ------------------------------------------------------------
