@@ -188,4 +188,73 @@ ok('textIsPlain: a numeric weight in the className style stays on the direct pat
   ok('withUniwind path: the effect subscribes even if the ref never attaches; the ref with NO_DEPS does not subscribe again', () => { hooks.effects.length = 0; const styled = { themed: null, deps: [THEME], rerender: () => {}, onRegisterFailed: undefined }; useEffectSubscription(styled); assert.strictEqual(hooks.effects.length, 1); assert.deepStrictEqual(hooks.effects[0], [[THEME]]); const user = () => {}; assert.strictEqual(useEngineRef({ ...styled, deps: NO_DEPS }, user), user); });
 }
 
+// src/uniwind/nativeResolver.ts: a fresh module per check (it keeps module state), a fake engine and a fake Uniwind store
+{
+  const resolverSrc = ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'nativeResolver.ts'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText.replace(/require\(/g, 'module.require(');
+  globalThis.requestIdleCallback = (cb) => cb();
+  globalThis.performance = globalThis.performance ?? { now: () => Date.now() };
+  const fresh = (loadResult = { ok: true, classes: 3, unsupported: 0 }) => {
+    const mod = new Module('nativeResolver'); mod.paths = [];
+    mod.require = (name) => {
+      if (name === '../internal') return { ShadewindEngine: { loadStyleTable: () => loadResult } };
+      if (name === './styleTable') return { buildStyleTable: () => ({ json: '{"t":1}', fallback: 0 }) };
+      throw new Error('unexpected import ' + name);
+    };
+    mod._compile(resolverSrc, 'nativeResolver.js');
+    const listeners = [];
+    const proto = { resolveStyles() { return { styles: { from: 'uniwind' }, dependencies: [] }; } };
+    const store = Object.assign(Object.create(proto), { stylesheet: {}, vars: { light: {}, dark: {} }, runtime: { currentThemeName: 'light', screen: { width: 400 } } });
+    const listener = { subscribe: (fn) => { listeners.push(fn); return () => {}; }, getSnapshot: () => 0 };
+    const notifyAll = () => listeners.forEach((fn) => fn());
+    return { api: mod.exports, store, listener, notifyAll };
+  };
+  const NO_SCOPE = { scopedTheme: null, variables: null };
+  globalThis.__swResolve = (className) => (className === 'unknown' ? undefined : { styles: { from: 'native' }, dependencies: [] });
+  ok('nativeResolver: a table built while disabled reads off, and ready once enabled (it no longer stays off)', () => {
+    const { api, store, listener } = fresh();
+    api.installNativeResolver(store, listener, 9);
+    api.nativeResolver.setEnabled(false);
+    api.nativeResolver.rebuild();
+    assert.strictEqual(api.nativeResolver.status().state, 'off');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+    api.nativeResolver.setEnabled(true);
+    assert.strictEqual(api.nativeResolver.status().state, 'ready');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'native');
+  });
+  ok('nativeResolver: a class the table lacks, a scoped theme and scoped variables go to Uniwind', () => {
+    const { api, store, listener } = fresh();
+    api.installNativeResolver(store, listener, 9);
+    api.nativeResolver.rebuild(); // install builds it when the JS thread is idle
+    assert.strictEqual(api.nativeResolver.status().state, 'ready');
+    assert.strictEqual(store.resolveStyles('unknown', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, { scopedTheme: 'dark', variables: null }).styles.from, 'uniwind');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, { scopedTheme: null, variables: {} }).styles.from, 'uniwind');
+  });
+  ok('nativeResolver: Variables, or a CSS reload (reinit replaces the stylesheet, then notifyAll), marks the table stale until the idle rebuild', () => {
+    const { api, store, listener, notifyAll } = fresh();
+    const realTimeout = globalThis.setTimeout; const pending = []; globalThis.setTimeout = (fn) => { pending.push(fn); return 0; };
+    try {
+      api.installNativeResolver(store, listener, 9);
+      pending.splice(0).forEach((fn) => fn());
+      assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'native');
+      store.stylesheet = {}; store.vars = { light: {}, dark: {} };
+      notifyAll();
+      assert.strictEqual(api.nativeResolver.status().state, 'stale');
+      assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+      pending.splice(0).forEach((fn) => fn());
+      assert.strictEqual(api.nativeResolver.status().state, 'ready');
+      assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'native');
+    } finally { globalThis.setTimeout = realTimeout; }
+  });
+  ok('nativeResolver: a table the engine cannot load fails without reporting its classes, and Uniwind keeps resolving', () => {
+    const { api, store, listener } = fresh({ ok: false, classes: 7, unsupported: 0, error: 'bad table' });
+    api.installNativeResolver(store, listener, 9);
+    api.nativeResolver.rebuild();
+    const st = api.nativeResolver.status();
+    assert.strictEqual(st.state, 'failed'); assert.strictEqual(st.classes, 0); assert.strictEqual(st.error, 'bad table');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+  });
+  delete globalThis.__swResolve;
+}
+
 console.log(n + ' checks passed');
