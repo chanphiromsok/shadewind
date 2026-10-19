@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PACKAGE_ROOT = fs.realpathSync(__dirname);
+const PACKAGE_NAME = require('./package.json').name;
 const BABEL_TRANSFORMER = path.join(PACKAGE_ROOT, 'metro-babel-transformer.cjs');
 // the library's own code (source and compiled): an app inside the package folder (this repository's example) is not part of it
 const OWN_CODE = [path.join(PACKAGE_ROOT, 'src'), path.join(PACKAGE_ROOT, 'lib')];
@@ -102,7 +103,11 @@ function withShadewind(config, options = {}) {
         const origin = context.originModulePath;
 
         if (origin && OWN_CODE.some((dir) => isInside(realOrSelf(origin), dir))) {
-          return context.resolveRequest(context, moduleName, platform);
+          // except our imports of ourselves: those go through the wrapped resolvers like the app's (Uniwind's leaves them
+          // alone), so they get the app's export conditions and the same module instance the app has (src or lib)
+          const self = moduleName === PACKAGE_NAME || moduleName.startsWith(`${PACKAGE_NAME}/`);
+
+          return (self ? previous ?? context.resolveRequest : context.resolveRequest)(context, moduleName, platform);
         }
 
         const resolved = (previous ?? context.resolveRequest)(context, moduleName, platform);
@@ -112,8 +117,9 @@ function withShadewind(config, options = {}) {
             const match = pattern.exec(resolved.filePath);
 
             if (match) {
-              // resolved like an app import, so the `shadewind-source` / default export condition picks src or lib
-              return context.resolveRequest(
+              // resolved like an app import, through the wrapped resolvers, so the app's export conditions apply: a monorepo
+              // setup that adds `shadewind-source` (react-native-monorepo-config) gets src, an installed package gets lib
+              return (previous ?? context.resolveRequest)(
                 { ...context, originModulePath: pinnedOrigin },
                 `shadewind/uniwind/${name(match)}`,
                 platform
