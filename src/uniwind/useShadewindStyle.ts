@@ -296,6 +296,16 @@ const accentDeps = (
 
 let warnedAccent = false;
 
+// once per app: a helper, so a render only calls it (the flag is a module variable)
+const warnNoAccent = (accentClassName: string) => {
+  if (!warnedAccent) {
+    warnedAccent = true;
+    console.warn(
+      `[shadewind] selectionColorClassName '${accentClassName}' has no accent colour (use an accent-* class)`
+    );
+  }
+};
+
 const warnUnbound = () => {
   if (debugOn()) {
     console.warn(
@@ -418,16 +428,8 @@ export const useShadewindStyle = (
     ? (accent.styles as { accentColor?: string }).accentColor
     : undefined;
 
-  if (
-    __DEV__ &&
-    accentClassName?.trim() &&
-    accentColor === undefined &&
-    !warnedAccent
-  ) {
-    warnedAccent = true;
-    console.warn(
-      `[shadewind] selectionColorClassName '${accentClassName}' has no accent colour (use an accent-* class)`
-    );
+  if (__DEV__ && accentClassName?.trim() && accentColor === undefined) {
+    warnNoAccent(accentClassName);
   }
 
   // no layout effect: the view subscribes from its ref (useEngineRef), which attaches and detaches at the same moments (commit,
@@ -586,9 +588,16 @@ export const useEngineRef = (
   userRef: Ref<unknown> | undefined,
   pausable = false
 ): any => {
+  // Writes the holder during render on purpose, so never compiled. The old ref's detach runs in React's mutation phase, before
+  // the shadow tree commits, and must know by then whether this render replaced its binding (unbind) or not (a hide or an
+  // unmount keeps it); only the render knows, and the other carrier, a layout effect per view, is the mount cost the ref
+  // subscription removed. A render React throws away heals: every attach registers again.
+  'use no memo';
+
   const holder = R.useRef<RefHolder | null>(null);
   const { themed, deps } = styled;
 
+  /* eslint-disable react-hooks/immutability -- the render-time holder hand-over above */
   if (!themed && deps.length === 0) {
     if (holder.current) {
       holder.current.superseded = true;
@@ -616,6 +625,7 @@ export const useEngineRef = (
       styled.rerender
     );
   }
+  /* eslint-enable react-hooks/immutability */
 
   return h.ref;
 };
