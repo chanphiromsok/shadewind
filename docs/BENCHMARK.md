@@ -1,5 +1,43 @@
 # Theme-change benchmark: this engine vs Uniwind
 
+## End to end, uniwind-benchmarks render and theme (2026-10-19)
+
+The repository's own protocol (`scripts/bench/measure.py`), unchanged: Release builds, iPhone 17 Pro simulator (iOS 26.5), StyleSheet
+control launches before and after every block and a fresh StyleSheet baseline (`--rebaseline`), six warm launches per block, two
+sweeps in alternating order, so twelve warm launches per build. All three builds in the same session per scenario; no block was
+rejected; host load 3-6 during the runs (a theme run started during a load spike to 30 was discarded and run again).
+
+**Render** (re-mount of the 2003-view list, time until the JS thread is idle, median of twelve):
+
+| Build | Median | Spread | vs StyleSheet | Memory after GC |
+|---|---|---|---|---|
+| StyleSheet (baseline) | 38.94 ms | | 1.00x | ~93 MiB (controls) |
+| Uniwind 1.12 | 64.31 ms | 59.99-65.57 | 1.65x | 138.1 MiB |
+| Shadewind `d171749` | 57.48 ms | 55.56-60.68 | 1.48x | 125.2 MiB |
+| Shadewind `0197c72` | **49.93 ms** | 48.32-51.81 | **1.28x** | 134.4 MiB (spread 111.8-135.9) |
+
+Memory after GC follows the peak of the run, not what the app holds (freed malloc pages that iOS has not taken back count too; see
+"Mount, engine only" below): the same `0197c72` build read 114.4 MiB in the earlier run the same day, and its spread here is 24 MiB.
+Treat the memory column as noisy; no memory claim is made from it.
+
+**Theme** (the list mounted once, ten light/dark switches, time per switch until the JS thread is idle, median of twelve):
+
+| Build | Median | Spread |
+|---|---|---|
+| Uniwind 1.12 | 105.86 ms | 96.95-111.83 |
+| Shadewind `d171749` | 2.61 ms | 2.50-2.89 |
+| Shadewind `0197c72` | **2.45 ms** | 2.34-2.59 |
+
+The theme number is the JS thread only: the main thread still applies the new colours after it, see "On screen, frame by frame"
+below (about 57 ms to pixels with Shadewind, about 111 ms with plain Uniwind, earlier build). An earlier same-protocol render run on
+the same day measured `d171749` at 55.44 ms and `0197c72` at 47.58 ms (StyleSheet 36.67 ms): the absolute numbers move between
+sessions with the host, the ratios to StyleSheet stay close.
+
+Instruments traces of both builds (Release, 20 re-mounts + 20 switches in one launch, converted to Perfetto timelines with the JS and
+main threads) show the same split per re-mount in both: JS (React + adapter) about 40 ms, React Native `createNode` about 12 ms, Yoga
+about 8 ms, GC about 7 ms, Shadewind `registerMany` about 1 ms (sampled at 1 ms with the profiler running, so larger than the
+benchmark's own times). The traces are not part of the repository.
+
 ## Mount, engine only (2026-10-19, uniwind-benchmarks render scenario)
 
 The `uniwind-benchmarks` render screen (2003 views, re-mounted 10 times per launch; the app reports the average time from the

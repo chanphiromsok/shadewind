@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" font-family="-apple-system, Helvetica, Arial, sans-serif">
+<rect width="960" height="520" fill="#ffffff"/>
+<text x="32" y="44" font-size="22" font-weight="600" fill="#1a1a1a">uniwind-benchmarks · 2003 views · Release · median of 12 warm launches</text>
+<text x="32" y="92" font-size="17" font-weight="600" fill="#1a1a1a">Mount (re-render the whole list)</text>
+<text x="32" y="112" font-size="13" fill="#6b6b6b">time until the JS thread is idle; lower is better</text>
+<text x="278" y="147" font-size="15" text-anchor="end" fill="#1a1a1a">StyleSheet (no library)</text>
+<rect x="290" y="128" width="198.2" height="28" rx="4" fill="#b4b2a9"/>
+<text x="496.2" y="147" font-size="15" fill="#1a1a1a">38.94 ms</text>
+<text x="278" y="187" font-size="15" text-anchor="end" fill="#1a1a1a">Uniwind 1.12</text>
+<rect x="290" y="168" width="327.4" height="28" rx="4" fill="#2a78d6"/>
+<text x="625.4" y="187" font-size="15" fill="#1a1a1a">64.31 ms</text>
+<text x="278" y="227" font-size="15" text-anchor="end" fill="#1a1a1a">Shadewind (previous, d171749)</text>
+<rect x="290" y="208" width="292.6" height="28" rx="4" fill="#9fe1cb"/>
+<text x="590.6" y="227" font-size="15" fill="#1a1a1a">57.48 ms</text>
+<text x="278" y="267" font-size="15" text-anchor="end" fill="#1a1a1a" font-weight="600">Shadewind (this version)</text>
+<rect x="290" y="248" width="254.2" height="28" rx="4" fill="#1baf7a"/>
+<text x="552.2" y="267" font-size="15" fill="#1a1a1a" font-weight="600">49.93 ms</text>
+<text x="32" y="322" font-size="17" font-weight="600" fill="#1a1a1a">Theme switch (light / dark)</text>
+<text x="32" y="342" font-size="13" fill="#6b6b6b">JS thread per switch; the main thread still applies the colours after it</text>
+<text x="278" y="377" font-size="15" text-anchor="end" fill="#1a1a1a">Uniwind 1.12</text>
+<rect x="290" y="358" width="538.9" height="28" rx="4" fill="#2a78d6"/>
+<text x="836.9" y="377" font-size="15" fill="#1a1a1a">105.86 ms</text>
+<text x="278" y="417" font-size="15" text-anchor="end" fill="#1a1a1a" font-weight="600">Shadewind (this version)</text>
+<rect x="290" y="398" width="12.5" height="28" rx="4" fill="#1baf7a"/>
+<text x="310.5" y="417" font-size="15" fill="#1a1a1a" font-weight="600">2.45 ms</text>
+<text x="32" y="488" font-size="12" fill="#6b6b6b">2026-10-19 · iPhone 17 Pro simulator (iOS 26.5) · scripts/bench/measure.py with StyleSheet controls · all builds in one session per scenario.</text>
+<text x="32" y="506" font-size="12" fill="#6b6b6b">One simulator, not a device.</text>
+</svg>
