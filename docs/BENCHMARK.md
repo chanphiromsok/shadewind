@@ -136,6 +136,8 @@ We have not measured other libraries on a device, so we make no claim against th
 
 ## Four numbers per strategy (2026-10-18, earlier build, `example/` app)
 
+> The `example/` app these come from was replaced by the uniwind-benchmarks app on 2026-10-19; it is at commit `bd6638d`.
+
 > **Superseded for the on-screen question.** The "until the new theme is mounted" (10.3 ms) and "+5.7 ms at the next commit" figures
 > below come from a different probe (a React commit in the `example/` app). The screen recordings above show the cells changing about
 > 57 to 62 ms after the first changed frame for `hookAsync`, and the check counted 2002 views here but 2003 in `example-real`. We have not

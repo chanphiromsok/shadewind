@@ -18,6 +18,8 @@ const path = require('node:path');
 
 const PACKAGE_ROOT = fs.realpathSync(__dirname);
 const BABEL_TRANSFORMER = path.join(PACKAGE_ROOT, 'metro-babel-transformer.cjs');
+// the library's own code (source and compiled): an app inside the package folder (this repository's example) is not part of it
+const OWN_CODE = [path.join(PACKAGE_ROOT, 'src'), path.join(PACKAGE_ROOT, 'lib')];
 const UPSTREAM_ENV = 'SHADEWIND_UPSTREAM_BABEL_TRANSFORMER';
 const PREFIX = 'uniwind-internal/';
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'];
@@ -99,7 +101,7 @@ function withShadewind(config, options = {}) {
         // our own files import the real react-native: do not let Uniwind's resolver redirect them back to its barrel
         const origin = context.originModulePath;
 
-        if (origin && isInside(realOrSelf(origin), PACKAGE_ROOT)) {
+        if (origin && OWN_CODE.some((dir) => isInside(realOrSelf(origin), dir))) {
           return context.resolveRequest(context, moduleName, platform);
         }
 

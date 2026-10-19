@@ -164,16 +164,19 @@ medians next to `uniwind` from the same run. For the theme scenario note that `h
 metric), so also run the engine arm with the synchronous strategy (`Shadewind.setTheme(name, 'hook')`, or the example's
 `-strategy hook`) and report both.
 
-## 8. Theme-switch benchmark in `example` (2003 views, every strategy)
+## 8. The uniwind-benchmarks app in `example` (2003 views, render and theme)
+
+`example/` is the uni-stack/uniwind-benchmarks app with Shadewind (see example/README.md):
 
 ```sh
 cd example && npx react-native run-ios --mode Release --simulator "iPhone 17 Pro"
-xcrun simctl launch --terminate-running-process booted uniwindshadow.example -benchmarkScenario theme -strategy hook
-xcrun simctl launch --terminate-running-process booted uniwindshadow.example -benchmarkScenario theme -strategy hookAsync
+xcrun simctl launch --terminate-running-process booted uniwindshadow.example
+xcrun simctl launch --terminate-running-process booted uniwindshadow.example -benchmarkScenario theme
 ```
 
-3 warm launches per strategy (discard the first cold one). Report JS-idle median, `visualMs` (hookAsync), and the
-`treeOK / viewOK / layerOK` line, which must be 2002 / 2002 / 2002.
+Discard the first (cold) launch, then read the on-screen average of three warm launches per scenario. For the published comparison
+with Uniwind and StyleSheet use upstream's `scripts/bench/measure.py` (docs/BENCHMARK.md, "End to end"). The strategy benchmark that
+was here (`-strategy hook / hookAsync`, the `treeOK / viewOK / layerOK` line) went with the previous example; it is at commit `bd6638d`.
 
 ## 9. Android (optional, emulator)
 
