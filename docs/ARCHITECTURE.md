@@ -78,10 +78,10 @@ use because component modules can be evaluated before the native runtime exists)
 - `install.ts` is the only file that reads Uniwind's runtime (`UniwindStore`, `UniwindListener`), lazily and inside `try/catch`. It
   checks the Uniwind minor version (tested: 1.12). When Uniwind is missing or unsupported the adapter reports inactive and every
   component behaves as plain Uniwind.
-- `useShadewindStyle.ts` is Uniwind's `useStyle` plus a **plan** per className: resolve the style in every theme; if a view's styles
-  differ between themes only in colours the engine can paint, hand the view to the engine and stop re-rendering it on a switch;
-  otherwise keep Uniwind's behaviour (breakpoints, data attributes, `active:` states, scoped themes). Decisions are cached per
-  className and context and are visible in the dev diagnostics.
+- `useShadewindStyle.ts` is Uniwind's `useStyle` plus a **plan** per className: resolve the style in every theme; if the themes differ
+  only in `backgroundColor`, `borderColor` and `color`, hand the view to the engine (it is registered, and the adapter does not
+  subscribe it to the theme). Otherwise the plan returns no per-theme styles and the view is not registered (see "Not painted by the
+  engine" below). Decisions are cached per className and context and are visible in the dev diagnostics.
 - `View.tsx`, `Text.tsx`, `Pressable.tsx`, `LightPressable.tsx`, `TouchableOpacity.tsx`, `withUniwind.tsx` are the replacements the
   build swaps in. `native.ts` is the direct path: a plain `View` or `Text` (none of the props React Native's own components rewrite)
   renders the host component directly, skipping their wrapper fibers.
@@ -125,8 +125,14 @@ engine rebuilds its per-theme props from React's.
 **Unmount, hide, freeze.** An unmount takes the entry with it (entries hold weak references). A hidden or frozen screen keeps its
 bindings; the hook themes it in the commit that shows it.
 
-**Not painted by the engine** (falls back to Uniwind's own behaviour, the view re-renders on a switch): classNames that depend on
-breakpoints, orientation, insets, font scale or colour scheme, data attributes, `active:` states on the fast path, scoped themes.
+**Not painted by the engine.** The plan returns no per-theme styles, and the view is not registered, when the className has a scoped
+theme, data attributes, an inline `style` that overlaps a painted key, themes that differ in properties other than the three painted
+ones, a key missing in a theme, or while a pressable view is pressed or focused. Such a view renders with the style of the theme it
+rendered under. While the engine is active the adapter subscribes it only to the dependencies other than the theme (orientation,
+breakpoints, insets, font scale, colour scheme; `nonThemeDeps` in `useShadewindStyle.ts`), so a theme switch alone does not re-render
+it. No test in this repository covers a theme switch for such a view, and [GUIDE.md](GUIDE.md) describes these views as keeping
+Uniwind's behaviour: treat their live theming as not established. When the engine is inactive every component re-renders on a switch
+like Uniwind's own.
 
 ## Invariants
 

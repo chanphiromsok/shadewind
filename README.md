@@ -37,8 +37,8 @@ shadewind; median of three launches)
 
 | | Mount 2003 views | Theme switch |
 |---|---|---|
-| iOS · Uniwind 1.12 | 64.31 ms | 105.86 ms |
-| **iOS · Shadewind** | **49.93 ms** | **2.45 ms** |
+| iOS · Uniwind 1.12 | | 105.86 ms |
+| **iOS · Shadewind** | | **2.45 ms** |
 | Android · `StyleSheet` (numeric colours) | 55.38 ms | |
 | **Android · Shadewind 0.2.0** | **59 to 61 ms** | **0.14 ms** |
 
