@@ -19,6 +19,11 @@ if (Settings.get('realDebug')) {
   (globalThis as { __SHADEWIND_DEBUG__?: boolean }).__SHADEWIND_DEBUG__ = true;
 }
 
+// -engineOff 1: the adapter's components without the engine (no registration), for A/B launches of one build
+if (Settings.get('engineOff')) {
+  (globalThis as { __SHADEWIND_ENGINE_OFF__?: boolean }).__SHADEWIND_ENGINE_OFF__ = true;
+}
+
 // -resolverOff 1: Uniwind's own class resolution only (no class table loaded or built), for A/B launches of one build
 if (Settings.get('resolverOff')) {
   nativeResolver.setEnabled(false);

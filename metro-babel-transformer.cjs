@@ -24,6 +24,13 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const UPSTREAM_ENV = 'SHADEWIND_UPSTREAM_BABEL_TRANSFORMER';
+// withShadewind(config, { precompileClassNames: true }) sets '1' (metro-precompile-plugin.cjs); `prebuildStyleTable: false`
+// with it on sets the second one to '0' (the transformer is then installed for the plugin only)
+const PRECOMPILE_ENV = 'SHADEWIND_PRECOMPILE_CLASSNAMES';
+const PREBUILD_ENV = 'SHADEWIND_PREBUILD_STYLE_TABLE';
+const PRECOMPILE_PLUGIN = path.join(__dirname, 'metro-precompile-plugin.cjs');
+// shadewind's own code (source and compiled) imports the real react-native and is never compiled (see metro.cjs OWN_CODE)
+const OWN_CODE = [path.join(__dirname, 'src'), path.join(__dirname, 'lib')];
 const TESTED_UNIWIND = /^1\.12\./;
 // Uniwind 1.12's CSS module (bundler/adapters/metro/transformer.ts), native platforms
 const CSS_MODULE = /^const \{ Uniwind \} = require\('uniwind'\);Uniwind\.__reinit\(rt => /;
@@ -175,11 +182,41 @@ async function prebuildStyleTable(src, platform, projectRoot) {
   };
 }
 
+// The app's own source files (what Uniwind's resolver rewrites `react-native` for), on a native platform, that may hold a
+// className attribute
+const precompiles = (filename, src, options) => {
+  if (
+    process.env[PRECOMPILE_ENV] !== '1' ||
+    !PLATFORMS.has(options.platform) ||
+    !/\.[jt]sx?$/.test(filename) ||
+    filename.endsWith('.css.js') // Uniwind's CSS module (its stylesheet names every class `className`)
+  ) {
+    return false;
+  }
+
+  const file = path.resolve(options.projectRoot ?? process.cwd(), filename);
+
+  return (
+    !file.split(path.sep).includes('node_modules') &&
+    !OWN_CODE.some((dir) => file.startsWith(dir + path.sep)) &&
+    src.includes('className')
+  );
+};
+
 async function transform(args) {
   const { filename, src, options } = args;
 
+  if (precompiles(filename, src, options)) {
+    return upstream().transform({ ...args, plugins: [...(args.plugins ?? []), require(PRECOMPILE_PLUGIN)] });
+  }
+
   // a cheap test first: every file of the app comes through here
-  if (filename.endsWith('.css.js') && PLATFORMS.has(options.platform) && CSS_MODULE.test(src)) {
+  if (
+    process.env[PREBUILD_ENV] !== '0' &&
+    filename.endsWith('.css.js') &&
+    PLATFORMS.has(options.platform) &&
+    CSS_MODULE.test(src)
+  ) {
     try {
       const result = await prebuildStyleTable(src, options.platform, options.projectRoot);
 
@@ -205,6 +242,9 @@ function getCacheKey() {
   hash.update(fs.readFileSync(__filename));
   hash.update(fs.existsSync(TABLE_MODULE) ? fs.readFileSync(TABLE_MODULE) : '');
   hash.update(process.env[UPSTREAM_ENV] ?? '');
+  // The precompile plugin and whether it (and the prebuilt table) are on: A/B builds must not share cached transforms
+  hash.update(fs.existsSync(PRECOMPILE_PLUGIN) ? fs.readFileSync(PRECOMPILE_PLUGIN) : '');
+  hash.update(`${process.env[PRECOMPILE_ENV] ?? ''}/${process.env[PREBUILD_ENV] ?? ''}`);
 
   const upstreamKey = upstream().getCacheKey ? upstream().getCacheKey() : '';
 

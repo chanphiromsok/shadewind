@@ -1,5 +1,7 @@
 # Shadewind on top of Uniwind: long-term design
 
+> Design for the Uniwind integration; the adapter in `src/uniwind/` is what was built from it. See [ARCHITECTURE.md](../ARCHITECTURE.md).
+
 Status: design, not implemented. Written against Uniwind 1.12.0 (MIT) and React Native 0.86.
 
 ## Goal

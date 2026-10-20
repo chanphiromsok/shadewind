@@ -1,5 +1,7 @@
 # Unistyles 3 review (shadow tree usage)
 
+> Historical review (2026-10-13), read from source, not run.
+
 Source: `jpudysz/react-native-unistyles` (HEAD 3aaf2c1, 2026-10-13), `packages/unistyles/cxx`. Read, not run.
 
 ## What it does

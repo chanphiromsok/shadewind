@@ -5,7 +5,7 @@
 // Supported: #rgb #rgba #rrggbb #rrggbbaa, rgb()/rgba(), hsl()/hsla(), oklch(), `transparent`, a small named set.
 // Both the comma syntax and the space + `/ alpha` syntax are accepted; numbers may be percentages.
 //
-// Policy (must match the build-time pipeline, see docs/ARCHITECTURE.md section 11): channels are clamped to [0, 1] after the
+// Policy (must match the build-time pipeline, see docs/archive/RENDER_PIPELINE_DESIGN.md section 11): channels are clamped to [0, 1] after the
 // colour-space conversion (no gamut mapping), alpha is kept and rounded to 8 bits.
 #include <algorithm>
 #include <cmath>

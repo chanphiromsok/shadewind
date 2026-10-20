@@ -1,5 +1,44 @@
 # Theme-change benchmark: this engine vs Uniwind
 
+## Reference apps with and without `precompileClassNames` (2026-10-20)
+
+The render scenario run in the benchmark repository's own apps, so the baseline is theirs: `apps/stylesheet` and `apps/uniwind` of
+[`uni-stack/uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks) as they are, and two builds of a copy of
+`apps/uniwind` that adds shadewind (the packed package of the `perf/precompile-classnames` branch, `withShadewind` in `metro.config.js`,
+`installUniwind()` in `App.tsx`, `shadewind` and `react-native-nitro-modules` in `package.json`; nothing else changed). The two shadewind
+builds differ only in `precompileClassNames` (7 element call sites were compiled in the second).
+
+Release builds, iPhone 17 Pro simulator (iOS 26), React Native 0.86.3, Uniwind 1.12.0. The app's own statistic: the average of the ten
+re-mounts of the 2003-view list, time until the JS thread is idle. **Three launches per build** (each after reinstalling the app), one
+launch of each build per round; the table is the median of the three launch averages. This is a smaller protocol than the
+six-warm-launch protocol of the sections below and no launch was dropped, so read differences of a few ms as approximate.
+
+| Build | Launch averages | Median | vs StyleSheet |
+|---|---|---|---|
+| StyleSheet (their app) | 37.20, 38.67, 37.09 | 37.2 ms | 1.00x |
+| Shadewind + `precompileClassNames` | 40.70, 42.85, 40.16 | 40.7 ms | 1.09x |
+| Shadewind | 48.85, 47.52, 47.48 | 47.5 ms | 1.28x |
+| Uniwind 1.12 (their app) | 60.30, 60.14, 60.55 | 60.3 ms | 1.62x |
+
+Precompile is about 3 to 4 ms behind `StyleSheet` here, not ahead of it. The simulator reproduces the published figures for their two
+apps (about 37 and 60 ms), which is the reason these apps are the reference for comparing with the website. For orientation only: the
+chart on the Uniwind site lists Uniwind Pro at about 1.2x its `StyleSheet` on a different device; Uniwind Pro was not run here.
+
+**Do not compare `example-real` with the table above.** `example-real`'s own render benchmark (`-mountBench render`, `src/bench/RenderBench.tsx`)
+replays the same scenario, but its `StyleSheet` baseline is about 5 ms slower than the reference app's (42.1 against 37.2 ms) and its plain
+Uniwind about 4 ms faster (56.5 against 60.3), so its gaps are narrower. Inside it, the same session gave `StyleSheet` 42.1, shadewind with
+precompile 39.6, shadewind 46.5 and plain Uniwind 56.5 ms (medians of five launch averages); use it to compare builds with each other,
+not with the site.
+
+On the 30-card feed screen of `example-real` (`-mountBench feed`, median JS-idle of the 30 cards, one launch per build) the adapter was
+36.1 ms and `StyleSheet` 33.5 ms in one launch. With `precompileClassNames` (expression classNames such as `cn(...)` compiled, and the
+per-instance record that drops a superseded binding), three launches gave 30.9, 32.9 and 34.7 ms against 30.4, 34.1 and 33.8 ms for
+`StyleSheet` in the same launches: in line with `StyleSheet`, within about 1 ms either way. The `Pressable`s and the app's wrapper
+components still run the adapter's path. (An earlier build without that record measured 30.1 to 32.1 ms against 32.2 to 34.0 ms; the
+record is a `useRef` per expression-className view and costs about 1 to 2 ms on this screen.)
+
+What is not measured: a physical device, Android, a Debug build, memory beyond a post-run `footprint` of about 165 MB for both builds.
+
 ## End to end, uniwind-benchmarks render and theme (2026-10-19)
 
 The repository's own protocol (`scripts/bench/measure.py`), unchanged: Release builds, iPhone 17 Pro simulator (iOS 26.5), StyleSheet
@@ -77,10 +116,10 @@ What is left for Shadewind, measured with throwaway builds that remove one per-v
 as each other, against the build with the first two changes at 51.31 ms): without the per-view ref and registration 45.42 ms
 (-5.89 ms, -31 MiB), without the layout effect 47.04 ms, without the reducer and the effect 45.39 ms; without all of them (another
 session) 42.14 ms against 54.84 ms. Removing the ref means registering the views at theme-switch time instead of at mount
-(docs/HANDOFF.md); it is not done because a view whose className changes would keep its old binding until the next switch.
+(docs/archive/HANDOFF.md); it is not done because a view whose className changes would keep its old binding until the next switch.
 
 For scale: StyleSheet's own median on the same screen was 37.28 ms (measure.py, 2026-10-18); plain Uniwind 1.12 61.86 ms in the
-owner's run (docs/HANDOFF.md, another protocol). One simulator, not a device.
+owner's run (docs/archive/HANDOFF.md, another protocol). One simulator, not a device.
 
 Correctness of this version: a theme switch, a className change on a bound view after a switch, and `Uniwind.updateCSSVariables` on the
 benchmark screen each end with all 2007 views right (`inspect()`: tree, native props and layer) and nothing stale; the `example-real`
@@ -208,7 +247,7 @@ Reading it:
 
 The example's authors publish about 60.7 ms for plain Uniwind rendering, close to the 61.86 ms measured here. The engine-off build
 exists to measure cost only: with the engine inactive, views do not follow a theme switch (a known gap, see
-[ARCHITECTURE.md](ARCHITECTURE.md), "Mount cost"). To repeat the runs yourself, see
+[RENDER_PIPELINE_DESIGN.md](archive/RENDER_PIPELINE_DESIGN.md), "Mount cost"). To repeat the runs yourself, see
 [DEMO.md](DEMO.md).
 
 Same screen and method, with the strategy as the only difference (both Release, code at `9ee5b93` for `hookAsync`):
@@ -279,7 +318,7 @@ Uniwind behind: `Uniwind.setTheme` still drives the switch, only the engine's st
    ms after a switch on the JavaScript thread).
 6. Time to the screen, the only measure fair to every arm: record the simulator (`xcrun simctl io booted recordVideo out.mp4`) and
    count the frames from one switch to the next change on screen (per-frame brightness with ffmpeg `signalstats`, as in
-   `THEME_TRANSITION_TESTS.md`). A 60 Hz recording resolves 16.7 ms: it tells "same frame or N frames later", not milliseconds.
+   `design/THEME_TRANSITION_TESTS.md`). A 60 Hz recording resolves 16.7 ms: it tells "same frame or N frames later", not milliseconds.
 7. Check correctness once per arm with a Debug build and `shadewind/diagnostics`: every registered view matches the theme after a
    switch.
 
@@ -549,14 +588,14 @@ React Native with no engine. Not comparable with the simulator tables above; com
 | reveal a frozen tab (commit + flush), after a sync / async switch | 11.04 / 9.55 ms | 20.29 / 23.94 ms | 12.40 / 15.35 ms |
 | stale views in a reveal commit | - | 800 | 0 |
 
-The 44eb043 mount numbers grow with the number of re-mounts (see `docs/ARCHITECTURE.md` section 18).
+The 44eb043 mount numbers grow with the number of re-mounts (see `docs/archive/RENDER_PIPELINE_DESIGN.md` section 18).
 
 ### Same harness on React Native 0.88.0 (2026-10-17, one run each, back to back)
 
 The engine builds against 0.88.0 unchanged and passes all 15 tests (`docker build --build-arg RN_VERSION=0.88.0 ...`). React
 Native's own commits are cheaper (unrelated React commit on the 2003-view screen with no engine: 0.30 -> 0.09 ms), the engine's
 costs are about the same (sync switch 5.5 -> 4.8 ms, next React commit 3.8 -> 3.4 ms, reveal of a frozen tab 13.1 -> 12.3 ms), and
-the two Yoga costs described in `docs/ARCHITECTURE.md` section 18 are unchanged in 0.88.0 and in the 0.89 nightly of 2026-10-17
+the two Yoga costs described in `docs/archive/RENDER_PIPELINE_DESIGN.md` section 18 are unchanged in 0.88.0 and in the 0.89 nightly of 2026-10-17
 (`zeroOutLayoutRecursively` still clones hidden subtrees on a layout pass; a clone with new props still loses its Yoga
 configuration). With 4 frozen tabs an unrelated React commit costs about 9 ms with no engine on both versions.
 
@@ -654,7 +693,7 @@ component layer it measured 64.08 ms against 59.01 ms for the tree without it, t
 
 ### Node tagging spike: a `themeClassId` prop reaches the C++ props (2026-10-20, Android, React Native 0.86.2)
 
-The question from docs/ARCHITECTURE.md (spike 1): does a prop on a host view reach C++ without a JS ref? Adding `themeClassId` to
+The question from docs/archive/RENDER_PIPELINE_DESIGN.md (spike 1): does a prop on a host view reach C++ without a JS ref? Adding `themeClassId` to
 `validAttributes` of the `RCTView` and `RCTText` view configs (`ReactNativeViewConfigRegistry.get(String(NativeView))`, after the
 host component modules have loaded) made the prop appear in `node.getProps()->rawProps` of the shadow nodes: 2,100 `View`s rendered
 with it, tagged nodes seen at counts 1, 1,000 and 2,000 in the commit hook's walk. Without that patch the renderer drops it (it builds

@@ -27,6 +27,9 @@ const BABEL_TRANSFORMER = path.join(PACKAGE_ROOT, 'metro-babel-transformer.cjs')
 // the library's own code (source and compiled): an app inside the package folder (this repository's example) is not part of it
 const OWN_CODE = [path.join(PACKAGE_ROOT, 'src'), path.join(PACKAGE_ROOT, 'lib')];
 const UPSTREAM_ENV = 'SHADEWIND_UPSTREAM_BABEL_TRANSFORMER';
+// precompileClassNames (metro-precompile-plugin.cjs, src/uniwind/precompiled.tsx); read by metro-babel-transformer.cjs
+const PRECOMPILE_ENV = 'SHADEWIND_PRECOMPILE_CLASSNAMES';
+const PREBUILD_ENV = 'SHADEWIND_PREBUILD_STYLE_TABLE';
 // cacheColors: the wrapper replaces `@react-native/normalize-colors`; it reaches the real one through this private name
 const COLOR_CACHE = path.join(PACKAGE_ROOT, 'metro-color-cache.cjs');
 const NORMALIZE_COLORS = '@react-native/normalize-colors';
@@ -52,15 +55,24 @@ const realOrSelf = (file) => {
 /**
  * @template {object} C
  * @param {C} config Metro config, already wrapped with withUniwindConfig
- * @param {{ prebuildStyleTable?: boolean, cacheColors?: boolean }} [options]
+ * @param {{ prebuildStyleTable?: boolean, cacheColors?: boolean, precompileClassNames?: boolean }} [options]
  * @returns {C}
  */
 function withShadewind(config, options = {}) {
   const resolver = config.resolver ?? {};
   const transformer = config.transformer ?? {};
   let babelTransformerPath = transformer.babelTransformerPath;
+  const precompile = options.precompileClassNames === true;
 
-  if (options.prebuildStyleTable !== false && babelTransformerPath && realOrSelf(babelTransformerPath) !== BABEL_TRANSFORMER) {
+  // set both ways: a second withShadewind in the same process must not inherit the first one's choice
+  process.env[PRECOMPILE_ENV] = precompile ? '1' : '0';
+  process.env[PREBUILD_ENV] = options.prebuildStyleTable === false ? '0' : '1';
+
+  if (
+    (options.prebuildStyleTable !== false || precompile) &&
+    babelTransformerPath &&
+    realOrSelf(babelTransformerPath) !== BABEL_TRANSFORMER
+  ) {
     // Metro's transform workers are started after the config is loaded and inherit the environment
     process.env[UPSTREAM_ENV] = babelTransformerPath;
     babelTransformerPath = BABEL_TRANSFORMER;

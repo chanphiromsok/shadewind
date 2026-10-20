@@ -36,7 +36,7 @@ recorded in `docs/BENCHMARK.md`.
 
 ## Phase 2: Uniwind integration (adapter on top)
 
-Long-term design (reviewed by Opus; spike A then B before building): `docs/UNIWIND_INTEGRATION.md` (thin versioned seam, engine Uniwind-agnostic, fallbacks, CI matrix, upstream asks).
+Long-term design (reviewed by Opus; spike A then B before building): `docs/design/UNIWIND_INTEGRATION.md` (thin versioned seam, engine Uniwind-agnostic, fallbacks, CI matrix, upstream asks).
 The note below is the original sketch.
 
 
@@ -75,7 +75,7 @@ a full fork of Uniwind is not planned.
 
 ## Reference
 
-- `docs/DESIGN.md`: measurements, profiles, retractions.
+- `docs/design/DESIGN.md`: measurements, profiles, retractions.
 - `docs/BENCHMARK.md`: the comparison table.
 
 ## Android follow-ups
@@ -87,10 +87,10 @@ a full fork of Uniwind is not planned.
 
 ## Status: Uniwind integration spikes
 
-- Spike A done (docs/UNIWIND_INTEGRATION.md): `scopedTheme` resolution is wrong for `light-dark()`; resolving with the runtime
+- Spike A done (docs/design/UNIWIND_INTEGRATION.md): `scopedTheme` resolution is wrong for `light-dark()`; resolving with the runtime
   theme temporarily swapped to B and an unscoped call matches a real switch (0 mismatches).
 - Next: spike B (adapter `View` in `uniwind-benchmarks/apps/uniwind`, test screens for state variants, inline style, ScopedTheme,
   7 themes, className change, updateCSSVariables, mount time).
-- Spike B done (docs/UNIWIND_INTEGRATION.md): adapter View/Text works on Uniwind 1.12.0 on iOS; engine-handled components do not
+- Spike B done (docs/design/UNIWIND_INTEGRATION.md): adapter View/Text works on Uniwind 1.12.0 on iOS; engine-handled components do not
   re-render on a switch and stay correct (updateCSSVariables, className change, ScopedTheme, fallbacks). Open: mount cost, className
   flash, nested Text collision, 7 themes, Android, list recycling, Metro file-path seam (spike C).

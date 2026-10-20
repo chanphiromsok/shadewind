@@ -1,5 +1,7 @@
 # Design notes
 
+> Early design notes. The system as built is in [ARCHITECTURE.md](../ARCHITECTURE.md).
+
 Zero-re-render style updates for React Native (Fabric), written from React Native's own public C++ APIs.
 No dependency on Unistyles.
 

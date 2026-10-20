@@ -8,4 +8,4 @@ const config = withUniwindConfig(mergeConfig(getDefaultConfig(__dirname), {}), {
 
 module.exports = process.env.REAL_PLAIN
   ? config
-  : require('shadewind/metro').withShadewind(config);
+  : require('shadewind/metro').withShadewind(config, { precompileClassNames: process.env.SHADEWIND_PRECOMPILE === '1' });

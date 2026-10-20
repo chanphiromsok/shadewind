@@ -33,10 +33,10 @@ Hooks run before layout (`:393` then `:409`), so a hook can change props and hav
   `MeasurableYogaNode` trait, and then when `fragment.children` is set or `shouldNewRevisionDirtyMeasurement` returns true. The base
   implementation returns `true` (`:322-326`); `ParagraphShadowNode` overrides it to `fragment.props != nullptr`
   (`ParagraphShadowNode.cpp:64-68`). So a Paragraph clone with new props, or with new children, is dirty; one that only gets new state is not. That is the reason `recolorParagraph` in `ThemeHook.hpp` builds the new `ParagraphState`
-  itself and clears the dirty flag: it avoids the layout pass that dominated the 8.6 ms switch (docs/DESIGN.md, deep dive).
+  itself and clears the dirty flag: it avoids the layout pass that dominated the 8.6 ms switch (docs/design/DESIGN.md, deep dive).
 - `updateYogaChildren` sets a node dirty when any child yoga node is dirty (`YogaLayoutableShadowNode.cpp:366-375`), so one dirty Text puts the whole path to the root in the layout pass.
 
-Note on an older claim: `docs/DESIGN.md` says every `MeasurableYogaNode` clone is dirtied unconditionally. Per the source above that
+Note on an older claim: `docs/design/DESIGN.md` says every `MeasurableYogaNode` clone is dirtied unconditionally. Per the source above that
 holds for new props or new children, which covers a colour change, so its conclusion stands but the wording was too broad.
 
 ## Where each piece of this library sits

@@ -18,8 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /shadewind
 
-# only what the harness compiles: the engine headers and the harness itself
-COPY cpp/ThemeHook.hpp cpp/ThemeEngine.hpp cpp/
+# only what the harness compiles: the engine's headers (every cpp/*.hpp: ThemeHook.hpp includes DevTools.hpp and Diagnostics.hpp,
+# the commit worker's tests include CommitWorker.hpp; a list of names went stale each time a header was added) and the harness itself
+COPY cpp/*.hpp cpp/
 COPY cpp/css cpp/css
 COPY cpp/harness cpp/harness
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- `withShadewind(config, { precompileClassNames: true })` (off by default, experimental): a Babel plugin compiles `View` / `Text` elements
+  with a literal or expression `className` (from `react-native` or `shadewind/uniwind`, no spread, `style` or `ref`) into components that
+  resolve the style once per className and render the host element without hooks. Everything else keeps the adapter's path. A mounted
+  compiled view does not re-render on `Uniwind.updateCSSVariables`. See `docs/PRECOMPILE.md`. Checked by `tools/precompile-check.cjs` and, on a
+  device screen, by `example-real/scripts/edge-cases.py` (pixel comparison with plain Uniwind and the adapter).
+- `ShadewindEngine.register` takes a `force` argument: register a view again with the same styles (a view React re-rendered under another
+  theme, so the engine rebuilds its per-theme props from React's).
+- `example-real`: `-mountBench render` (the uniwind-benchmarks render scenario), `-mountBench feed`, `-engineOff 1`, and
+  `SHADEWIND_PRECOMPILE=1` in its Metro config.
+- Docs: a current `docs/ARCHITECTURE.md`, a docs index, `docs/PRECOMPILE.md`; design notes moved to `docs/design/` and dated memos and the
+  own-compiler design to `docs/archive/`. The README and `docs/BENCHMARK.md` carry the 2026-10-20 mount numbers measured in the benchmark
+  repository's own apps.
+
 ## 0.2.1
 
 - `capabilities.asyncCommit` is `true` on Android too (it was `false` there while `hookAsync` committed on the JS thread). 0.2.0 shipped
@@ -37,7 +52,7 @@ First public release. Experimental: New Architecture only, React Native 0.86.x, 
 - Uniwind adapter (`shadewind/uniwind`, `shadewind/metro`), verified against Uniwind 1.12.x.
 - Fixed: a screen revealed after `freezeOnBlur` could keep the previous theme when the theme changed more than once while it was
   frozen (views re-registered with a render-theme claim that the tree no longer matched). Verified on the iOS simulator through the
-  Uniwind adapter, with bottom tabs and a native stack; see `docs/DESIGN.md`. The public `useThemed` / `ThemedView` path got the same
+  Uniwind adapter, with bottom tabs and a native stack; see `docs/design/DESIGN.md`. The public `useThemed` / `ThemedView` path got the same
   change but has not been verified on a device.
 - Fixed: with the Uniwind adapter active, `setTheme` (with or without a transition) switched only the engine; Uniwind stayed on the
   old theme (half-switched screen) and the next `Uniwind.setTheme` to that old theme was ignored. `setTheme` now goes through
@@ -48,7 +63,7 @@ First public release. Experimental: New Architecture only, React Native 0.86.x, 
   and not reproduced: a switch from outside a press handler (system appearance, effects, timers) lets React render in a later task
   than the engine's own commit. Harness-tested; not verified on a device.
 - Removed: `shadewind/uniwind/aot` (an undocumented ahead-of-time `className` path). It measured no faster than the adapter's
-  components (docs/ARCHITECTURE.md section 17c) and was a second code path to keep right.
+  components (docs/archive/RENDER_PIPELINE_DESIGN.md section 17c) and was a second code path to keep right.
 - The adapter's components pass the resolved `className` style as a single object when there is no `style` prop, instead of a
   new two-element array per render.
 - `shadewind/diagnostics` (development only): `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })` logs every view

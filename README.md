@@ -9,8 +9,10 @@ React Native 0.86 · New Architecture (Fabric) · iOS & Android · MIT · experi
   <a href="docs/BENCHMARK.md">Benchmark</a> ·
   <a href="docs/DEMO.md">Run the demo</a> ·
   <a href="docs/KNOWN_LIMITS.md">Known limits</a> ·
-  <a href="docs/OVERVIEW.md">Architecture</a> ·
-  <a href="docs/API.md">API</a>
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/PRECOMPILE.md">Precompile</a> ·
+  <a href="docs/API.md">API</a> ·
+  <a href="docs/README.md">All docs</a>
 </p>
 
 </div>
@@ -18,19 +20,32 @@ React Native 0.86 · New Architecture (Fabric) · iOS & Android · MIT · experi
 ## 📊 Benchmark
 
 The [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks) screen (thanks to the Uniwind team): 2003 views, one scenario
-re-mounting them and one switching light and dark, ten runs each. Release builds, median of twelve warm launches, time until the JS thread is idle.
+re-mounting them and one switching light and dark, ten runs each, time until the JS thread is idle. Release builds. Neither platform
+was measured on a device.
+
+**Mount** (iOS, iPhone 17 Pro simulator, 2026-10-20: the benchmark repository's own apps, plus a copy of its Uniwind app with
+shadewind; median of three launches)
+
+| | Mount 2003 views | vs `StyleSheet` |
+|---|---|---|
+| `StyleSheet` (no styling library) | 37.2 ms | 1.00x |
+| Uniwind 1.12 | 60.3 ms | 1.62x |
+| **Shadewind** | **47.5 ms** | 1.28x |
+| **Shadewind + [`precompileClassNames`](docs/PRECOMPILE.md)** (experimental, opt-in) | **40.7 ms** | 1.09x |
+
+**Theme switch and Android** (2026-10-19 protocol: six warm launches, two sweeps, median of twelve; Android not re-measured since)
 
 | | Mount 2003 views | Theme switch |
 |---|---|---|
-| iOS · `StyleSheet` (no styling library) | 38.94 ms | |
-| iOS · Uniwind 1.12 | 64.31 ms | 105.86 ms |
-| **iOS · Shadewind** | **49.93 ms** | **2.45 ms** |
+| iOS · Uniwind 1.12 | | 105.86 ms |
+| **iOS · Shadewind** | | **2.45 ms** |
 | Android · `StyleSheet` (numeric colours) | 55.38 ms | |
 | **Android · Shadewind 0.2.0** | **59 to 61 ms** | **0.14 ms** |
 
 The theme column is JS-thread time only; the colours reach the screen about 47 ms (Android) to 57 ms (iOS) after the call, because the
-main thread's mount is React Native's own work. iOS: iPhone 17 Pro simulator; Android: Pixel_8_Pro emulator; neither is a device.
-Spreads, the method and what did not help: [docs/BENCHMARK.md](docs/BENCHMARK.md).
+main thread's mount is React Native's own work. iOS: iPhone 17 Pro simulator; Android: Pixel_8_Pro emulator. Absolute milliseconds move
+between sessions with the host; compare rows from one table. Spreads, both protocols, the method and what did not help:
+[docs/BENCHMARK.md](docs/BENCHMARK.md).
 
 > 💚 **A note from the author.** Shadewind is vibe-coded with Claude Code by a dev who finds joy in programming. Take the code and numbers with a grain of salt, and kindly roast me where I’m wrong. 🤝
 
@@ -43,6 +58,8 @@ Spreads, the method and what did not help: [docs/BENCHMARK.md](docs/BENCHMARK.md
   the JS thread stays free.
 - 🎨 **Works with your Uniwind `className`s.** They stay exactly as they are. The setup is two small changes (below).
 - 🌗 **Optional animated switch.** `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })` cross-fades; instant by default.
+- 🧩 **Optional build step.** `withShadewind(config, { precompileClassNames: true })` compiles literal and expression `className`s on
+  `View` and `Text` into hookless components, which lowers mount cost ([experimental](docs/PRECOMPILE.md)).
 - 🛠️ **See what the engine does.** A dev-only diagnostics log shows every view it binds and every commit it themes.
 - 🧪 **Tested at the native level.** A harness runs React Native's real C++ renderer, so the commit logic is checked without a device.
 

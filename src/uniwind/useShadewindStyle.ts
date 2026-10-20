@@ -45,7 +45,7 @@ export const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 
 // UniwindStore.getStyles(..., { scopedTheme }) is wrong for light-dark() (spike A): make `theme` the runtime theme for the call.
-const withTheme = <T>(theme: string, fn: () => T): T => {
+export const withTheme = <T>(theme: string, fn: () => T): T => {
   const runtime = getInternals()!.UniwindStore.runtime;
   const previous = runtime.currentThemeName;
 

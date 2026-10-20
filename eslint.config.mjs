@@ -46,6 +46,7 @@ export default defineConfig([
     },
   },
   {
-    ignores: ['node_modules/', 'lib/', 'example-real/', 'example/uniwind-types.d.ts'],
+    // spikes/ are throwaway experiments and cpp/harness/ holds the native harness (its JS helper included); neither ships in the package
+    ignores: ['node_modules/', 'lib/', 'example-real/', 'example/uniwind-types.d.ts', 'spikes/', 'cpp/harness/', '.claude/'],
   },
 ]);

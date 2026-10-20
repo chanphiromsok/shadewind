@@ -46,6 +46,7 @@
     "metro.cjs",
     "metro-babel-transformer.cjs",
     "metro-color-cache.cjs",
+    "metro-precompile-plugin.cjs",
     "metro.d.ts",
     "bin",
     "nitro.json",

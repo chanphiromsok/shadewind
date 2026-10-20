@@ -1,5 +1,7 @@
 # Port to a real app: tovtam (2026-10-14)
 
+> Historical port report (2026-10-14), Debug build. Current status: [KNOWN_LIMITS.md](../KNOWN_LIMITS.md).
+
 App: `~/Desktop/tovtam` (Expo, RN 0.86.3, Uniwind 1.12.0, React Compiler, Sentry, hot-updater). Worked on a copy-on-write copy in the
 scratchpad; the original was not touched. iOS simulator (iPhone 17 Pro), **Debug** build (dev mode renders are ~3x slower).
 

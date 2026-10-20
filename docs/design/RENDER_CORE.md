@@ -1,5 +1,7 @@
 # Render core decision memo (Opus research, 2026-10-14)
 
+> Decision memo (2026-10-14).
+
 Markers: [V] verified by reading a file or URL, [I] inferred. Versions: RN 0.86.2 (repo) / 0.86.3 (tovtam), Reanimated 4.6.0,
 Nitro 0.37.1.
 
