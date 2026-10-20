@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - `withShadewind(config, { precompileClassNames: true })` (off by default, experimental): a Babel plugin compiles `View` / `Text` elements
   with a literal or expression `className` (from `react-native` or `shadewind/uniwind`, no spread, `style` or `ref`) into components that
