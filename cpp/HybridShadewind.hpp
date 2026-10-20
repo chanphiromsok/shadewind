@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommitWorker.hpp"
 #include "DevTools.hpp"
 #include "HybridShadewindSpec.hpp"
 #include "ThemeEngine.hpp"
@@ -51,6 +52,7 @@ private:
     std::weak_ptr<const ContextContainer> registeredContainer; // identifies the UIManager the hook is registered with
     std::weak_ptr<const ContextContainer> transitionContainer; // the UIManager the mount hook is registered with (on first use)
     std::atomic<bool> prewarmScheduled{false};
+    CoalescedCommit commit; // Android's hookAsync: the commits waiting for the worker thread (CommitWorker.hpp)
     std::vector<ThemeHook::Registration> registrations; // registerMany's batch, kept for its capacity (JS thread only)
   };
 
