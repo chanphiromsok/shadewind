@@ -7,6 +7,11 @@ const NView = require('react-native/Libraries/Components/View/ViewNativeComponen
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const NText = require('react-native/Libraries/Text/TextNativeComponent').NativeText as React.ComponentType<any>;
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RNView = require('react-native/Libraries/Components/View/View').default as React.ComponentType<any>;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RNText = require('react-native/Libraries/Text/Text').default as React.ComponentType<any>;
+
 import { makePosts } from '../data/posts';
 
 const posts = makePosts(30);
@@ -36,47 +41,51 @@ const s = StyleSheet.create({
   sep: { width: StyleSheet.hairlineWidth, backgroundColor: '#eee' },
 });
 
-export function FeedSampleStatic({ onLayout }: { onLayout: () => void }) {
+export function FeedSampleStatic({ onLayout, rn = false }: { onLayout: () => void; rn?: boolean }) {
+  // rn: React Native's own View / Text (the StyleSheet baseline of an ordinary app), else the host components
+  const V = rn ? RNView : NView;
+  const T = rn ? RNText : NText;
+
   return (
-    <NView onLayout={onLayout} style={s.root}>
+    <V onLayout={onLayout} style={s.root}>
       {posts.map((post) => (
-        <NView key={post.id} style={s.card}>
-          <NView style={s.head}>
-            <NView style={[s.avatar, { borderColor: `hsl(${post.hue}, 60%, 55%)` }]}>
-              <NText style={s.avatarText}>{post.author.slice(0, 1)}</NText>
-            </NView>
-            <NView style={s.meta}>
-              <NText style={s.author}>{post.author}</NText>
-              <NText style={s.place}>
+        <V key={post.id} style={s.card}>
+          <V style={s.head}>
+            <V style={[s.avatar, { borderColor: `hsl(${post.hue}, 60%, 55%)` }]}>
+              <T style={s.avatarText}>{post.author.slice(0, 1)}</T>
+            </V>
+            <V style={s.meta}>
+              <T style={s.author}>{post.author}</T>
+              <T style={s.place}>
                 {post.place} • {post.distance}
-              </NText>
-            </NView>
-            <NView style={s.badge}>
-              <NText style={s.badgeText}>{post.tag}</NText>
-            </NView>
-          </NView>
-          <NView style={s.body}>
-            <NText style={s.title}>{post.title}</NText>
-            <NText style={s.text}>{post.body}</NText>
-          </NView>
-          <NView style={s.photos}>
+              </T>
+            </V>
+            <V style={s.badge}>
+              <T style={s.badgeText}>{post.tag}</T>
+            </V>
+          </V>
+          <V style={s.body}>
+            <T style={s.title}>{post.title}</T>
+            <T style={s.text}>{post.body}</T>
+          </V>
+          <V style={s.photos}>
             {Array.from({ length: post.photos }, (_, i) => (
-              <NView key={i} style={[s.photo, { backgroundColor: i % 2 === 0 ? '#e6f7ec' : '#e0f2fb' }]} />
+              <V key={i} style={[s.photo, { backgroundColor: i % 2 === 0 ? '#e6f7ec' : '#e0f2fb' }]} />
             ))}
-          </NView>
-          <NView style={s.divider} />
-          <NView style={s.bar}>
-            <NView style={s.action}>
-              <NText style={s.actionText}>♥</NText>
-              <NText style={s.actionText}>{post.likes}</NText>
-            </NView>
-            <NView style={s.sep} />
-            <NView style={s.action}>
-              <NText style={s.actionText}>Share</NText>
-            </NView>
-          </NView>
-        </NView>
+          </V>
+          <V style={s.divider} />
+          <V style={s.bar}>
+            <V style={s.action}>
+              <T style={s.actionText}>♥</T>
+              <T style={s.actionText}>{post.likes}</T>
+            </V>
+            <V style={s.sep} />
+            <V style={s.action}>
+              <T style={s.actionText}>Share</T>
+            </V>
+          </V>
+        </V>
       ))}
-    </NView>
+    </V>
   );
 }

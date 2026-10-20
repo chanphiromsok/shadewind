@@ -1,4 +1,6 @@
 import './global.css';
+import { MountBench } from './src/bench/MountBench';
+import { RenderBench } from './src/bench/RenderBench';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, Settings, Text, View } from 'react-native';
 import { ShadewindEngine } from 'shadewind/internal';
@@ -115,6 +117,14 @@ function Probe() {
 }
 
 export default function App() {
+  if (Settings.get('mountBench') === 'render') {
+    return <RenderBench />;
+  }
+
+  if (Settings.get('mountBench')) {
+    return <MountBench />;
+  }
+
   // `-theirBench theme`: the uniwind-benchmarks theme scenario with className, instead of the app (src/bench/TheirBench.tsx)
   if (Settings.get('theirBench')) {
     return <TheirBench />;
