@@ -130,8 +130,8 @@ theme, data attributes, an inline `style` that overlaps a painted key, themes th
 ones, a key missing in a theme, or while a pressable view is pressed or focused. Such a view renders with the style of the theme it
 rendered under. While the engine is active the adapter subscribes it only to the dependencies other than the theme (orientation,
 breakpoints, insets, font scale, colour scheme; `nonThemeDeps` in `useShadewindStyle.ts`), so a theme switch alone does not re-render
-it. No test in this repository covers a theme switch for such a view, and [GUIDE.md](GUIDE.md) describes these views as keeping
-Uniwind's behaviour: treat their live theming as not established. When the engine is inactive every component re-renders on a switch
+it. A pixel comparison against plain Uniwind (`example-real/scripts/edge-cases.py`) shows it: a className such as `bg-card dark:opacity-40` keeps the
+style of the theme it rendered under after a switch, until something re-renders it. When the engine is inactive every component re-renders on a switch
 like Uniwind's own.
 
 ## Invariants

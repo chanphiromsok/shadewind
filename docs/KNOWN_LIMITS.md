@@ -33,7 +33,11 @@ See [PRECOMPILE.md](PRECOMPILE.md) for the mechanism.
 ## What the fast path covers
 
 - Up to 6 themes, and every theme must define every key a view registers.
-- No state variants (such as `active:`) and no scoped themes on the fast path; those views keep Uniwind's own behaviour.
+- No state variants (such as `active:`) and no scoped themes on the fast path; those views are not registered.
+- A className whose themes differ in a property other than `backgroundColor`, `borderColor` or `color` (for example `dark:opacity-40`) is
+  not repainted by a theme switch: the view keeps the style of the theme it rendered under until something re-renders it. Found by
+  comparing builds pixel by pixel (`example-real/scripts/edge-cases.py`); it is the same in the adapter with and without
+  `precompileClassNames`, and plain Uniwind does not have it.
 
 ## How well it is tested
 

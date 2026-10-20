@@ -24,7 +24,7 @@
 //   inactive, a className with data attributes or a dependency other than the theme and variables (breakpoints, orientation, rtl,
 //   insets, font scale, color scheme), a Text whose resolved style needs Text.js (line clamp, userSelect, verticalAlign), a Text with
 //   non-primitive children, a view inside a Text, a scoped theme or scoped variables.
-import { use } from 'react';
+import { use, useRef } from 'react';
 import { Platform } from 'react-native';
 import { jsx } from 'react/jsx-runtime';
 import { UniwindContext } from 'uniwind-internal/core/context';
@@ -45,6 +45,7 @@ import { View } from './View';
 // read once at module load (Metro's inline requires, see useShadewindStyle.ts)
 const M = {
   use,
+  useRef,
   jsx,
   UniwindContext,
   TextAncestorContext,
@@ -239,17 +240,26 @@ const engineRefs = (themed: ThemedStyles, themes: string[]) => {
 
       attachedWith.set(node, { theme, themed });
 
-      // a view that was bound with another className's styles (an expression className changed): its props are this render's, as
-      // with a first attach
-      const registered =
-        previous === undefined || previous.themed !== themed
-          ? engine().register(node, themed, theme)
-          : engine().register(
-              node,
-              themed,
-              undefined,
-              previous.theme !== theme
-            );
+      // - first attach of the view: React's props are this render's, of `theme` (the adapter's renderThemeFor rule).
+      // - the same styles again: a re-attach (a reveal, no render theme), or a re-render under another theme (forced).
+      // - other styles (an expression className changed on a mounted view): the old registration is dropped and the view is registered
+      //   as a new one, like the adapter's superseded holder (a bare re-registration left the previous className's colour on the view
+      //   in the pixel test, scripts/edge-cases.py). No render theme: the engine applies the new styles itself.
+      let registered: boolean;
+
+      if (previous === undefined) {
+        registered = engine().register(node, themed, theme);
+      } else if (previous.themed === themed) {
+        registered = engine().register(
+          node,
+          themed,
+          undefined,
+          previous.theme !== theme
+        );
+      } else {
+        engine().unregister(node);
+        registered = engine().register(node, themed, undefined);
+      }
 
       if (registered) {
         boundNodes.add(node);
@@ -264,6 +274,45 @@ const engineRefs = (themed: ThemedStyles, themes: string[]) => {
 
 type Props = Record<string, unknown> & { children?: unknown };
 
+// A view whose className is an expression can be bound with one className's styles and, after a render, need another's. The old
+// binding must be dropped BEFORE the shadow tree of that React commit is built (the commit hook would paint the old styles over the
+// props React just rendered): React detaches the old ref in its mutation phase, before that commit, so the detach is where it is
+// dropped. Only the render knows whether the view moved on, so every such view has an instance record the render writes (as the
+// adapter's holder, useEngineRef): `current` is the wrapper of the newest render, and a wrapper detached while it is no longer
+// `current` unbinds its view. A plain hide or unmount (still `current`) keeps the binding.
+type Wrapper = {
+  fn: (node: unknown) => void;
+  base: (node: unknown) => void;
+  node: object | null;
+};
+type Instance = { current: Wrapper | null };
+
+const wrapperFor = (
+  instance: Instance,
+  base: (node: unknown) => void
+): Wrapper => {
+  const wrapper: Wrapper = {
+    base,
+    node: null,
+    fn: (node) => {
+      if (typeof node === 'object' && node !== null) {
+        wrapper.node = node;
+        base(node);
+
+        return;
+      }
+
+      if (instance.current !== wrapper && wrapper.node !== null) {
+        unbind(wrapper.node);
+      }
+
+      wrapper.node = null;
+    },
+  };
+
+  return wrapper;
+};
+
 // `fixed`: the className literal the plugin saw; null for `className={expression}`, read from the props of each render (one
 // resolution per distinct string, kept for the life of the app: the classNames of an app are a small set)
 const make = (fixed: string | null, kind: Kind) => {
@@ -275,6 +324,10 @@ const make = (fixed: string | null, kind: Kind) => {
     'use no memo';
 
     const adapter = kind === 'view' ? M.View : M.Text;
+    // one record per view with an expression className (`fixed` never changes for a component type, so the hook order is stable)
+    const instance: Instance | null =
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      fixed === null ? M.useRef<Wrapper | null>(null) : null;
     const context = M.use(M.UniwindContext);
     const inText = M.use(M.TextAncestorContext);
     let className = fixed;
@@ -300,17 +353,20 @@ const make = (fixed: string | null, kind: Kind) => {
 
     // `className={cond ? 'x' : undefined}`: no className now, but the same host element as with one, so the subtree is not remounted
     // when the expression toggles. A binding the view had is dropped (`unbind`).
+    if (instance !== null && (className === null || hostBlocked)) {
+      instance.current = null;
+    }
+
     if (className === null) {
       if (hostBlocked) {
         return M.jsx(adapter as any, allProps);
       }
 
       return kind === 'view'
-        ? M.jsx(M.NativeView, { ...props, ref: unbind })
+        ? M.jsx(M.NativeView, props)
         : M.jsx(M.NativeText, {
             ...props,
             style: M.nativeTextStyle(undefined),
-            ref: unbind,
             accessible: M.accessible,
             allowFontScaling: true,
             ellipsizeMode: props.ellipsizeMode ?? 'tail',
@@ -331,24 +387,39 @@ const make = (fixed: string | null, kind: Kind) => {
 
     const r = entry.resolved;
 
-    if (r === null || r.mode === SLOW || hostBlocked) {
+    const theme = getInternals()?.UniwindStore.runtime.currentThemeName;
+    const style =
+      r === null || theme === undefined ? undefined : r.byTheme[theme];
+
+    if (r === null || r.mode === SLOW || hostBlocked || style === undefined) {
+      if (instance !== null) {
+        instance.current = null;
+      }
+
       return M.jsx(adapter as any, { ...props, className });
     }
 
-    const theme = getInternals()!.UniwindStore.runtime.currentThemeName;
-    const style = r.byTheme[theme];
+    let ref: ((node: unknown) => void) | undefined;
 
-    if (style === undefined) {
-      return M.jsx(adapter as any, { ...props, className });
+    if (instance !== null) {
+      const base = r.refs ? r.refs[theme!] : undefined;
+
+      if (base) {
+        let wrapper = instance.current;
+
+        if (wrapper === null || wrapper.base !== base) {
+          wrapper = wrapperFor(instance, base);
+          instance.current = wrapper;
+        }
+
+        ref = wrapper.fn;
+      } else {
+        // not engine-bound now: a wrapper from an earlier render is no longer current and unbinds its view when React detaches it
+        instance.current = null;
+      }
+    } else {
+      ref = r.refs ? r.refs[theme!] : entry.wasBound ? unbind : undefined;
     }
-
-    // an expression className: this view may have been bound with another className's resolution (the ref is called with null for
-    // the old one, which keeps the binding), so every non-engine resolution unbinds
-    const ref = r.refs
-      ? r.refs[theme]
-      : fixed === null || entry.wasBound
-        ? unbind
-        : undefined;
 
     if (kind === 'view') {
       return M.jsx(

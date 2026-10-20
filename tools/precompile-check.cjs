@@ -389,7 +389,10 @@ const runtime = async () => {
   };
 
   stub('react-native', rn);
-  stub('react', { use, createContext, useLayoutEffect() {}, useReducer() {}, useRef() {} });
+  // useRef: the record of the view being rendered; a test that renders one view several times keeps `instance` (see `view()` below)
+  let instance = { current: null };
+  const newInstance = () => (instance = { current: null });
+  stub('react', { use, createContext, useLayoutEffect() {}, useReducer() {}, useRef: () => instance });
   stub('react/jsx-runtime', { jsx: (type, props) => ({ type, props }) });
   stub('react-native/Libraries/Components/View/ViewNativeComponent', { default: 'RCTView' });
   stub('react-native/Libraries/Text/TextNativeComponent', { NativeText: 'RCTText' });
@@ -502,41 +505,71 @@ const runtime = async () => {
     assert.strictEqual(DynText({ className: undefined, onPress: () => {} }).type, 'AdapterText');
   });
 
-  check('runtime: an expression className that changes on a bound view: the old binding is dropped, a new one is made', () => {
+  check('runtime: an expression className that changes on a bound view: the old binding is dropped when React detaches the old ref, before the commit', () => {
     const node = {};
     const engineA = BENCH_VIEW;
     const engineB = 'bg-bench-primary';
-    const refOf = (className) => DynView({ className }).props.ref;
 
+    // one simulated view: render, then let React call the old ref with null (mutation phase) and the new ref with the node (layout phase)
+    const swap = (from, to) => {
+      const before = DynView({ className: from }).props.ref;
+      const after = DynView({ className: to }).props.ref;
+
+      return { before, after };
+    };
+
+    newInstance();
     registered.length = 0;
     unregistered.length = 0;
-    refOf(engineA)(node);
+
+    const first = DynView({ className: engineA }).props.ref;
+
+    first(node);
     assert.strictEqual(registered.length, 1);
 
-    // ENGINE -> STATIC: React calls the old ref with null (kept), then the new ref with the node
-    refOf(engineA)(null);
+    // ENGINE -> STATIC
+    const toStatic = DynView({ className: 'p-3 flex-row' }).props.ref;
 
-    const toStatic = refOf('p-3 flex-row');
+    assert.strictEqual(toStatic, undefined, 'a static className carries no ref');
+    first(null); // React detaches the old ref
+    assert.deepStrictEqual(unregistered, [node], 'unregistered at the detach');
 
-    assert.ok(toStatic, 'a static className on an expression view carries the unbind ref');
-    toStatic(node);
-    assert.deepStrictEqual(unregistered, [node], 'unregistered');
-
-    // and an empty value drops a binding too
+    // empty value -> no ref either; a view bound again and then emptied drops its binding
+    newInstance();
     registered.length = 0;
-    refOf(engineA)(node);
     unregistered.length = 0;
-    DynView({ className: undefined }).props.ref(node);
+
+    const bound = DynView({ className: engineA }).props.ref;
+
+    bound(node);
+    assert.strictEqual(DynView({ className: undefined }).props.ref, undefined);
+    bound(null);
     assert.deepStrictEqual(unregistered, [node], 'unregistered by the empty value');
 
-    // ENGINE A -> ENGINE B: registered again with B's styles and the render theme (as a first attach)
+    // ENGINE A -> ENGINE B: A's ref detaches (unregister), B's ref attaches as a first attach with the render theme
+    newInstance();
     registered.length = 0;
-    refOf(engineA)(node);
-    refOf(engineB)(node);
+    unregistered.length = 0;
+
+    const a = DynView({ className: engineA }).props.ref;
+
+    a(node);
+
+    const b = DynView({ className: engineB }).props.ref;
+
+    assert.notStrictEqual(a, b);
+    a(null);
+    assert.deepStrictEqual(unregistered, [node], 'the old binding is dropped before the new one');
+    b(node);
     assert.strictEqual(registered.length, 2);
     assert.notStrictEqual(registered[0].themed, registered[1].themed);
-    assert.strictEqual(registered[1].renderTheme, 'light');
-    assert.strictEqual(registered[1].force, false);
+    assert.strictEqual(registered[1].renderTheme, 'light', 'a first attach: React rendered this theme');
+
+    // a hide or an unmount (the ref is still the newest) keeps the binding
+    unregistered.length = 0;
+    b(null);
+    assert.deepStrictEqual(unregistered, [], 'a plain detach keeps the binding');
+    void swap;
   });
 
   check('runtime: benchmark View -> host View, the adapter\'s style object, bound to the engine', () => {

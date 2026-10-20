@@ -57,7 +57,9 @@ Nothing in `node_modules` is patched and your `className` code does not change. 
 </details>
 
 Inside the four components, views the engine cannot take (state variants such as `active:`, scoped themes, inline colour
-overrides, themes that differ in other properties) keep Uniwind's own behaviour too. More than 6 themes, or an unsupported
+overrides, themes that differ in other properties) are not registered. A className whose themes differ in a property other than
+background, border or text colour (for example `dark:opacity-40`) is not repainted by a theme switch alone: the view keeps the style of the
+theme it rendered under until something else re-renders it (`example-real/scripts/edge-cases.py` shows it). More than 6 themes, or an unsupported
 Uniwind version, turns the engine off and leaves plain Uniwind.
 
 Uniwind's class resolution (what runs when its style cache misses) also goes native, from a class table `withShadewind` builds

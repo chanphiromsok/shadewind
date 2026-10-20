@@ -68,6 +68,12 @@ adapter's own plan (`cachedPlan`) whether the engine can paint it. The result is
 
 A value that toggles to nothing (`undefined`, `false`, `''`) keeps the same host element, so the subtree is not remounted.
 
+A view whose `className` is an expression can be bound with one className's styles and need another's after a render. React detaches the
+old ref before it builds the shadow tree of that commit, and the engine's commit hook would paint the old styles over the props React
+just rendered, so such a view carries a small per-instance record (`useRef`, the one hook of that path): the render marks the newest
+ref as current, and a ref that React detaches while it is no longer current drops the view's registration at that moment. A plain hide
+or unmount keeps it. Views with a literal `className` never change className and have no such record.
+
 ## What differs from the adapter's components
 
 - **`Uniwind.updateCSSVariables`** does not re-render mounted compiled views. Views rendered after the call get the new values; mounted
@@ -94,6 +100,12 @@ grep -c '\.precompiled\.\(view\|text\)(' /tmp/on.js   # 0 means nothing was rewr
 In a development build with diagnostics on, `decisions` records the mode chosen for each className (`precompiled view: <className>`).
 
 ## Tests
+
+`example-real/scripts/edge-cases.py` compares builds pixel by pixel on a screen of 28 cases (`-edgeCases 1`, `src/bench/EdgeCases.tsx`:
+themed and static colours, classNames that change with state, a className that is `undefined` in some phases, a keyed list that
+reorders, mount, hide and reveal, nested `Text`, scoped themes, breakpoints, `style` and spread props) while it steps through theme
+switches and className changes. It runs plain Uniwind, the adapter and the precompiled build and compares every cell in every phase.
+It found the className-change bug described above.
 
 `node tools/precompile-check.cjs <app dir>` checks the plugin (what it rewrites and what it leaves alone, through Metro's transformer)
 and the runtime (the mode per className, the engine registrations, element type stability, unbinding) against Uniwind's real store.

@@ -1,4 +1,5 @@
 import './global.css';
+import { EdgeCases } from './src/bench/EdgeCases';
 import { MountBench } from './src/bench/MountBench';
 import { RenderBench } from './src/bench/RenderBench';
 import { useEffect, useRef, useState } from 'react';
@@ -117,6 +118,10 @@ function Probe() {
 }
 
 export default function App() {
+  if (Settings.get('edgeCases')) {
+    return <EdgeCases />;
+  }
+
   if (Settings.get('mountBench') === 'render') {
     return <RenderBench />;
   }
