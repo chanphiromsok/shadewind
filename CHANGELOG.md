@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 (unreleased)
+## 0.2.1
 
 - `capabilities.asyncCommit` is `true` on Android too (it was `false` there while `hookAsync` committed on the JS thread). 0.2.0 shipped
   the worker thread but still reported `false`.
