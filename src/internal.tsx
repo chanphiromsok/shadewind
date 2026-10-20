@@ -345,11 +345,12 @@ const registerNative = (
   ref: unknown,
   native: Record<string, Record<string, unknown>>,
   renderTheme: string | undefined,
-  label: string | undefined
+  label: string | undefined,
+  force = false
 ): boolean => {
   const key = typeof ref === 'object' && ref !== null ? ref : null;
 
-  if (key !== null && registeredWith.get(key) === native) {
+  if (!force && key !== null && registeredWith.get(key) === native) {
     return true;
   }
 
@@ -434,9 +435,15 @@ export const ShadewindEngine = {
   /**
    * Binds a mounted view (its ref) to per-theme styles. `renderTheme`: the theme its props were rendered with, known only on the
    * view's first attach. Registrations are sent to native after the commit, all at once. Returns false when the ref is not a
-   * Fabric host view.
+   * Fabric host view. `force`: register again even when the view is registered with these styles already (React gave it new
+   * props the engine should rebuild its cached per-theme props from; native replaces the entry and prewarms it).
    */
-  register(ref: unknown, styles: ThemedStyles, renderTheme?: string) {
+  register(
+    ref: unknown,
+    styles: ThemedStyles,
+    renderTheme?: string,
+    force = false
+  ) {
     // the same `styles` object is registered by every view of one className: convert it once
     let native = nativeByStyles.get(styles);
 
@@ -450,7 +457,13 @@ export const ShadewindEngine = {
       nativeByStyles.set(styles, native);
     }
 
-    return registerNative(ref, native, renderTheme, styleLabels.get(styles));
+    return registerNative(
+      ref,
+      native,
+      renderTheme,
+      styleLabels.get(styles),
+      force
+    );
   },
   /** Registers with props already converted by toNativeProps (used by the public useThemed). */
   registerRaw(

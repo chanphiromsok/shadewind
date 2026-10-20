@@ -26,6 +26,11 @@ declare module 'uniwind-internal/core/listener' {
 
 declare module 'uniwind-internal/core/context' {
   export const useUniwindContext: () => { scopedTheme: string | null };
+  export const UniwindContext: import('react').Context<{
+    scopedTheme: string | null;
+    rtl: boolean | null;
+    variables: unknown;
+  }>;
 }
 
 declare module 'uniwind-internal/common/consts' {
