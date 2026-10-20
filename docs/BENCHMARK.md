@@ -1,5 +1,42 @@
 # Theme-change benchmark: this engine vs Uniwind
 
+## Reference apps with and without `precompileClassNames` (2026-10-20)
+
+The render scenario run in the benchmark repository's own apps, so the baseline is theirs: `apps/stylesheet` and `apps/uniwind` of
+[`uni-stack/uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks) as they are, and two builds of a copy of
+`apps/uniwind` that adds shadewind (the packed package of the `perf/precompile-classnames` branch, `withShadewind` in `metro.config.js`,
+`installUniwind()` in `App.tsx`, `shadewind` and `react-native-nitro-modules` in `package.json`; nothing else changed). The two shadewind
+builds differ only in `precompileClassNames` (7 element call sites were compiled in the second).
+
+Release builds, iPhone 17 Pro simulator (iOS 26), React Native 0.86.3, Uniwind 1.12.0. The app's own statistic: the average of the ten
+re-mounts of the 2003-view list, time until the JS thread is idle. **Three launches per build** (each after reinstalling the app), one
+launch of each build per round; the table is the median of the three launch averages. This is a smaller protocol than the
+six-warm-launch protocol of the sections below and no launch was dropped, so read differences of a few ms as approximate.
+
+| Build | Launch averages | Median | vs StyleSheet |
+|---|---|---|---|
+| StyleSheet (their app) | 37.20, 38.67, 37.09 | 37.2 ms | 1.00x |
+| Shadewind + `precompileClassNames` | 40.70, 42.85, 40.16 | 40.7 ms | 1.09x |
+| Shadewind | 48.85, 47.52, 47.48 | 47.5 ms | 1.28x |
+| Uniwind 1.12 (their app) | 60.30, 60.14, 60.55 | 60.3 ms | 1.62x |
+
+Precompile is about 3 to 4 ms behind `StyleSheet` here, not ahead of it. The simulator reproduces the published figures for their two
+apps (about 37 and 60 ms), which is the reason these apps are the reference for comparing with the website. For orientation only: the
+chart on the Uniwind site lists Uniwind Pro at about 1.2x its `StyleSheet` on a different device; Uniwind Pro was not run here.
+
+**Do not compare `example-real` with the table above.** `example-real`'s own render benchmark (`-mountBench render`, `src/bench/RenderBench.tsx`)
+replays the same scenario, but its `StyleSheet` baseline is about 5 ms slower than the reference app's (42.1 against 37.2 ms) and its plain
+Uniwind about 4 ms faster (56.5 against 60.3), so its gaps are narrower. Inside it, the same session gave `StyleSheet` 42.1, shadewind with
+precompile 39.6, shadewind 46.5 and plain Uniwind 56.5 ms (medians of five launch averages); use it to compare builds with each other,
+not with the site.
+
+On the 30-card feed screen of `example-real` (`-mountBench feed`, median JS-idle of the 30 cards, one launch per build) the adapter was
+36.1 ms and `StyleSheet` 33.5 ms in one launch; after `className={cn(...)}` and the other expression classNames were compiled, three
+launches gave 30.1 to 32.1 ms against 32.2 to 34.0 ms for `StyleSheet` in the same launches. The `Pressable`s and the app's wrapper
+components still run the adapter's path.
+
+What is not measured: a physical device, Android, a Debug build, memory beyond a post-run `footprint` of about 165 MB for both builds.
+
 ## End to end, uniwind-benchmarks render and theme (2026-10-19)
 
 The repository's own protocol (`scripts/bench/measure.py`), unchanged: Release builds, iPhone 17 Pro simulator (iOS 26.5), StyleSheet

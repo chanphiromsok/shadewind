@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `withShadewind(config, { precompileClassNames: true })` (off by default, experimental): a Babel plugin compiles `View` / `Text` elements
+  with a literal or expression `className` (from `react-native` or `shadewind/uniwind`, no spread, `style` or `ref`) into components that
+  resolve the style once per className and render the host element without hooks. Everything else keeps the adapter's path. A mounted
+  compiled view does not re-render on `Uniwind.updateCSSVariables`. See `docs/PRECOMPILE.md`. Checked by `tools/precompile-check.cjs`.
+- `ShadewindEngine.register` takes a `force` argument: register a view again with the same styles (a view React re-rendered under another
+  theme, so the engine rebuilds its per-theme props from React's).
+- `example-real`: `-mountBench render` (the uniwind-benchmarks render scenario), `-mountBench feed`, `-engineOff 1`, and
+  `SHADEWIND_PRECOMPILE=1` in its Metro config.
+- Docs: a current `docs/ARCHITECTURE.md`, a docs index, `docs/PRECOMPILE.md`; design notes moved to `docs/design/` and dated memos and the
+  own-compiler design to `docs/archive/`. The README and `docs/BENCHMARK.md` carry the 2026-10-20 mount numbers measured in the benchmark
+  repository's own apps.
+
 ## 0.2.1
 
 - `capabilities.asyncCommit` is `true` on Android too (it was `false` there while `hookAsync` committed on the JS thread). 0.2.0 shipped
