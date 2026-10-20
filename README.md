@@ -54,8 +54,9 @@ between sessions with the host; compare rows from one table. Spreads, both proto
 
 ## ✨ What you get
 
-- ⚡ **No re-render on a theme switch.** The new theme is applied to views that are already mounted, so your components stay put and
-  the JS thread stays free.
+- ⚡ **No re-render on a theme switch for the views it paints.** The new theme is applied to views that are already mounted, so those
+  components stay put and the JS thread stays free. A view it cannot take (an inline background over a `className` colour, a property it
+  does not paint, `active:` states) re-renders on a switch as it does in plain Uniwind.
 - 🎨 **Works with your Uniwind `className`s.** They stay exactly as they are. The setup is two small changes (below).
 - 🌗 **Optional animated switch.** `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })` cross-fades; instant by default.
 - 🧩 **Optional build step.** `withShadewind(config, { precompileClassNames: true })` compiles literal and expression `className`s on
