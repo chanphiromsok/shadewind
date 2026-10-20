@@ -109,8 +109,8 @@ const SUPPORTED_KEYS: readonly ThemeKey[] = [
 export const capabilities: Capabilities = Object.freeze({
   maxThemes: 6,
   supportedKeys: SUPPORTED_KEYS,
-  // Android commits synchronously for now (no background executor yet).
-  asyncCommit: Platform.OS === 'ios',
+  // hookAsync commits off the JS thread on both platforms: a background queue on iOS, the `sw-commit` worker thread on Android.
+  asyncCommit: true,
   platform: Platform.OS === 'ios' ? 'ios' : 'android',
 } as const);
 

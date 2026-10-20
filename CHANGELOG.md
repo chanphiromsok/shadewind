@@ -7,6 +7,7 @@
   commit of the newest theme. Time to the screen is unchanged (React Native's main-thread mount, about 47 ms for 2003 views); the
   re-mount scenario is unchanged. The queue has its own tests (`cpp/harness/run-commit-worker-tests.sh`, under ThreadSanitizer,
   AddressSanitizer and UBSan). iOS is unchanged.
+- `capabilities.asyncCommit` is `true` on Android too (it was `false` there while `hookAsync` committed on the JS thread).
 - `withShadewind(config, { cacheColors: true })` (off by default): a bounded cache in front of React Native's colour parser, for apps
   that write colours as strings in `StyleSheet` styles (about 19 ms less for a 2003-view re-mount). No effect for Uniwind with
   Shadewind.
