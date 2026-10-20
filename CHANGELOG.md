@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 (unreleased)
+
+- `capabilities.asyncCommit` is `true` on Android too (it was `false` there while `hookAsync` committed on the JS thread). 0.2.0 shipped
+  the worker thread but still reported `false`.
+- Docs: the README benchmark is one table (iOS and Android), and the API, guide, known-limits, overview and architecture docs match the
+  code (the `withShadewind` options, the Android worker thread, current mount numbers).
+
 ## 0.2.0
 
 - Android: `hookAsync` commits on a worker thread (`sw-commit`) instead of the JS thread. A theme switch now costs the JS thread about
@@ -7,7 +14,6 @@
   commit of the newest theme. Time to the screen is unchanged (React Native's main-thread mount, about 47 ms for 2003 views); the
   re-mount scenario is unchanged. The queue has its own tests (`cpp/harness/run-commit-worker-tests.sh`, under ThreadSanitizer,
   AddressSanitizer and UBSan). iOS is unchanged.
-- `capabilities.asyncCommit` is `true` on Android too (it was `false` there while `hookAsync` committed on the JS thread).
 - `withShadewind(config, { cacheColors: true })` (off by default): a bounded cache in front of React Native's colour parser, for apps
   that write colours as strings in `StyleSheet` styles (about 19 ms less for a 2003-view re-mount). No effect for Uniwind with
   Shadewind.
