@@ -1,5 +1,7 @@
 # Strategy after the tovtam port (Opus memo, 2026-10-14)
 
+> Historical memo (2026-10-14). The decision it records is reflected in [ARCHITECTURE.md](../ARCHITECTURE.md).
+
 Question: keep extending the Uniwind adapter (A), build our own Tailwind resolver/compiler (B), or something else (C)?
 
 ## Diagnosis (from reading the tovtam source, not yet profiled)

@@ -1,5 +1,7 @@
 # Theme transition: handover for a reviewing / testing agent
 
+> Handover for the theme-transition work; kept for the device-check procedure.
+
 Branch `claude/exciting-tesla-0ajx5i` (not merged, no PR). Read `docs/design/THEME_TRANSITION_TESTS.md` for the device checks; this file is
 what an agent needs to review the code and to re-run what can be run without a device.
 

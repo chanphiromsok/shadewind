@@ -1,5 +1,7 @@
 # Handoff (2026-10-18): why Shadewind on Uniwind is not faster at mount, and what to do next
 
+> Historical handoff (2026-10-17/18). Numbers and branch names are those of the time; see [BENCHMARK.md](../BENCHMARK.md) for current ones.
+
 Branch `claude/exciting-tesla-0ajx5i`. Read this section first; the 2026-10-17 handoff below is older.
 
 ## Numbers so far (owner's runs, iPhone 17 Pro simulator, iOS 26.5, RN 0.86, 2003 views, median of 6 warm launches)

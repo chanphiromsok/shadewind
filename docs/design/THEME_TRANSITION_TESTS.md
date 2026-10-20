@@ -1,5 +1,7 @@
 # Theme transition: device checks (F8)
 
+> Device checks for the animated theme switch; kept as a procedure.
+
 For an agent that reviews or re-runs the non-device checks: `docs/design/THEME_TRANSITION_AGENT_REVIEW.md`.
 
 Nothing here was run on a device. The code was written and reviewed in a Linux container without Xcode, an Android SDK or an

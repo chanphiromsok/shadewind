@@ -1,5 +1,7 @@
 # Shadewind render pipeline: architecture and ERD (own Tailwind compiler)
 
+> Historical design and measurement log (2026-10-14 to 2026-10-19) for an own Tailwind compiler, which was not built. The system as built is in [ARCHITECTURE.md](../ARCHITECTURE.md). Section numbers cited from code comments refer to this file.
+
 Status: design, not implemented. Decision (2026-10-14): Shadewind no longer sits on top of Uniwind; it owns the style
 pipeline. The Opus memo (docs/archive/STRATEGY.md) advised against building a compiler; that evidence is kept here as *requirements*.
 
