@@ -129,6 +129,12 @@ ok('style: a theme-dependent accent keeps the hook count, returns its colour and
 ok('style: an accent that does not depend on the theme leaves the theme out', () => { const r = render('accent-red-500'); assert.strictEqual(r.out.accentColor, 'red'); assert.ok(!r.deps[0].includes(THEME)); });
 ok('style: the subscription array is the same object across renders (the ref is not replaced)', () => { assert.strictEqual(render('accent-brand').deps[0], render('accent-brand').deps[0]); assert.strictEqual(render(undefined).deps[0], render(undefined).deps[0]); });
 ok('style: engine inactive, the view subscribes to the theme like Uniwind\'s own (with and without an accent)', () => { hooks.active = false; try { assert.ok(render(undefined).deps[0].includes(THEME)); assert.ok(render('accent-red-500').deps[0].includes(THEME)); assert.strictEqual(render('accent-red-500').deps[0], render('accent-red-500').deps[0]); assert.strictEqual(render(undefined).out.themed, null); } finally { hooks.active = true; } assert.ok(!render('accent-red-500').deps[0].includes(THEME)); });
+ok('style: a className the engine cannot take (an inline style over a painted key) keeps the theme in the subscription, so a switch re-renders it', () => {
+  hooks.reducers = 0; hooks.effects.length = 0;
+  const out = useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } });
+  assert.strictEqual(out.themed, null);
+  assert.ok(out.deps.includes(THEME), 'the theme stays in the subscription');
+});
 console.warn = warn;
 
 // src/uniwind/native.ts withUserStyle: the cached className style alone when there is no user style

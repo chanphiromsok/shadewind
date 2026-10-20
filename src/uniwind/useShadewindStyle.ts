@@ -246,6 +246,16 @@ export const cachedPlan = (
 };
 
 const bump = (n: number) => n + 1;
+
+// A plan that left a theme-dependent className to React: the engine does not paint it and nothing else changes it on a switch. (A
+// className that does not depend on the theme, or has the same style in every theme, a scoped theme, and a view being pressed need no
+// re-render for a switch.)
+const needsThemeRerender = (plan: Plan): boolean =>
+  plan.themed === null &&
+  (plan.reason === 'data attributes' ||
+    plan.reason === 'inline style overlaps' ||
+    plan.reason === 'key missing in a theme' ||
+    plan.reason.startsWith('unsupported'));
 const NO_PLAN: Plan = { themed: null, reason: 'engine inactive' };
 
 // the dependencies of a resolved style without the theme, computed once per resolution (the store reuses `current`)
@@ -418,10 +428,15 @@ export const useShadewindStyle = (
   const accent = accentClassName
     ? UniwindStore!.getStyles(accentClassName, props, state, context)
     : null;
-  // engine inactive: nothing re-themes the view natively, so it re-renders on a theme switch like Uniwind's own components
+  // The theme dependency is dropped only for a view the engine paints (planned.themed). Engine inactive, or a className the engine
+  // cannot take (an inline style over a painted key, a property the engine does not paint, a scoped theme...): nothing re-themes the
+  // view natively, so it re-renders on a theme switch like Uniwind's own components. (Dropping it for those left the view with the style
+  // of the theme it first rendered under: a search bar with `border-divider` and an inline background kept the dark theme's border
+  // after the app switched to light at start-up.)
+  const engineHandles = active && !needsThemeRerender(planned);
   const deps = accent
-    ? accentDeps(current, accent, StyleDependency!.Theme, active)
-    : active
+    ? accentDeps(current, accent, StyleDependency!.Theme, engineHandles)
+    : engineHandles
       ? nonThemeDeps(current, StyleDependency!.Theme)
       : current.dependencies;
   const accentColor = accent

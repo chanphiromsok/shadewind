@@ -72,11 +72,10 @@ type Kind = 'view' | 'text';
 const SLOW = 0; // the adapter's component
 const STATIC = 1; // the same style in every theme
 const ENGINE = 2; // bound to the engine: the render theme's style, the engine paints the others
-const CURRENT = 3; // differs between themes in what the engine cannot paint: the render theme's style, stale after a switch (as the adapter)
 
 type Resolved = {
   generation: number;
-  mode: typeof SLOW | typeof STATIC | typeof ENGINE | typeof CURRENT;
+  mode: typeof SLOW | typeof STATIC | typeof ENGINE;
   /** the style per theme (Text: after nativeTextStyle) */
   byTheme: Record<string, unknown>;
   /** ENGINE: one ref per theme, the theme of the render it was handed to */
@@ -213,11 +212,9 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
     false
   );
 
+  // differs between themes in what the engine cannot paint: the adapter's component, which re-renders the view on a theme switch
   if (!themed) {
-    return decide(
-      { generation, mode: CURRENT, byTheme, refs: null, themed: null },
-      `current theme only (${reason})`
-    );
+    return decide(slow, `the engine cannot paint it (${reason})`);
   }
 
   return decide(

@@ -701,12 +701,11 @@ const runtime = async () => {
     assert.deepStrictEqual(element.props.style, { flexDirection: 'row', alignItems: 'center', padding: 12 });
   });
 
-  check('runtime: differs between themes in what the engine cannot paint -> current theme style, no ref (as the adapter)', () => {
+  check('runtime: differs between themes in what the engine cannot paint -> the adapter (it re-renders the view on a theme switch)', () => {
     const element = precompiled.view('dark:p-4 p-1')({});
 
-    assert.strictEqual(element.type, 'RCTView');
-    assert.strictEqual(element.props.ref, undefined);
-    assert.strictEqual(element.props.style.padding, 4);
+    assert.strictEqual(element.type, 'AdapterView');
+    assert.strictEqual(element.props.className, 'dark:p-4 p-1');
   });
 
   const adapterFallback = (Component, props, expected) => {

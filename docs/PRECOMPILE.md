@@ -63,8 +63,7 @@ adapter's own plan (`cachedPlan`) whether the engine can paint it. The result is
 |---|---|---|
 | static | the same style in every theme | host element with that style, no ref |
 | engine | differs between themes in what the engine paints | host element with the current theme's style, bound to the engine through a shared ref |
-| current | differs in something the engine cannot paint | host element with the current theme's style, stale after a switch (as the adapter's) |
-| adapter | data attributes, breakpoints, orientation, insets, font scale, colour scheme, a style that needs `Text.js` (line clamp, `userSelect`, `verticalAlign`), a `Text` with non-primitive children, a view inside a `Text`, a scoped theme or scoped variables, the engine inactive | the adapter's own `View` / `Text` |
+| adapter | differs between themes in something the engine cannot paint (it needs a re-render on a switch), data attributes, breakpoints, orientation, insets, font scale, colour scheme, a style that needs `Text.js` (line clamp, `userSelect`, `verticalAlign`), a `Text` with non-primitive children, a view inside a `Text`, a scoped theme or scoped variables, the engine inactive | the adapter's own `View` / `Text` |
 
 A value that toggles to nothing (`undefined`, `false`, `''`) keeps the same host element, so the subtree is not remounted.
 
