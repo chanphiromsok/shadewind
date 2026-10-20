@@ -27,7 +27,7 @@ const BABEL_TRANSFORMER = path.join(PACKAGE_ROOT, 'metro-babel-transformer.cjs')
 // the library's own code (source and compiled): an app inside the package folder (this repository's example) is not part of it
 const OWN_CODE = [path.join(PACKAGE_ROOT, 'src'), path.join(PACKAGE_ROOT, 'lib')];
 const UPSTREAM_ENV = 'SHADEWIND_UPSTREAM_BABEL_TRANSFORMER';
-// SPIKE: precompileClassNames (metro-precompile-plugin.cjs, src/uniwind/precompiled.tsx); read by metro-babel-transformer.cjs
+// precompileClassNames (metro-precompile-plugin.cjs, src/uniwind/precompiled.tsx); read by metro-babel-transformer.cjs
 const PRECOMPILE_ENV = 'SHADEWIND_PRECOMPILE_CLASSNAMES';
 const PREBUILD_ENV = 'SHADEWIND_PREBUILD_STYLE_TABLE';
 // cacheColors: the wrapper replaces `@react-native/normalize-colors`; it reaches the real one through this private name

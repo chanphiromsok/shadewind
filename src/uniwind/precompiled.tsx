@@ -1,4 +1,4 @@
-// SPIKE: the runtime half of `withShadewind(config, { precompileClassNames: true })` (metro-precompile-plugin.cjs).
+// The runtime half of `withShadewind(config, { precompileClassNames: true })` (metro-precompile-plugin.cjs).
 //
 // The Babel plugin replaces `<View className="literal" ...>` / `<Text className="literal" ...>` (from `react-native` or
 // `shadewind/uniwind`, no spread, no style / ref, and for Text only the props the direct host path allows) with a component made

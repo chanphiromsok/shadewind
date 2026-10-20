@@ -1,4 +1,4 @@
-// SPIKE check of withShadewind(config, { precompileClassNames: true }): the Babel plugin (metro-precompile-plugin.cjs, through
+// Check of withShadewind(config, { precompileClassNames: true }): the Babel plugin (metro-precompile-plugin.cjs, through
 // metro-babel-transformer.cjs as Metro calls it) and its runtime (src/uniwind/precompiled.tsx, against Uniwind's real store loaded
 // with the app's stylesheet).
 //

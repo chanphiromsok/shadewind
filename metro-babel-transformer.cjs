@@ -24,7 +24,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const UPSTREAM_ENV = 'SHADEWIND_UPSTREAM_BABEL_TRANSFORMER';
-// SPIKE: withShadewind(config, { precompileClassNames: true }) sets '1' (metro-precompile-plugin.cjs); `prebuildStyleTable: false`
+// withShadewind(config, { precompileClassNames: true }) sets '1' (metro-precompile-plugin.cjs); `prebuildStyleTable: false`
 // with it on sets the second one to '0' (the transformer is then installed for the plugin only)
 const PRECOMPILE_ENV = 'SHADEWIND_PRECOMPILE_CLASSNAMES';
 const PREBUILD_ENV = 'SHADEWIND_PREBUILD_STYLE_TABLE';
@@ -182,7 +182,7 @@ async function prebuildStyleTable(src, platform, projectRoot) {
   };
 }
 
-// SPIKE: the app's own source files (what Uniwind's resolver rewrites `react-native` for), on a native platform, that may hold a
+// The app's own source files (what Uniwind's resolver rewrites `react-native` for), on a native platform, that may hold a
 // className attribute
 const precompiles = (filename, src, options) => {
   if (
@@ -242,7 +242,7 @@ function getCacheKey() {
   hash.update(fs.readFileSync(__filename));
   hash.update(fs.existsSync(TABLE_MODULE) ? fs.readFileSync(TABLE_MODULE) : '');
   hash.update(process.env[UPSTREAM_ENV] ?? '');
-  // SPIKE: the precompile plugin and whether it (and the prebuilt table) are on: A/B builds must not share cached transforms
+  // The precompile plugin and whether it (and the prebuilt table) are on: A/B builds must not share cached transforms
   hash.update(fs.existsSync(PRECOMPILE_PLUGIN) ? fs.readFileSync(PRECOMPILE_PLUGIN) : '');
   hash.update(`${process.env[PRECOMPILE_ENV] ?? ''}/${process.env[PREBUILD_ENV] ?? ''}`);
 

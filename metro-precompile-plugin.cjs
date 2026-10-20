@@ -1,6 +1,6 @@
 'use strict';
 
-// SPIKE: shadewind/metro `precompileClassNames: true`. A Babel plugin, added by metro-babel-transformer.cjs to the app's own
+// shadewind/metro `precompileClassNames: true`. A Babel plugin, added by metro-babel-transformer.cjs to the app's own
 // files (not node_modules, not shadewind's src / lib) on iOS and Android, that compiles the simplest styled elements:
 //
 //   import { View, Text } from 'react-native';                  // or from 'shadewind/uniwind'
