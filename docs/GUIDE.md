@@ -66,6 +66,11 @@ when idle instead): same results as Uniwind's JS (checked on 137,790 cases), and
 hold (shadows, transforms, safe-area and screen units, data / rtl variants) is still resolved by Uniwind. `nativeResolver` from
 `shadewind/uniwind` reports its status and turns it off (`setEnabled(false)`).
 
+`withShadewind(config, { cacheColors: true })` (off by default) also puts a bounded cache (512 entries) in front of React Native's
+colour parser, for apps that write colours as strings in `StyleSheet` styles: the same string is parsed once instead of for every view
+of every render (about 19 ms of a 2003-view re-mount on the Android emulator). It changes no result, and it does nothing for views the
+engine themes.
+
 ## Animated switch (optional, default instant)
 
 `setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })`, or once for everything (Uniwind too):

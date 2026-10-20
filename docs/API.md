@@ -1,8 +1,8 @@
 # Shadewind public API (1.0 design)
 
-Status: core implemented on branch `feat/theme-engine-android-benchmark` (configure, setTheme, getTheme, subscribe, useTheme,
-followSystem, capabilities, useThemed, ThemedView/ThemedText, mergeRefs, `shadewind/internal`). Not yet: `shadewind/uniwind`,
-`shadewind/metro`, `whenApplied`. Reviewed by Opus on 2026-10-14. Contract: **a binding always renders correctly; the fast
+Status: implemented (configure, setTheme, getTheme, subscribe, useTheme, followSystem, capabilities, useThemed, ThemedView/ThemedText,
+mergeRefs, `shadewind/internal`, `shadewind/uniwind`, `shadewind/metro`, `shadewind/diagnostics`). Not yet: `whenApplied`. Reviewed by Opus
+on 2026-10-14; the tables below were brought up to date with the code on 2026-10-20. Contract: **a binding always renders correctly; the fast
 path is an optimisation and never changes behaviour.**
 
 ## Facts in the code that shape it
@@ -21,8 +21,8 @@ path is an optimisation and never changes behaviour.**
 | Entry | Stable | Contents |
 |---|---|---|
 | `shadewind` | yes | `configure`, `setTheme`, `getTheme`, `subscribe`, `useTheme`, `followSystem`, `capabilities`, `useThemed`, `ThemedView`, `ThemedText`, `mergeRefs`, types, `ShadewindError` |
-| `shadewind/uniwind` | yes | `installUniwind`, `View`, `Text`, `useShadewindStyle`, `ThemeStyleSource` |
-| `shadewind/metro` | yes (CJS) | `withShadewind(config, { uniwind })` |
+| `shadewind/uniwind` | yes | `installUniwind`, `registerPrebuiltStyleTable`, `nativeResolver`, `View`, `Text`, `Pressable`, `TouchableOpacity`, `withUniwind`, and the debug helpers `decisions`, `renders` |
+| `shadewind/metro` | yes (CJS) | `withShadewind(config, { prebuildStyleTable?, cacheColors? })`: wraps the config returned by `withUniwindConfig`; `prebuildStyleTable: false` builds the native class table on the device instead of at bundle time; `cacheColors: true` (off by default) caches React Native's colour parsing |
 | `shadewind/diagnostics` | yes, development only | `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })`, `disableDiagnostics`, `flushDiagnostics`; no-ops outside `__DEV__`, native recorder in Debug builds only (`cpp/Diagnostics.hpp`) |
 | `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending`. `inspect`, `resetMainBusy`, `mainBusyMs` and the timings exist in debug builds or with `SHADEWIND_DEV_TOOLS` (`docs/LOCAL_TESTING.md`, "Release builds carry no debug code"); `hasDevTools()`, `setThemeTimed()` |
 
@@ -52,8 +52,9 @@ the public `setTheme`; the native side picks by capability.
 
 ## Switching
 
-- `setTheme(name): void`, queued, idempotent, last call wins. No mounted promise in 1.0 (Android has no background executor or
-  mount hook yet; a future `whenApplied()` is a minor release). With the Uniwind adapter active it calls `Uniwind.setTheme` (one source
+- `setTheme(name): void`, queued, idempotent, last call wins. No mounted promise in 1.0 (there is no mount hook yet, on either platform; a future
+  `whenApplied()` is a minor release). `hookAsync` commits off the JS thread on both platforms: a background queue on iOS, one worker
+  thread (`sw-commit`) on Android since 0.2.0, where switches made while it is busy coalesce into one commit of the newest theme. With the Uniwind adapter active it calls `Uniwind.setTheme` (one source
   of truth), whose listener applies the engine with `hookDeferred` and the call's transition; Uniwind's subscribers re-render, and
   their React commit carries the engine's switch (no separate engine commit, so colours React renders change together with the
   engine's; a low-priority task commits if React does not).
@@ -113,7 +114,7 @@ function Card() { const t = useThemed(card); return <View ref={t.ref} style={[s.
 Uniwind:
 
 ```js
-module.exports = withShadewind(withUniwindConfig(getDefaultConfig(__dirname), {}), { uniwind: true });
+module.exports = withShadewind(withUniwindConfig(getDefaultConfig(__dirname), { cssEntryFile: './global.css' }));
 installUniwind(); // Uniwind.setTheme('dark') now goes through the engine
 ```
 
@@ -149,7 +150,7 @@ fast path, components beyond `View`/`Text`.
 3. Every binding relies on private `getNodeFromInternalInstanceHandle`: needs a startup probe, fallback, upstream ask.
 4. Mount cost of the Uniwind adapter, scrolling and FlatList recycling unmeasured.
 5. Nested `Text` recolour where an inner explicit colour equals the old colour has no targeted test.
-6. Android: `asyncCommit` false and no `viewOK`/`layerOK` probes; `capabilities` must be truthful.
+6. Android: no `viewOK`/`layerOK` probes; `capabilities` must be truthful (`asyncCommit` is true on both platforms since 0.2.0).
 
 ## Implementation notes (core)
 

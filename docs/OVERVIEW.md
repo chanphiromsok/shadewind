@@ -19,7 +19,7 @@ JS THREAD                    NATIVE (C++, Nitro raw JSI)  [shipped]
 
 | Layer | State | Where |
 |---|---|---|
-| Commit hook: per-theme prop slots, text recolour without a layout pass, background commit, Android `rawProps` | shipped, iOS + Android | `cpp/ThemeHook.hpp`, `cpp/HybridShadewind.cpp` |
+| Commit hook: per-theme prop slots, text recolour without a layout pass, background commit (iOS queue, Android `sw-commit` worker), Android `rawProps` | shipped, iOS + Android | `cpp/ThemeHook.hpp`, `cpp/HybridShadewind.cpp` |
 | Public API (`configure`, `setTheme`, `useThemed`, `useThemedProps`, `ThemedView`) | shipped | `src/index.tsx`, `docs/API.md` |
 | Uniwind adapter (`shadewind/uniwind`, `shadewind/metro`) | shipped, bridge to be retired | `src/uniwind`, `metro.cjs` |
 | Own Tailwind compiler (scan, compile, lower, binary table) | build chain measured on a real app (about 100 ms cold) and reviewed (first extractor was wrong, fixed), compiler not built | `docs/ARCHITECTURE.md` sections 8-9, `spikes/compiler-spike` |

@@ -929,3 +929,30 @@ Checked: the JS check tool runs `useShadewindStyle` against a fake Uniwind store
 an accent, the theme in the subscription only with a theme-dependent accent, the same subscription array across renders; mutants
 dropping the accent's theme or rebuilding the array each render fail), typecheck, example-real Metro bundles of both arms and a
 Hermes compile. Not measured: the effect on mounting, which needs the rendering benchmark on a simulator.
+
+## 22. Android: `hookAsync` commits on a worker thread (2026-10-19)
+
+On Android `setTheme` with `hookAsync` used to commit on the JS thread (8.24 ms median per switch on the 2003-view benchmark, mostly
+React Native's own mount work for the 2001 changed views). It now publishes the theme and the epoch (the same atomic word as on iOS,
+section 21) and posts the commit to one worker thread, `sw-commit`. The JS thread is free after about 0.14 ms. The time until the
+colours are on screen does not change (about 47 ms, the main thread's mount of the same work).
+
+- **`cpp/CommitWorker.hpp`** holds the two pieces and knows nothing of React Native, JNI or Android; the platform's needs are passed
+  in as hooks (`threadScope` attaches the thread to the JVM, `jobScope` opens a JNI local reference frame per job, `onError`, `nameThread`),
+  so the queue is tested natively. `CommitWorker` is a FIFO worker: the thread starts with the first job, `post` creates the thread
+  before queueing (a failed start leaves nothing half done), a job that throws is reported and the next one runs (an exception
+  leaving a thread ends the process), and the destructor drains the queue and joins. `CoalescedCommit` keeps at most one commit
+  waiting: a request that arrives while one waits replaces it (the commit reads the newest theme when it starts, so the older request
+  would do nothing new); a request that arrives while one runs queues the next. Its state is shared, so a queued run survives the
+  object that posted it.
+- **In `HybridShadewind::setTheme`** the Android branch posts `commitTick(uiManager, true)` through `_state.commit`. The worker is a
+  leaked singleton (its thread must outlive static destruction). The iOS branch is unchanged.
+- **Tests:** `cpp/harness/commit_worker_tests.cpp`, 17 tests, built on their own by `cpp/harness/run-commit-worker-tests.sh` (any C++20
+  compiler, googletest from the system or the NDK's copy) and run under ThreadSanitizer, AddressSanitizer and UBSan; six deliberate
+  bugs put into the header were each caught.
+- **Measured** (Release, Pixel_8_Pro emulator, twelve warm launches per build, two sweeps in alternating order): JS thread per switch
+  8.24 ms (7.57 to 8.95) before, 0.14 ms (0.10 to 0.17) after; re-mount unchanged (56.83 against 56.17 ms); 21 `setTheme` calls in one
+  task end on the last theme; a soak of about 2,100 switches (100 bursts of 21) kept the heap flat. Details: `docs/BENCHMARK.md`.
+- **Not covered:** a JS reload or app teardown while a commit is queued or running (the worker's last reference to the engine could be
+  released on its thread), a React render that waits on the hook's lock while the worker commits, physical devices.
+- `capabilities.asyncCommit` is `true` on Android from this change (it was `false` while the commit ran on the JS thread).
