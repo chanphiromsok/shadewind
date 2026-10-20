@@ -565,6 +565,31 @@ const runtime = async () => {
     assert.notStrictEqual(registered[0].themed, registered[1].themed);
     assert.strictEqual(registered[1].renderTheme, 'light', 'a first attach: React rendered this theme');
 
+    // the same className re-rendered under another theme (its parent re-rendered during a switch): not dropped, registered again (forced)
+    newInstance();
+    const fresh = {};
+    registered.length = 0;
+    unregistered.length = 0;
+
+    const light = DynView({ className: engineA }).props.ref;
+
+    light(fresh);
+    UniwindStore.runtime.currentThemeName = 'dark';
+
+    try {
+      const dark = DynView({ className: engineA }).props.ref;
+
+      assert.notStrictEqual(light, dark, 'another theme, another ref');
+      light(null);
+      assert.deepStrictEqual(unregistered, [], 'a re-render under another theme does not unregister');
+      dark(fresh);
+      assert.strictEqual(registered.length, 2);
+      assert.strictEqual(registered[1].renderTheme, undefined);
+      assert.strictEqual(registered[1].force, true, 'forced: React gave the view new props');
+    } finally {
+      UniwindStore.runtime.currentThemeName = 'light';
+    }
+
     // a hide or an unmount (the ref is still the newest) keeps the binding
     unregistered.length = 0;
     b(null);

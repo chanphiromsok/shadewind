@@ -3,7 +3,7 @@
 // SHADEWIND_PRECOMPILE=1: every cell must look the same in every phase.
 //
 // The grid re-renders only when `on` changes (phases 3 and 5); the other steps are theme switches alone.
-// Phases (4 s each): 0 light | 1 dark | 2 light | 3 `on` | 4 dark (while `on`) | 5 not `on` (dark) | 6 light. The header shows the phase as filled
+// Phases (4 s each): 0 light | 1 dark | 2 light | 3 `on` | 4 dark (while `on`) | 5 not `on` (dark) | 6 light, with the grid re-rendered in the same tick. The header shows the phase as filled
 // squares, so a screenshot can be matched to a phase without reading text.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -90,6 +90,7 @@ function Cell({ children }: { children?: React.ReactNode }) {
 
 export function EdgeCases() {
   const [on, setOn] = useState(false);
+  const [, setTick] = useState(0);
   const order = on ? ['c', 'b', 'a'] : ['a', 'b', 'c'];
   const selected = on ? 'b' : 'a';
 
@@ -109,7 +110,11 @@ export function EdgeCases() {
       () => setOn(true),
       () => Uniwind.setTheme('dark'),
       () => setOn(false),
-      () => Uniwind.setTheme('light'),
+      () => {
+        // a theme switch and a re-render of the whole grid in the same tick (a parent that re-renders while the theme changes)
+        Uniwind.setTheme('light');
+        setTick((t) => t + 1);
+      },
     ];
 
     steps.forEach((step, i) => {

@@ -31,9 +31,11 @@ precompile 39.6, shadewind 46.5 and plain Uniwind 56.5 ms (medians of five launc
 not with the site.
 
 On the 30-card feed screen of `example-real` (`-mountBench feed`, median JS-idle of the 30 cards, one launch per build) the adapter was
-36.1 ms and `StyleSheet` 33.5 ms in one launch; after `className={cn(...)}` and the other expression classNames were compiled, three
-launches gave 30.1 to 32.1 ms against 32.2 to 34.0 ms for `StyleSheet` in the same launches. The `Pressable`s and the app's wrapper
-components still run the adapter's path.
+36.1 ms and `StyleSheet` 33.5 ms in one launch. With `precompileClassNames` (expression classNames such as `cn(...)` compiled, and the
+per-instance record that drops a superseded binding), three launches gave 30.9, 32.9 and 34.7 ms against 30.4, 34.1 and 33.8 ms for
+`StyleSheet` in the same launches: in line with `StyleSheet`, within about 1 ms either way. The `Pressable`s and the app's wrapper
+components still run the adapter's path. (An earlier build without that record measured 30.1 to 32.1 ms against 32.2 to 34.0 ms; the
+record is a `useRef` per expression-className view and costs about 1 to 2 ms on this screen.)
 
 What is not measured: a physical device, Android, a Debug build, memory beyond a post-run `footprint` of about 165 MB for both builds.
 

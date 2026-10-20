@@ -81,6 +81,8 @@ type Resolved = {
   byTheme: Record<string, unknown>;
   /** ENGINE: one ref per theme, the theme of the render it was handed to */
   refs: Record<string, (node: unknown) => void> | null;
+  /** ENGINE: the styles the refs bind (what tells a view that moved to another className from one re-rendered under another theme) */
+  themed: ThemedStyles | null;
 };
 
 const ROOT_CONTEXT = { scopedTheme: null, rtl: null, variables: null };
@@ -120,7 +122,13 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
     return null; // the stylesheet is not loaded yet: the adapter's component, asked again next render
   }
 
-  const slow: Resolved = { generation, mode: SLOW, byTheme: {}, refs: null };
+  const slow: Resolved = {
+    generation,
+    mode: SLOW,
+    byTheme: {},
+    refs: null,
+    themed: null,
+  };
   const decide = (resolved: Resolved, reason: string) => {
     if (debugOn()) {
       decisions.set(`precompiled ${kind}: ${className}`, reason);
@@ -189,7 +197,10 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
   const first = raw[themes[0]!];
 
   if (themes.every((theme) => same(raw[theme], first))) {
-    return decide({ generation, mode: STATIC, byTheme, refs: null }, 'static');
+    return decide(
+      { generation, mode: STATIC, byTheme, refs: null, themed: null },
+      'static'
+    );
   }
 
   // the adapter's own engine decision for this className (no inline style: the plugin compiles no `style` prop)
@@ -204,13 +215,19 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
 
   if (!themed) {
     return decide(
-      { generation, mode: CURRENT, byTheme, refs: null },
+      { generation, mode: CURRENT, byTheme, refs: null, themed: null },
       `current theme only (${reason})`
     );
   }
 
   return decide(
-    { generation, mode: ENGINE, byTheme, refs: engineRefs(themed, themes) },
+    {
+      generation,
+      mode: ENGINE,
+      byTheme,
+      refs: engineRefs(themed, themes),
+      themed,
+    },
     'engine'
   );
 };
@@ -283,16 +300,19 @@ type Props = Record<string, unknown> & { children?: unknown };
 type Wrapper = {
   fn: (node: unknown) => void;
   base: (node: unknown) => void;
+  themed: ThemedStyles;
   node: object | null;
 };
 type Instance = { current: Wrapper | null };
 
 const wrapperFor = (
   instance: Instance,
-  base: (node: unknown) => void
+  base: (node: unknown) => void,
+  themed: ThemedStyles
 ): Wrapper => {
   const wrapper: Wrapper = {
     base,
+    themed,
     node: null,
     fn: (node) => {
       if (typeof node === 'object' && node !== null) {
@@ -302,7 +322,13 @@ const wrapperFor = (
         return;
       }
 
-      if (instance.current !== wrapper && wrapper.node !== null) {
+      // the newest wrapper binds other styles (or none): this view moved on. The same styles under another theme is a re-render of the
+      // same className: the new wrapper's attach registers it again (forced), nothing to drop.
+      if (
+        wrapper.node !== null &&
+        instance.current !== wrapper &&
+        instance.current?.themed !== wrapper.themed
+      ) {
         unbind(wrapper.node);
       }
 
@@ -408,7 +434,7 @@ const make = (fixed: string | null, kind: Kind) => {
         let wrapper = instance.current;
 
         if (wrapper === null || wrapper.base !== base) {
-          wrapper = wrapperFor(instance, base);
+          wrapper = wrapperFor(instance, base, r.themed!);
           instance.current = wrapper;
         }
 

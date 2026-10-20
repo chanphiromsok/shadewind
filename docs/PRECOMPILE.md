@@ -78,6 +78,8 @@ or unmount keeps it. Views with a literal `className` never change className and
 
 - **`Uniwind.updateCSSVariables`** does not re-render mounted compiled views. Views rendered after the call get the new values; mounted
   ones keep the old until they re-render. (The adapter's views subscribe to variable changes.) Theme switches are not affected.
+- **A literal className that stops being engine-bound after a variable change** (`updateCSSVariables` made it the same in every theme)
+  is unbound when its ref attaches, which is after the commit that rendered it; until the next commit it can show the old styles.
 - **A className that toggles into an adapter case** (a breakpoint or data-attribute class) swaps the element type, which remounts the
   subtree, as the adapter's own `View` does when a prop makes `View.js` necessary.
 - **Spread props are not compiled.** `<View className={...} {...props}>` is left as written, so wrapper components that forward
