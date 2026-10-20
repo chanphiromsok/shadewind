@@ -24,15 +24,6 @@ if (Settings.get('engineOff')) {
   (globalThis as { __SHADEWIND_ENGINE_OFF__?: boolean }).__SHADEWIND_ENGINE_OFF__ = true;
 }
 
-// -markers 1 / -weakSub 1: option-2 experiment flags (read by the engine at install / first use)
-if (Settings.get('markers')) {
-  (globalThis as { __SHADEWIND_MARKERS__?: boolean }).__SHADEWIND_MARKERS__ = true;
-}
-
-if (Settings.get('weakSub')) {
-  (globalThis as { __SHADEWIND_WEAK_SUBSCRIBE__?: boolean }).__SHADEWIND_WEAK_SUBSCRIBE__ = true;
-}
-
 // -resolverOff 1: Uniwind's own class resolution only (no class table loaded or built), for A/B launches of one build
 if (Settings.get('resolverOff')) {
   nativeResolver.setEnabled(false);
