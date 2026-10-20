@@ -128,11 +128,10 @@ bindings; the hook themes it in the commit that shows it.
 **Not painted by the engine.** The plan returns no per-theme styles, and the view is not registered, when the className has a scoped
 theme, data attributes, an inline `style` that overlaps a painted key, themes that differ in properties other than the three painted
 ones, a key missing in a theme, or while a pressable view is pressed or focused. Such a view renders with the style of the theme it
-rendered under. While the engine is active the adapter subscribes it only to the dependencies other than the theme (orientation,
-breakpoints, insets, font scale, colour scheme; `nonThemeDeps` in `useShadewindStyle.ts`), so a theme switch alone does not re-render
-it. A pixel comparison against plain Uniwind (`example-real/scripts/edge-cases.py`) shows it: a className such as `bg-card dark:opacity-40` keeps the
-style of the theme it rendered under after a switch, until something re-renders it. When the engine is inactive every component re-renders on a switch
-like Uniwind's own.
+rendered under. Where that would leave it stale (data attributes, an inline style over a painted key, an unpainted property, a key missing
+in a theme: `needsThemeRerender` in `useShadewindStyle.ts`) the adapter keeps the Theme dependency in its subscription, so a switch
+re-renders it as plain Uniwind does; for a view the engine paints it drops the Theme dependency. A pixel comparison against plain Uniwind
+(`example-real/scripts/edge-cases.py`) checks this. When the engine is inactive every component re-renders on a switch like Uniwind's own.
 
 ## Invariants
 

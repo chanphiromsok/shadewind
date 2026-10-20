@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix: while the engine was active the adapter dropped the Theme dependency from every view's subscription, including views the engine does not
+  paint (an inline `style` over a painted key, a property the engine does not paint such as `dark:opacity-40`, a key missing in a theme, data
+  attributes). Such a view kept the style of the theme it first rendered under after a switch: a search bar with `border border-divider` and an
+  inline background showed the dark theme's border after the app switched to light at start-up. Those views now re-render on a theme switch as plain
+  Uniwind's do. With `precompileClassNames`, such a className is rendered by the adapter's component.
+
 ## 0.3.0
 
 - `withShadewind(config, { precompileClassNames: true })` (off by default, experimental): a Babel plugin compiles `View` / `Text` elements
