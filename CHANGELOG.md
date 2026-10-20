@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+- Android: `hookAsync` commits on a worker thread (`sw-commit`) instead of the JS thread. A theme switch now costs the JS thread about
+  0.14 ms instead of about 8.2 ms (2003 views, Android Release, emulator). Switches made while the worker is busy coalesce into one
+  commit of the newest theme. Time to the screen is unchanged (React Native's main-thread mount, about 47 ms for 2003 views); the
+  re-mount scenario is unchanged. The queue has its own tests (`cpp/harness/run-commit-worker-tests.sh`, under ThreadSanitizer,
+  AddressSanitizer and UBSan). iOS is unchanged.
+- `withShadewind(config, { cacheColors: true })` (off by default): a bounded cache in front of React Native's colour parser, for apps
+  that write colours as strings in `StyleSheet` styles (about 19 ms less for a 2003-view re-mount). No effect for Uniwind with
+  Shadewind.
+- Docs: measured Android findings in `docs/BENCHMARK.md`: where a re-mount's time goes (JS thread per function, a native trace), the
+  floor for 2003 views (37 ms on the emulator, against 61 ms for the current tree), and what did not help (view recycling, skipping
+  prewarm, a cheap path for theme-only classNames, which every className here fails because each reads CSS variables).
+- `cn()` (the native class merge) is about 10% faster per call (about 236 ns to about 213 ns on the test suite's cases): a first-character
+  check before the order-sensitive modifier lookup, one output resize instead of per-token appends, no sort for fewer than two
+  modifiers. The output is unchanged byte for byte (the 3,000-case `tailwind-merge` fixture suite, under AddressSanitizer and UBSan).
+- Not changed: re-mount time. Registering views by a prop instead of a ref was only checked to be possible (the prop reaches the C++
+  props once it is in the host view config's attributes); it is not built.
+
 ## 0.1.0 (unreleased)
 
 First public release. Experimental: New Architecture only, React Native 0.86.x, iOS is the primary target.

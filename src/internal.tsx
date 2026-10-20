@@ -158,8 +158,10 @@ export type ThemeTimings = {
 
 /**
  * How a theme change reaches the screen. Unknown names throw.
- * - 'hookAsync' (default): the commit runs on a background thread, the JS thread is free right away. On Android it is synchronous
- *   for now.
+ * - 'hookAsync' (default): the commit runs on a background thread, the JS thread is free right away. On Android that thread is one
+ *   worker attached to the JVM; switches made while it is busy run as one commit of the newest theme. The screen updates no
+ *   sooner: the main thread's mount is the same work (about 47 ms from the call for 2003 views on the Pixel_8_Pro AVD, with
+ *   either strategy).
  * - 'hook': the commit runs synchronously on the JS thread and is mounted at once.
  * - 'hookDeferred': no commit of its own. The next commit carries the theme, normally React's for the re-render the switch causes
  *   (Uniwind's subscribers: useResolveClassNames, useCSSVariable, components that read the theme), so views the engine handles

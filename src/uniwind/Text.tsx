@@ -5,9 +5,39 @@ import {
   NativeText,
   TextAncestorContext,
   textIsPlain,
+  nativeTextStyle,
   withUserStyle,
 } from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import { jsx } from 'react/jsx-runtime';
+
+// read once at module load: Metro's inline requires would look each of these up on every render (see useShadewindStyle.ts)
+const M = {
+  use,
+  useState,
+  TextAncestorContext,
+  textIsPlain,
+  nativeTextStyle,
+  withUserStyle,
+  useEngineRef,
+  useShadewindStyle,
+  NativeText,
+  RNText,
+  jsx,
+  accessible: Platform.OS === 'ios',
+};
+
+// one state object per combination: Uniwind's store reads the values only, so no new object per render
+const STATES = [
+  [
+    { isPressed: false, isDisabled: false },
+    { isPressed: false, isDisabled: true },
+  ],
+  [
+    { isPressed: true, isDisabled: false },
+    { isPressed: true, isDisabled: true },
+  ],
+] as const;
 
 type Props = TextProps & {
   className?: string;
@@ -18,48 +48,38 @@ type Props = TextProps & {
 export const Text: ComponentType<Props> = copyComponentProperties(
   RNText,
   (props: Props) => {
-    const [isPressed, setIsPressed] = useState(false);
-    const state = {
-      isPressed,
-      isDisabled: Boolean((props as { disabled?: boolean }).disabled),
-    };
-    const {
-      style,
-      themed,
-      onRegisterFailed,
-      accentColor: selectionColor,
-    } = useShadewindStyle(
+    const [isPressed, setIsPressed] = M.useState(false);
+    const state =
+      STATES[isPressed ? 1 : 0][
+        (props as { disabled?: boolean }).disabled ? 1 : 0
+      ];
+    const styled = M.useShadewindStyle(
       props.className,
       props,
       state,
       props.selectionColorClassName
     );
-    const ref = useEngineRef(
-      themed,
-      (props as { ref?: any }).ref,
-      onRegisterFailed
-    );
+    const { style, accentColor: selectionColor } = styled;
+    const ref = M.useEngineRef(styled, (props as { ref?: any }).ref);
 
     // plain text (primitive children, no press handlers or accessibility props, no clamp): the host component directly, with the
     // defaults Text.js would have set. Everything else keeps the full path below.
     if (
-      !use(TextAncestorContext) &&
+      !M.use(M.TextAncestorContext) &&
       !props.selectionColorClassName &&
       !props.onPressIn &&
       !props.onPressOut &&
       !(props as { onPress?: unknown }).onPress &&
-      textIsPlain(props, style)
+      M.textIsPlain(props, style)
     ) {
-      return (
-        <NativeText
-          {...props}
-          ref={ref}
-          style={withUserStyle(style, props.style)}
-          accessible={Platform.OS === 'ios'}
-          allowFontScaling
-          ellipsizeMode={props.ellipsizeMode ?? 'tail'}
-        />
-      );
+      return M.jsx(M.NativeText, {
+        ...props,
+        ref,
+        style: M.withUserStyle(M.nativeTextStyle(style), props.style),
+        accessible: M.accessible,
+        allowFontScaling: true,
+        ellipsizeMode: props.ellipsizeMode ?? 'tail',
+      });
     }
 
     return (

@@ -31,5 +31,5 @@
     "target": "ESNext",
     "verbatimModuleSyntax": true
   },
-  "exclude": ["example-real", "lib", "node_modules"]
+  "exclude": ["example", "example-real", "lib", "node_modules"]
 }

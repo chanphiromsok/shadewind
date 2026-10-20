@@ -5,6 +5,7 @@
 #                   Android's mounting layer would send each Java view, in each of React Native 0.86's props modes
 set -e
 
+build/commit_worker_tests --gtest_brief=1
 build/harness_tests
 
 for mode in default accumulated reconciliation; do

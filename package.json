@@ -1,6 +1,6 @@
 {
   "name": "shadewind",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Zero-re-render theme styling for React Native (Fabric) via a Nitro module",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -45,6 +45,7 @@
     "nitrogen",
     "metro.cjs",
     "metro-babel-transformer.cjs",
+    "metro-color-cache.cjs",
     "metro.d.ts",
     "bin",
     "nitro.json",
@@ -69,7 +70,7 @@
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
     "nitrogen": "nitrogen",
-    "typecheck": "tsc",
+    "typecheck": "tsc && tsc -p example",
     "lint": "eslint \"**/*.{js,ts,tsx}\""
   },
   "keywords": [

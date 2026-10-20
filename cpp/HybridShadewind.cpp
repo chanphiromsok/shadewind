@@ -1,4 +1,5 @@
 #include "HybridShadewind.hpp"
+#include "CommitWorker.hpp"
 #include "css/ClassMerge.hpp"
 #include "css/StyleResolver.hpp"
 #include "ResolveGlue.hpp"
@@ -23,6 +24,10 @@
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
 #include <CoreFoundation/CoreFoundation.h>
+#elif defined(__ANDROID__)
+#include <android/log.h>
+#include <fbjni/fbjni.h>
+#include <sys/prctl.h>
 #endif
 
 namespace margelo::nitro::shadewind {
@@ -72,6 +77,38 @@ int64_t colorBits(const SharedColor& color) {
   return colorValueBits(*color);
 }
 #endif // SHADEWIND_DEV_TOOLS
+
+#if defined(__ANDROID__)
+// hookAsync's commit on Android runs on one worker thread (CommitWorker.hpp), attached to the JVM for the thread's whole life:
+// React Native's mount (FabricMountingManager::executeMount) and the Paragraph state copy of a recolour both call into Java, which a
+// plain std::thread cannot do. Never destroyed: its thread outlives static destruction.
+CommitWorker& commitWorker() {
+  static auto* const worker = new CommitWorker(CommitWorker::Options{
+      .threadScope =
+          [](const CommitWorker::Job& loop) {
+            // WithClassLoader: a thread made in C++ resolves classes with the system class loader, which does not know the app's
+            // classes
+            facebook::jni::ThreadScope::WithClassLoader([&loop]() { loop(); });
+          },
+      .jobScope =
+          [](const CommitWorker::Job& job) {
+            // The loop never returns to Java, so nothing frees the JNI local references a commit creates (executeMount, the
+            // Paragraph state copy): a frame per job does, or the local reference table would fill up
+            facebook::jni::JniLocalScope frame(facebook::jni::Environment::current(), 256);
+
+            job();
+          },
+      .onError =
+          [](const std::string& message) {
+            // A theme that could not be committed is applied by the next commit anyway (the hook keeps the theme)
+            __android_log_print(ANDROID_LOG_ERROR, "Shadewind", "theme commit failed: %s", message.c_str());
+          },
+      .nameThread = [](const char* name) { prctl(PR_SET_NAME, name, 0, 0, 0); }, // the kernel keeps 15 characters
+      .name = "sw-commit"});
+
+  return *worker;
+}
+#endif // __ANDROID__
 
 #if defined(__APPLE__)
 #if SHADEWIND_DEV_TOOLS
@@ -824,8 +861,43 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
     return jsi::Value::undefined();
 #endif
   }
+#elif defined(__ANDROID__)
+  if (async) {
+    // The commit (walk + clone + diff + the mount hand-off to Java) runs on the commit worker; the JS thread is free at once.
+    // weak: the worker must never drop the last reference of the binding (it owns a jsi::Function)
+    std::weak_ptr<UIManagerBinding> weakBinding = UIManagerBinding::getBinding(rt);
+
+    // rapid switches: one commit waits for the worker, and runs the newest request (CoalescedCommit)
+    _state.commit.post(commitWorker(), [weakBinding, clock]() {
+      (void)clock; // empty in a release build
+      auto locked = weakBinding.lock();
+
+      if (!locked) {
+        return;
+      }
+
+#if SHADEWIND_DEV_TOOLS
+      const auto c0 = Clock::now();
+#endif
+
+      // `mountSynchronously = false` would queue a rendering update on the RuntimeScheduler, whose queues only the JS thread may
+      // touch. `true` is what React Native uses for commits made off the JS thread.
+      commitTick(locked->getUIManager(), true);
+
+#if SHADEWIND_DEV_TOOLS
+      gLastAsyncCommitMs = ms(c0, Clock::now());
+#endif
+    });
+
+#if SHADEWIND_DEV_TOOLS
+    // the stats and the commit time are those of the previous run (this one finishes after the call returns)
+    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
 #else
-  (void)async; // Android commits on the JS thread for now
+    return jsi::Value::undefined();
+#endif
+  }
+#else
+  (void)async;
 #endif
 
   // `mountSynchronously = false` (hookDeferred without a scheduler) queues the mount with RuntimeScheduler::scheduleRenderingUpdate

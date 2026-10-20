@@ -1,7 +1,12 @@
 import { createElement, type ComponentType } from 'react';
 import { withUniwind as uniwindWithUniwind } from 'uniwind-internal/hoc/withUniwind.native';
 import { withUserStyle } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import {
+  NO_DEPS,
+  useEffectSubscription,
+  useEngineRef,
+  useShadewindStyle,
+} from './useShadewindStyle';
 
 // Uniwind's `withUniwind(Component)` for the common case: a component that takes `className` and passes `style` (and `ref`)
 // down to a host view (`<NativeText {...props} />`). Anything else (several *ClassName props, a manual options map) uses
@@ -26,11 +31,11 @@ export const withUniwind = (
   }
 
   const Engine = (props: AnyProps) => {
-    const { style, themed, onRegisterFailed } = useShadewindStyle(
-      props.className,
-      props
-    );
-    const ref = useEngineRef(themed, props.ref, onRegisterFailed);
+    const styled = useShadewindStyle(props.className, props);
+    const { style } = styled;
+    // the wrapped component may never attach `ref`: subscribe with an effect, the ref only binds the engine
+    useEffectSubscription(styled);
+    const ref = useEngineRef({ ...styled, deps: NO_DEPS }, props.ref);
 
     return createElement(Component, {
       ...props,

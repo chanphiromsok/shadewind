@@ -83,12 +83,12 @@ const fakeInternals = {
   UniwindListener: { subscribe: () => () => {} },
   StyleDependency: { Theme: THEME },
 };
-const hooks = { reducers: 0, effects: [], active: true };
+const hooks = { reducers: 0, effects: [], active: true, ref: null };
 const refStubs = {
   react: {
     useLayoutEffect: (fn, deps) => { hooks.effects.push(deps); },
     useReducer: () => { hooks.reducers++; return [0, () => {}]; },
-    useRef: (v) => ({ current: v }),
+    useRef: (v) => hooks.ref ?? { current: v }, // set hooks.ref to keep one component's ref across renders
   },
   'react-native': { StyleSheet: { flatten: (s) => s } },
   './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: hooks.active }) },
@@ -109,33 +109,152 @@ rm._compile(refOut.replace(/require\(/g, 'module.require('), 'useShadewindStyle.
 const { useEngineRef, renderThemeOf, useShadewindStyle } = rm.exports;
 const themedA = { light: { backgroundColor: 1 }, dark: { backgroundColor: 2 } };
 const themedB = { light: { color: 1 }, dark: { color: 2 } };
+const st = (themed, deps = [], rerender = () => {}) => ({ themed, deps, rerender }); // what useShadewindStyle hands to useEngineRef
 renderThemeOf.set(themedA, 'light');
 renderThemeOf.set(themedB, 'light');
 
-ok('engine ref: a view gets a plain function, without pause / resume', () => { const ref = useEngineRef(themedA, undefined, undefined); assert.strictEqual(typeof ref, 'function'); assert.strictEqual(ref.pause, undefined); assert.strictEqual(ref.resume, undefined); });
-ok('engine ref: attach registers once with the render theme', () => { engineCalls.length = 0; const node = {}; useEngineRef(themedA, undefined, undefined)(node); assert.deepStrictEqual(engineCalls, [['register', node, themedA, 'light']]); });
-ok('engine ref: another holder on an attached node claims no render theme (re-attach, styles changed)', () => { const node = {}; useEngineRef(themedA, undefined, undefined)(node); engineCalls.length = 0; useEngineRef(themedB, undefined, undefined)(node); assert.deepStrictEqual(engineCalls, [['register', node, themedB, undefined]]); });
-ok('engine ref: a pausable ref unbinds on pause and binds again on resume', () => { const ref = useEngineRef(themedA, undefined, undefined, true); const node = {}; ref(node); engineCalls.length = 0; ref.pause(); ref.resume(); assert.deepStrictEqual(engineCalls, [['unregister', node], ['register', node, themedA]]); });
-ok('engine ref: the user ref still receives the node', () => { const user = { current: null }; const node = {}; useEngineRef(themedA, user, undefined)(node); assert.strictEqual(user.current, node); });
-ok('engine ref: no themed styles, the user ref is returned unchanged', () => { const user = () => {}; assert.strictEqual(useEngineRef(null, user, undefined), user); });
+ok('engine ref: a view gets a plain function, without pause / resume', () => { const ref = useEngineRef(st(themedA), undefined); assert.strictEqual(typeof ref, 'function'); assert.strictEqual(ref.pause, undefined); assert.strictEqual(ref.resume, undefined); });
+ok('engine ref: attach registers once with the render theme', () => { engineCalls.length = 0; const node = {}; useEngineRef(st(themedA), undefined)(node); assert.deepStrictEqual(engineCalls, [['register', node, themedA, 'light']]); });
+ok('engine ref: another holder on an attached node claims no render theme (re-attach, styles changed)', () => { const node = {}; useEngineRef(st(themedA), undefined)(node); engineCalls.length = 0; useEngineRef(st(themedB), undefined)(node); assert.deepStrictEqual(engineCalls, [['register', node, themedB, undefined]]); });
+ok('engine ref: a pausable ref unbinds on pause and binds again on resume', () => { const ref = useEngineRef(st(themedA), undefined, true); const node = {}; ref(node); engineCalls.length = 0; ref.pause(); ref.resume(); assert.deepStrictEqual(engineCalls, [['unregister', node], ['register', node, themedA]]); });
+ok('engine ref: the user ref still receives the node', () => { const user = { current: null }; const node = {}; useEngineRef(st(themedA), user)(node); assert.strictEqual(user.current, node); });
+ok('engine ref: no themed styles, the user ref is returned unchanged', () => { const user = () => {}; assert.strictEqual(useEngineRef(st(null), user), user); });
 
 // useShadewindStyle and Text's selection colour (an accent className): no extra hooks without one, the theme in the subscription with one
-const render = (accent) => { hooks.reducers = 0; hooks.effects.length = 0; const out = useShadewindStyle('bg-card', {}, undefined, accent); return { out, deps: hooks.effects[0], reducers: hooks.reducers, effects: hooks.effects.length }; };
+// the subscription moved from a layout effect to the ref: `deps` is what the ref subscribes to (useEngineRef), kept as deps[0]
+const render = (accent) => { hooks.reducers = 0; hooks.effects.length = 0; const out = useShadewindStyle('bg-card', {}, undefined, accent); return { out, deps: [out.deps], reducers: hooks.reducers, effects: hooks.effects.length }; };
 const warn = console.warn; console.warn = () => {};
-ok('style: no accent, one reducer and one layout effect, subscribed to the non-theme dependencies only', () => { const r = render(undefined); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 1); assert.deepStrictEqual(r.deps, [[RTL]]); assert.strictEqual(r.out.accentColor, undefined); });
-ok('style: a theme-dependent accent keeps the hook count, returns its colour and subscribes to the theme too', () => { const r = render('accent-brand'); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 1); assert.strictEqual(r.out.accentColor, 'green'); assert.ok(r.deps[0].includes(THEME) && r.deps[0].includes(RTL)); });
+ok('style: no accent, one reducer and no layout effect, the ref subscribes to the non-theme dependencies only', () => { const r = render(undefined); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 0); assert.strictEqual(typeof r.out.rerender, 'function'); assert.deepStrictEqual(r.deps, [[RTL]]); assert.strictEqual(r.out.accentColor, undefined); });
+ok('style: a theme-dependent accent keeps the hook count, returns its colour and subscribes to the theme too', () => { const r = render('accent-brand'); assert.strictEqual(r.reducers, 1); assert.strictEqual(r.effects, 0); assert.strictEqual(r.out.accentColor, 'green'); assert.ok(r.deps[0].includes(THEME) && r.deps[0].includes(RTL)); });
 ok('style: an accent that does not depend on the theme leaves the theme out', () => { const r = render('accent-red-500'); assert.strictEqual(r.out.accentColor, 'red'); assert.ok(!r.deps[0].includes(THEME)); });
-ok('style: the subscription array is the same object across renders (the effect does not subscribe again)', () => { assert.strictEqual(render('accent-brand').deps[0], render('accent-brand').deps[0]); assert.strictEqual(render(undefined).deps[0], render(undefined).deps[0]); });
+ok('style: the subscription array is the same object across renders (the ref is not replaced)', () => { assert.strictEqual(render('accent-brand').deps[0], render('accent-brand').deps[0]); assert.strictEqual(render(undefined).deps[0], render(undefined).deps[0]); });
 ok('style: engine inactive, the view subscribes to the theme like Uniwind\'s own (with and without an accent)', () => { hooks.active = false; try { assert.ok(render(undefined).deps[0].includes(THEME)); assert.ok(render('accent-red-500').deps[0].includes(THEME)); assert.strictEqual(render('accent-red-500').deps[0], render('accent-red-500').deps[0]); assert.strictEqual(render(undefined).out.themed, null); } finally { hooks.active = true; } assert.ok(!render('accent-red-500').deps[0].includes(THEME)); });
 console.warn = warn;
 
 // src/uniwind/native.ts withUserStyle: the cached className style alone when there is no user style
 const nm = new Module('native'); nm.paths = [];
-nm.require = (name) => ({ default: function Host() {}, NativeText: function NativeText() {} }); // the React Native host components
+nm.require = (name) => name.includes('featureflags') ? { defaultTextToOverflowHidden: () => true } : { default: function Host() {}, NativeText: function NativeText() {} }; // the React Native host components, the text overflow flag on (its default)
 nm._compile(ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'native.ts'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText.replace(/require\(/g, 'module.require('), 'native.js');
 const { withUserStyle } = nm.exports;
 const cached = { backgroundColor: 'white' };
 ok('withUserStyle: no style prop (undefined, null, false): the cached object itself, no array', () => { assert.strictEqual(withUserStyle(cached, undefined), cached); assert.strictEqual(withUserStyle(cached, null), cached); assert.strictEqual(withUserStyle(cached, false), cached); });
 ok('withUserStyle: with a style prop, the user style comes after the className style', () => { const user = { padding: 4 }; assert.deepStrictEqual(withUserStyle(cached, user), [cached, user]); });
+// font-bold resolves to a number in Uniwind: the direct Text path takes it, with the weight as a string and Text.js's default
+// `overflow: 'hidden'` first, as Text.js would
+const { nativeTextStyle, textIsPlain } = nm.exports;
+const bold = { color: '#000', fontWeight: 700, fontSize: 24 };
+ok('nativeTextStyle: overflow hidden first, a numeric weight as a string, the same copy on every call, the source untouched', () => { const a = nativeTextStyle(bold); assert.deepStrictEqual(a, { overflow: 'hidden', color: '#000', fontWeight: '700', fontSize: 24 }); assert.deepStrictEqual(Object.keys(a)[0], 'overflow'); assert.strictEqual(nativeTextStyle(bold), a); assert.strictEqual(bold.fontWeight, 700); });
+ok('nativeTextStyle: a className overflow wins over the default; no style gets the default alone', () => { assert.strictEqual(nativeTextStyle({ overflow: 'visible' }).overflow, 'visible'); assert.deepStrictEqual(nativeTextStyle(undefined), { overflow: 'hidden' }); const s = { fontWeight: '600' }; assert.deepStrictEqual(nativeTextStyle(s), { overflow: 'hidden', fontWeight: '600' }); });
+ok('textIsPlain: a numeric weight in the className style stays on the direct path, in the user style it does not', () => { assert.strictEqual(textIsPlain({ className: 'font-bold', children: 1 }, bold), true); assert.strictEqual(textIsPlain({ className: 'x', children: 1, style: { fontWeight: 700 } }, cached), false); assert.strictEqual(textIsPlain({ className: 'x', children: 1 }, { ...bold, userSelect: 'none' }), false); });
+
+// src/uniwind/useShadewindStyle.ts subscribeShared: one Uniwind subscription per dependency list, a Set of views behind it.
+// The fake listener behaves like Uniwind's: a listener is called once per notified dependency it subscribed to.
+{
+  const { subscribeShared } = rm.exports;
+  const sets = new Map(); let uniwindSubscribes = 0, disposes = 0;
+  fakeInternals.UniwindListener = {
+    subscribe: (fn, deps) => { uniwindSubscribes++; deps.forEach((d) => { if (!sets.has(d)) sets.set(d, new Set()); sets.get(d).add(fn); }); return () => { disposes++; deps.forEach((d) => sets.get(d).delete(fn)); }; },
+  };
+  const notify = (deps) => deps.forEach((d) => (sets.get(d) ?? new Set()).forEach((fn) => fn()));
+  const calls = { a: 0, b: 0, c: 0 };
+  const depsA = [9], depsSame = [9], depsOther = [3, 9];
+  const offA = subscribeShared(() => calls.a++, depsA);
+  const offB = subscribeShared(() => calls.b++, depsSame);
+  const offC = subscribeShared(() => calls.c++, depsOther);
+  ok('subscribeShared: views with the same dependencies share one Uniwind subscription (another list gets its own)', () => { assert.strictEqual(uniwindSubscribes, 2); });
+  ok('subscribeShared: a notify reaches every view as often as its own subscription would', () => { notify([9]); assert.deepStrictEqual(calls, { a: 1, b: 1, c: 1 }); notify([3, 9]); assert.deepStrictEqual(calls, { a: 2, b: 2, c: 3 }); });
+  ok('subscribeShared: an unsubscribed view is not called, the group stays while a view is left', () => { offA(); notify([9]); assert.deepStrictEqual(calls, { a: 2, b: 3, c: 4 }); assert.strictEqual(disposes, 0); });
+  ok('subscribeShared: the last view of a group disposes the Uniwind subscription; a later view subscribes again', () => { offB(); assert.strictEqual(disposes, 1); notify([9]); assert.strictEqual(calls.b, 3); const offD = subscribeShared(() => {}, [9]); assert.strictEqual(uniwindSubscribes, 3); offD(); offC(); assert.strictEqual(disposes, 3); });
+  fakeInternals.UniwindListener = { subscribe: () => () => {} };
+}
+
+// useEngineRef subscribes from the ref (no layout effect): attach subscribes, detach (unmount, hide) unsubscribes
+{
+  const sets = new Map();
+  fakeInternals.UniwindListener = {
+    subscribe: (fn, deps) => { deps.forEach((d) => { if (!sets.has(d)) sets.set(d, new Set()); sets.get(d).add(fn); }); return () => deps.forEach((d) => sets.get(d).delete(fn)); },
+  };
+  const notify = (d) => (sets.get(d) ?? new Set()).forEach((fn) => fn());
+  ok('engine ref: attach subscribes the view, a notify re-renders it, detach unsubscribes', () => { let n = 0; const ref = useEngineRef(st(themedA, [RTL], () => n++), undefined); const node = {}; ref(node); notify(RTL); assert.strictEqual(n, 1); ref(null); notify(RTL); assert.strictEqual(n, 1); });
+  ok('engine ref: engine inactive (no themed styles) with dependencies, the ref subscribes and forwards, nothing registers', () => { let n = 0; engineCalls.length = 0; const user = { current: null }; const ref = useEngineRef(st(null, [THEME], () => n++), user); assert.notStrictEqual(ref, user); const node = {}; ref(node); assert.strictEqual(user.current, node); notify(THEME); assert.strictEqual(n, 1); assert.deepStrictEqual(engineCalls, []); ref(null); assert.strictEqual(user.current, null); notify(THEME); assert.strictEqual(n, 1); });
+  ok('engine ref: only the dependencies change, the binding stays (no unregister) and the new list is subscribed', () => { hooks.ref = { current: null }; let n = 0; const rr = () => n++; const node = {}; const first = useEngineRef(st(themedA, [RTL], rr), undefined); first(node); engineCalls.length = 0; const second = useEngineRef(st(themedA, [RTL, 3], rr), undefined); assert.notStrictEqual(second, first); first(null); second(node); assert.ok(!engineCalls.some((c) => c[0] === 'unregister')); notify(3); assert.strictEqual(n, 1); second(null); hooks.ref = null; });
+  ok('engine ref: other themed styles (className changed), the old binding is unbound on detach as before', () => { hooks.ref = { current: null }; const node = {}; const first = useEngineRef(st(themedA, [RTL]), undefined); first(node); engineCalls.length = 0; useEngineRef(st(themedB, [RTL]), undefined); first(null); hooks.ref = null; assert.ok(engineCalls.some((c) => c[0] === 'unregister' && c[1] === node)); });
+  fakeInternals.UniwindListener = { subscribe: () => () => {} };
+}
+
+// withUniwind: the wrapped component may ignore `ref`, so it subscribes with a layout effect and the ref only binds the engine
+{
+  const { useEffectSubscription, NO_DEPS } = rm.exports;
+  ok('withUniwind path: the effect subscribes even if the ref never attaches; the ref with NO_DEPS does not subscribe again', () => { hooks.effects.length = 0; const styled = { themed: null, deps: [THEME], rerender: () => {}, onRegisterFailed: undefined }; useEffectSubscription(styled); assert.strictEqual(hooks.effects.length, 1); assert.deepStrictEqual(hooks.effects[0], [[THEME]]); const user = () => {}; assert.strictEqual(useEngineRef({ ...styled, deps: NO_DEPS }, user), user); });
+}
+
+// src/uniwind/nativeResolver.ts: a fresh module per check (it keeps module state), a fake engine and a fake Uniwind store
+{
+  const resolverSrc = ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'nativeResolver.ts'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText.replace(/require\(/g, 'module.require(');
+  globalThis.requestIdleCallback = (cb) => cb();
+  globalThis.performance = globalThis.performance ?? { now: () => Date.now() };
+  const fresh = (loadResult = { ok: true, classes: 3, unsupported: 0 }) => {
+    const mod = new Module('nativeResolver'); mod.paths = [];
+    mod.require = (name) => {
+      if (name === '../internal') return { ShadewindEngine: { loadStyleTable: () => loadResult } };
+      if (name === './styleTable') return { buildStyleTable: () => ({ json: '{"t":1}', fallback: 0 }) };
+      throw new Error('unexpected import ' + name);
+    };
+    mod._compile(resolverSrc, 'nativeResolver.js');
+    const listeners = [];
+    const proto = { resolveStyles() { return { styles: { from: 'uniwind' }, dependencies: [] }; } };
+    const store = Object.assign(Object.create(proto), { stylesheet: {}, vars: { light: {}, dark: {} }, runtime: { currentThemeName: 'light', screen: { width: 400 } } });
+    const listener = { subscribe: (fn) => { listeners.push(fn); return () => {}; }, getSnapshot: () => 0 };
+    const notifyAll = () => listeners.forEach((fn) => fn());
+    return { api: mod.exports, store, listener, notifyAll };
+  };
+  const NO_SCOPE = { scopedTheme: null, variables: null };
+  globalThis.__swResolve = (className) => (className === 'unknown' ? undefined : { styles: { from: 'native' }, dependencies: [] });
+  ok('nativeResolver: a table built while disabled reads off, and ready once enabled (it no longer stays off)', () => {
+    const { api, store, listener } = fresh();
+    api.installNativeResolver(store, listener, 9);
+    api.nativeResolver.setEnabled(false);
+    api.nativeResolver.rebuild();
+    assert.strictEqual(api.nativeResolver.status().state, 'off');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+    api.nativeResolver.setEnabled(true);
+    assert.strictEqual(api.nativeResolver.status().state, 'ready');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'native');
+  });
+  ok('nativeResolver: a class the table lacks, a scoped theme and scoped variables go to Uniwind', () => {
+    const { api, store, listener } = fresh();
+    api.installNativeResolver(store, listener, 9);
+    api.nativeResolver.rebuild(); // install builds it when the JS thread is idle
+    assert.strictEqual(api.nativeResolver.status().state, 'ready');
+    assert.strictEqual(store.resolveStyles('unknown', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, { scopedTheme: 'dark', variables: null }).styles.from, 'uniwind');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, { scopedTheme: null, variables: {} }).styles.from, 'uniwind');
+  });
+  ok('nativeResolver: Variables, or a CSS reload (reinit replaces the stylesheet, then notifyAll), marks the table stale until the idle rebuild', () => {
+    const { api, store, listener, notifyAll } = fresh();
+    const realTimeout = globalThis.setTimeout; const pending = []; globalThis.setTimeout = (fn) => { pending.push(fn); return 0; };
+    try {
+      api.installNativeResolver(store, listener, 9);
+      pending.splice(0).forEach((fn) => fn());
+      assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'native');
+      store.stylesheet = {}; store.vars = { light: {}, dark: {} };
+      notifyAll();
+      assert.strictEqual(api.nativeResolver.status().state, 'stale');
+      assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+      pending.splice(0).forEach((fn) => fn());
+      assert.strictEqual(api.nativeResolver.status().state, 'ready');
+      assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'native');
+    } finally { globalThis.setTimeout = realTimeout; }
+  });
+  ok('nativeResolver: a table the engine cannot load fails without reporting its classes, and Uniwind keeps resolving', () => {
+    const { api, store, listener } = fresh({ ok: false, classes: 7, unsupported: 0, error: 'bad table' });
+    api.installNativeResolver(store, listener, 9);
+    api.nativeResolver.rebuild();
+    const st = api.nativeResolver.status();
+    assert.strictEqual(st.state, 'failed'); assert.strictEqual(st.classes, 0); assert.strictEqual(st.error, 'bad table');
+    assert.strictEqual(store.resolveStyles('a', {}, undefined, NO_SCOPE).styles.from, 'uniwind');
+  });
+  delete globalThis.__swResolve;
+}
 
 console.log(n + ' checks passed');

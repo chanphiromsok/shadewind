@@ -158,6 +158,11 @@ add_executable(harness_tests tests.cpp class_merge_tests.cpp style_resolver_test
 target_link_libraries(harness_tests PRIVATE harness_support GTest::gtest_main)
 target_compile_definitions(harness_tests PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+# CommitWorker.hpp alone (the thread Android's hookAsync commits on, and the coalescing of rapid switches): no React Native, no JNI
+add_executable(commit_worker_tests commit_worker_tests.cpp)
+target_include_directories(commit_worker_tests PRIVATE "${ENGINE}")
+target_link_libraries(commit_worker_tests PRIVATE Threads::Threads GTest::gtest_main)
+
 add_executable(harness_bench bench.cpp)
 target_link_libraries(harness_bench PRIVATE harness_support)
 

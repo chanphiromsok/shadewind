@@ -385,6 +385,8 @@ Reading `setTheme` (cpp/HybridShadewind.cpp) and `applyBackgroundsOnMain` (ios/S
 
 ## Port of the uniwind-benchmarks theme scenario (example/src/TheirBench.tsx)
 
+> `example/` is now the uniwind-benchmarks app itself (2026-10-19); the port below is at commit `bd6638d`.
+
 Their screen (header card + 1000 items, 2003 views), their config (10 theme changes, 100 ms apart), their timing
 (`performance.now()` at the theme call until `requestIdleCallback`), their colours (apps/uniwind/global.css), including the
 Text colour of every item. Launched at the root, no navigation stack, with `-theirBench 1`. Release, iPhone 17 Pro simulator

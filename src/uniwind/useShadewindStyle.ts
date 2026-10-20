@@ -3,6 +3,17 @@ import { StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
 import { getInternals, installUniwind } from './install';
 
+// Metro's inline requires turn every use of an imported binding into a module lookup at the call site (`_$$_REQUIRE(...)`), once
+// per render of every view. The per-view functions below read them from this object instead, filled once at module load.
+const R = {
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  StyleSheet,
+  getInternals,
+  installUniwind,
+};
+
 // Uniwind's `useStyle`, plus: register the per-theme colours with the engine and stop re-rendering on a theme switch, for the
 // components that are safe to hand over. Everything else (and everything when the engine is inactive) keeps Uniwind's behaviour.
 
@@ -285,6 +296,16 @@ const accentDeps = (
 
 let warnedAccent = false;
 
+// once per app: a helper, so a render only calls it (the flag is a module variable)
+const warnNoAccent = (accentClassName: string) => {
+  if (!warnedAccent) {
+    warnedAccent = true;
+    console.warn(
+      `[shadewind] selectionColorClassName '${accentClassName}' has no accent colour (use an accent-* class)`
+    );
+  }
+};
+
 const warnUnbound = () => {
   if (debugOn()) {
     console.warn(
@@ -299,7 +320,63 @@ const useContext = () =>
     require('uniwind-internal/core/context') as typeof import('uniwind-internal/core/context')
   ).useUniwindContext)();
 
-// Per styled view: 3 hooks, like Uniwind's useStyle (context, reducer, layout effect). With the engine active a theme change never
+// One Uniwind subscription per distinct dependency list, shared by every view that has it: a view's layout effect then adds its
+// `rerender` to a Set instead of calling UniwindListener.subscribe, which builds a Map, a dispose closure and a closure per
+// dependency for each view (2000 of them on a 2003-view mount). The shared listener is subscribed to the same dependencies, so a
+// notify reaches each view as often as its own subscription would have.
+// Order: Uniwind's store adds its cache-delete listeners during render, so a group subscribed earlier is called before a newer
+// cache entry is dropped within the same notify. That is fine only because `rerender` schedules a React update and renders later.
+type Group = { views: Set<() => void>; dispose: () => void };
+const groups = new Map<string, Group>();
+const groupKeys = new WeakMap<number[], string>();
+
+export const depsKey = (deps: number[]): string => {
+  let key = groupKeys.get(deps);
+
+  if (key === undefined) {
+    key = deps.join(',');
+    groupKeys.set(deps, key);
+  }
+
+  return key;
+};
+
+export const subscribeShared = (
+  rerender: () => void,
+  deps: number[]
+): (() => void) => {
+  const key = depsKey(deps);
+  let group = groups.get(key);
+
+  if (!group) {
+    const views = new Set<() => void>();
+
+    group = {
+      views,
+      dispose: R.getInternals()!.UniwindListener.subscribe(
+        () => views.forEach((view) => view()),
+        deps
+      ),
+    };
+    groups.set(key, group);
+  }
+
+  const joined = group;
+
+  joined.views.add(rerender);
+
+  return () => {
+    joined.views.delete(rerender);
+
+    // the last view of the group is gone: let Uniwind drop the shared listener (a remount subscribes again)
+    if (joined.views.size === 0 && groups.get(key) === joined) {
+      joined.dispose();
+      groups.delete(key);
+    }
+  };
+};
+
+// Per styled view: context and reducer here, the subscription in the ref (useEngineRef); Uniwind's useStyle has a layout effect too. With the engine active a theme change never
 // re-renders a view (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and
 // stale after a later switch. With the engine inactive the view subscribes to the theme like Uniwind's own components.
 export const useShadewindStyle = (
@@ -312,9 +389,8 @@ export const useShadewindStyle = (
 ) => {
   'use no memo';
 
-  const { active } = installUniwind();
-  const { UniwindStore, UniwindListener, StyleDependency } =
-    getInternals() ?? {};
+  const { active } = R.installUniwind();
+  const { UniwindStore, StyleDependency } = R.getInternals() ?? {};
 
   if (debugOn()) {
     const key = String(props.testID ?? className);
@@ -324,12 +400,12 @@ export const useShadewindStyle = (
 
   const context = useContext();
   // re-render for what is not the theme (orientation, viewport, RTL, font scale), like Uniwind does
-  const [, rerender] = useReducer(bump, 0);
+  const [, rerender] = R.useReducer(bump, 0);
   const current = UniwindStore!.getStyles(className, props, state, context);
   let hasInlineOverlap = false;
 
   if (props.style) {
-    const flat = StyleSheet.flatten(props.style) as
+    const flat = R.StyleSheet.flatten(props.style) as
       Record<string, unknown> | undefined;
 
     hasInlineOverlap =
@@ -352,30 +428,20 @@ export const useShadewindStyle = (
     ? (accent.styles as { accentColor?: string }).accentColor
     : undefined;
 
-  if (
-    __DEV__ &&
-    accentClassName?.trim() &&
-    accentColor === undefined &&
-    !warnedAccent
-  ) {
-    warnedAccent = true;
-    console.warn(
-      `[shadewind] selectionColorClassName '${accentClassName}' has no accent colour (use an accent-* class)`
-    );
+  if (__DEV__ && accentClassName?.trim() && accentColor === undefined) {
+    warnNoAccent(accentClassName);
   }
 
-  useLayoutEffect(
-    () =>
-      deps.length > 0 ? UniwindListener!.subscribe(rerender, deps) : undefined,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deps]
-  );
-
+  // no layout effect: the view subscribes from its ref (useEngineRef), which attaches and detaches at the same moments (commit,
+  // unmount, a Suspense / Activity / freeze hide and reveal); one effect less per view. A caller whose ref may never attach
+  // (withUniwind wraps any component) subscribes with useEffectSubscription instead.
   return {
     style: current.styles,
     themed: planned.themed,
     onRegisterFailed: warnUnbound,
     accentColor,
+    deps,
+    rerender: rerender as () => void,
   };
 };
 
@@ -387,25 +453,30 @@ type EngineRef = ((node: unknown) => void) & {
 };
 
 type RefHolder = {
-  themed: ThemedStyles;
+  themed: ThemedStyles | null;
   user: Ref<unknown> | undefined;
+  depsKey: string;
   ref: EngineRef;
   // a later render bound the view to other styles, or to none: this holder's detach unbinds
   superseded: boolean;
 };
 
 const makeHolder = (
-  themed: ThemedStyles,
+  themed: ThemedStyles | null,
   user: Ref<unknown> | undefined,
   onRegisterFailed: (() => void) | undefined,
-  pausable: boolean
+  pausable: boolean,
+  deps: number[],
+  rerender: () => void
 ): RefHolder => {
   let registered: unknown = null;
   let attached: unknown = null;
+  let unsubscribe: (() => void) | null = null;
 
   const holder: RefHolder = {
     themed,
     user,
+    depsKey: depsKey(deps),
     superseded: false,
     ref: null as unknown as EngineRef,
   };
@@ -413,7 +484,17 @@ const makeHolder = (
   const ref = (node: unknown) => {
     attached = node;
 
-    if (node) {
+    // re-render for what the engine does not handle (variables, viewport, RTL, font scale; the theme too when it is inactive)
+    if (node && !unsubscribe && deps.length > 0) {
+      unsubscribe = subscribeShared(rerender, deps);
+    } else if (!node && unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+
+    if (!themed) {
+      // not bound to the engine: the ref only subscribes
+    } else if (node) {
       // another host instance under the same holder (the element type changed): the old one is unmounted, forget it
       if (registered && registered !== node) {
         registered = null;
@@ -455,7 +536,12 @@ const makeHolder = (
     },
     resume() {
       // no render theme: the props React has now may still be the pressed ones, so let the next commit apply the theme
-      if (attached && !registered && engine().register(attached, themed)) {
+      if (
+        attached &&
+        !registered &&
+        themed &&
+        engine().register(attached, themed)
+      ) {
         registered = attached;
       }
     },
@@ -465,18 +551,54 @@ const makeHolder = (
 };
 
 /**
- * The ref for an engine view: registers on attach and forwards to the user's ref. A view that is not bound gets the user's own
- * ref back unchanged, so React attaches nothing for it. With `pausable` the ref also carries `pause()` / `resume()` (Pressable).
+ * The subscription as a layout effect, for a caller that cannot rely on its ref attaching (withUniwind: the wrapped component may
+ * ignore `ref`). Pass `NO_DEPS` to useEngineRef with it, so the ref does not subscribe a second time.
+ */
+export const useEffectSubscription = (styled: {
+  deps: number[];
+  rerender: () => void;
+}) => {
+  R.useLayoutEffect(
+    () =>
+      styled.deps.length > 0
+        ? subscribeShared(styled.rerender, styled.deps)
+        : undefined,
+
+    [styled.deps]
+  );
+};
+
+export const NO_DEPS: number[] = [];
+
+/** What useShadewindStyle returns and the ref needs. */
+type Styled = {
+  themed: ThemedStyles | null;
+  onRegisterFailed?: () => void;
+  deps: number[];
+  rerender: () => void;
+};
+
+/**
+ * The ref for a styled view: subscribes it to what re-renders it, registers it with the engine when it is bound, and forwards to
+ * the user's ref. A view with neither gets the user's own ref back unchanged, so React attaches nothing for it. With `pausable`
+ * the ref also carries `pause()` / `resume()` (Pressable).
  */
 export const useEngineRef = (
-  themed: ThemedStyles | null,
+  styled: Styled,
   userRef: Ref<unknown> | undefined,
-  onRegisterFailed?: () => void,
   pausable = false
 ): any => {
-  const holder = useRef<RefHolder | null>(null);
+  // Writes the holder during render on purpose, so never compiled. The old ref's detach runs in React's mutation phase, before
+  // the shadow tree commits, and must know by then whether this render replaced its binding (unbind) or not (a hide or an
+  // unmount keeps it); only the render knows, and the other carrier, a layout effect per view, is the mount cost the ref
+  // subscription removed. A render React throws away heals: every attach registers again.
+  'use no memo';
 
-  if (!themed) {
+  const holder = R.useRef<RefHolder | null>(null);
+  const { themed, deps } = styled;
+
+  /* eslint-disable react-hooks/immutability -- the render-time holder hand-over above */
+  if (!themed && deps.length === 0) {
     if (holder.current) {
       holder.current.superseded = true;
       holder.current = null;
@@ -486,19 +608,24 @@ export const useEngineRef = (
   }
 
   let h = holder.current;
+  const key = depsKey(deps);
 
-  if (!h || h.themed !== themed || h.user !== userRef) {
+  if (!h || h.themed !== themed || h.user !== userRef || h.depsKey !== key) {
     if (h) {
-      h.superseded = true;
+      // only the dependencies changed: keep the engine binding, the new holder finds the view registered
+      h.superseded = h.themed !== themed || h.user !== userRef;
     }
 
     h = holder.current = makeHolder(
       themed,
       userRef,
-      onRegisterFailed,
-      pausable
+      styled.onRegisterFailed,
+      pausable,
+      deps,
+      styled.rerender
     );
   }
+  /* eslint-enable react-hooks/immutability */
 
   return h.ref;
 };

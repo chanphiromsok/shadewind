@@ -9,6 +9,21 @@ import {
   withUserStyle,
 } from './native';
 import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import { jsx } from 'react/jsx-runtime';
+
+// read once at module load: Metro's inline requires would look each of these up on every render (see useShadewindStyle.ts), the
+// JSX runtime included, so the render below calls `jsx` itself
+const M = {
+  useShadewindStyle,
+  useEngineRef,
+  use,
+  TextAncestorContext,
+  viewIsPlain,
+  withUserStyle,
+  NativeView,
+  RNView,
+  jsx,
+};
 
 type Props = ViewProps & { className?: string };
 
@@ -16,29 +31,16 @@ type Props = ViewProps & { className?: string };
 export const View: ComponentType<Props> = copyComponentProperties(
   RNView,
   (props: Props) => {
-    const { style, themed, onRegisterFailed } = useShadewindStyle(
-      props.className,
-      props
-    );
-    const ref = useEngineRef(
-      themed,
-      (props as { ref?: any }).ref,
-      onRegisterFailed
-    );
+    const styled = M.useShadewindStyle(props.className, props);
+    const { style } = styled;
+    const ref = M.useEngineRef(styled, (props as { ref?: any }).ref);
 
     // inside a Text, or with props View.js rewrites: React Native's own View. Otherwise the host component directly.
-    if (!use(TextAncestorContext) && viewIsPlain(props)) {
-      return (
-        <NativeView
-          {...props}
-          ref={ref}
-          style={withUserStyle(style, props.style)}
-        />
-      );
-    }
-
-    return (
-      <RNView {...props} ref={ref} style={withUserStyle(style, props.style)} />
+    return M.jsx(
+      !M.use(M.TextAncestorContext) && M.viewIsPlain(props)
+        ? M.NativeView
+        : M.RNView,
+      { ...props, ref, style: M.withUserStyle(style, props.style) }
     );
   }
 );

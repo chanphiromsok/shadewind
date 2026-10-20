@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "perfetto-performance-analysis": {
+      "source": "Gracker/Perfetto-Skills",
+      "sourceType": "github",
+      "skillPath": "skills/perfetto-performance-analysis/SKILL.md",
+      "computedHash": "0bb80be9a15900bf37ff6ada84cdde70578edcaa5b519e75544d3b107121525b"
+    }
+  }
+}
