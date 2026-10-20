@@ -100,6 +100,16 @@ public:
       }
     }
 
+    firstChars_[0] = firstChars_[1] = 0;
+
+    for (const auto& name : orderSensitive_) {
+      const unsigned char first = name.empty() ? 0 : static_cast<unsigned char>(name.front());
+
+      if (first < 128) {
+        firstChars_[first >> 6] |= 1ULL << (first & 63);
+      }
+    }
+
     size_t cap = 1;
 
     while (cap < items.size() * 2 + 2) {
@@ -147,12 +157,15 @@ public:
 
         size_t j = i;
 
+        bool colon = false;
+
         while (j < len && !isSpace(s[j])) {
+          colon |= s[j] == ':';
           j++;
         }
 
         if (j > i) {
-          if (n >= kMax || !parse(s + i, j - i, toks[n])) {
+          if (n >= kMax || !parse(s + i, j - i, colon, toks[n])) {
             return false;
           }
 
@@ -198,15 +211,27 @@ public:
       }
     }
 
-    out.clear();
+    size_t total = 0;
 
     for (size_t k = 0; k < n; k++) {
       if (keep[k]) {
-        if (!out.empty()) {
-          out += ' ';
-        }
+        total += toks[k].n + 1;
+      }
+    }
 
-        out.append(toks[k].p, toks[k].n);
+    // one resize, then plain copies: no per-token capacity check
+    out.resize(total ? total - 1 : 0);
+
+    char* dst = out.data();
+
+    for (size_t k = 0; k < n; k++) {
+      if (keep[k]) {
+        std::memcpy(dst, toks[k].p, toks[k].n);
+        dst += toks[k].n;
+
+        if (dst != out.data() + out.size()) {
+          *dst++ = ' ';
+        }
       }
     }
 
@@ -290,6 +315,17 @@ private:
       return true;
     }
 
+    // a modifier whose first character starts no listed name cannot be one (names with a byte >= 128 first are never rejected)
+    if (modifier.empty()) {
+      return false;
+    }
+
+    const unsigned char first = static_cast<unsigned char>(modifier.front());
+
+    if (first < 128 && !((firstChars_[first >> 6] >> (first & 63)) & 1)) {
+      return false;
+    }
+
     for (const auto& name : orderSensitive_) {
       if (name == modifier) {
         return true;
@@ -300,8 +336,8 @@ private:
   }
 
   // modifiers sorted like tailwind-merge (barriers stay in place, see isBarrier), important marker either side
-  bool parse(const char* p, size_t n, Tok& out) const {
-    if (!std::memchr(p, ':', n) && p[0] != '!' && p[n - 1] != '!') {
+  bool parse(const char* p, size_t n, bool colon, Tok& out) const {
+    if (!colon && p[0] != '!' && p[n - 1] != '!') {
       const int g0 = find(p, n);
 
       if (g0 == -2) {
@@ -349,12 +385,14 @@ private:
       bn--;
     }
 
-    int run = 0;
+    if (np > 1) { // nothing to reorder with fewer than two modifiers
+      int run = 0;
 
-    for (int i = 0; i <= np; i++) {
-      if (i == np || isBarrier(parts[i])) {
-        std::sort(parts + run, parts + i);
-        run = i + 1;
+      for (int i = 0; i <= np; i++) {
+        if (i == np || isBarrier(parts[i])) {
+          std::sort(parts + run, parts + i);
+          run = i + 1;
+        }
       }
     }
 
@@ -384,6 +422,7 @@ private:
   size_t mask_ = 0;
   std::vector<std::vector<int>> kills_;
   std::vector<std::string> orderSensitive_;
+  uint64_t firstChars_[2] = {0, 0}; // bit per first character of an order-sensitive modifier
 };
 
 } // namespace margelo::nitro::shadewind::css

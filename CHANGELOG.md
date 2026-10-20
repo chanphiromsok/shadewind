@@ -13,6 +13,9 @@
 - Docs: measured Android findings in `docs/BENCHMARK.md`: where a re-mount's time goes (JS thread per function, a native trace), the
   floor for 2003 views (37 ms on the emulator, against 61 ms for the current tree), and what did not help (view recycling, skipping
   prewarm, a cheap path for theme-only classNames, which every className here fails because each reads CSS variables).
+- `cn()` (the native class merge) is about 10% faster per call (about 236 ns to about 213 ns on the test suite's cases): a first-character
+  check before the order-sensitive modifier lookup, one output resize instead of per-token appends, no sort for fewer than two
+  modifiers. The output is unchanged byte for byte (the 3,000-case `tailwind-merge` fixture suite, under AddressSanitizer and UBSan).
 - Not changed: re-mount time. Registering views by a prop instead of a ref was only checked to be possible (the prop reaches the C++
   props once it is in the host view config's attributes); it is not built.
 
