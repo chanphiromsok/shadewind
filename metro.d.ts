@@ -7,4 +7,7 @@
  *   '#00a8ff' is parsed once instead of for every view of every render. It does not change any result, and it does nothing for
  *   views the engine themes.
  */
-export function withShadewind<C extends object>(config: C, options?: { prebuildStyleTable?: boolean; cacheColors?: boolean }): C;
+export function withShadewind<C extends object>(
+  config: C,
+  options?: { prebuildStyleTable?: boolean; cacheColors?: boolean }
+): C;

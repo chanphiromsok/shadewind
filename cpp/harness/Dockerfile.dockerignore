@@ -1,6 +1,5 @@
 *
-!cpp/ThemeHook.hpp
-!cpp/ThemeEngine.hpp
+!cpp/*.hpp
 !cpp/css
 !cpp/harness
 cpp/harness/.deps
