@@ -396,7 +396,7 @@ const callDevTool = <K extends DevToolName>(
 };
 
 export const ShadewindEngine = {
-  /** Experimental: native tailwind-merge compatible class merge (see docs/ARCHITECTURE.md section 13). */
+  /** Experimental: native tailwind-merge compatible class merge (see docs/archive/RENDER_PIPELINE_DESIGN.md section 13). */
   loadClassTable(text: string): boolean {
     return getNative().loadClassTable(text);
   },

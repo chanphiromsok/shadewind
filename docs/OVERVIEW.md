@@ -22,11 +22,11 @@ JS THREAD                    NATIVE (C++, Nitro raw JSI)  [shipped]
 | Commit hook: per-theme prop slots, text recolour without a layout pass, background commit (iOS queue, Android `sw-commit` worker), Android `rawProps` | shipped, iOS + Android | `cpp/ThemeHook.hpp`, `cpp/HybridShadewind.cpp` |
 | Public API (`configure`, `setTheme`, `useThemed`, `useThemedProps`, `ThemedView`) | shipped | `src/index.tsx`, `docs/API.md` |
 | Uniwind adapter (`shadewind/uniwind`, `shadewind/metro`) | shipped, bridge to be retired | `src/uniwind`, `metro.cjs` |
-| Own Tailwind compiler (scan, compile, lower, binary table) | build chain measured on a real app (about 100 ms cold) and reviewed (first extractor was wrong, fixed), compiler not built | `docs/ARCHITECTURE.md` sections 8-9, `spikes/compiler-spike` |
-| AOT `className` resolver | design | `docs/ARCHITECTURE.md` section 10 |
+| Own Tailwind compiler (scan, compile, lower, binary table) | build chain measured on a real app (about 100 ms cold) and reviewed (first extractor was wrong, fixed), compiler not built | `docs/archive/RENDER_PIPELINE_DESIGN.md` sections 8-9, `spikes/compiler-spike` |
+| AOT `className` resolver | design | `docs/archive/RENDER_PIPELINE_DESIGN.md` section 10 |
 | SIMD family index | experiment, 2-4x per lookup on large trees, not wired in | `cpp/experiments` |
-| Native CSS colour parser, native `cn` merge, `shadewind-cn-table` | shipped (iOS verified, Android build not run) | `cpp/css`, `bin/cn-table.mjs`, `docs/ARCHITECTURE.md` section 14 |
-| Native Uniwind class resolution (`resolveStyles` from a per-theme table, prebuilt by Metro) | parity-tested against Uniwind in the native harness and through Uniwind's real Metro transformer, not yet built or measured on a device | `cpp/css/StyleResolver.hpp`, `src/uniwind/nativeResolver.ts`, `metro-babel-transformer.cjs`, `docs/ARCHITECTURE.md` section 19 |
+| Native CSS colour parser, native `cn` merge, `shadewind-cn-table` | shipped (iOS verified, Android build not run) | `cpp/css`, `bin/cn-table.mjs`, `docs/archive/RENDER_PIPELINE_DESIGN.md` section 14 |
+| Native Uniwind class resolution (`resolveStyles` from a per-theme table, prebuilt by Metro) | parity-tested against Uniwind in the native harness and through Uniwind's real Metro transformer, not yet built or measured on a device | `cpp/css/StyleResolver.hpp`, `src/uniwind/nativeResolver.ts`, `metro-babel-transformer.cjs`, `docs/archive/RENDER_PIPELINE_DESIGN.md` section 19 |
 
 Rules the design holds to:
 

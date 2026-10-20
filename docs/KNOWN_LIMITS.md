@@ -24,7 +24,7 @@ What shadewind does not do yet, and where it is not fully proven. Back to the [R
 
 - **Frozen screens and rapid toggles** (`freezeOnBlur`, Suspense / Activity) are covered by the native harness in `cpp/harness`, which
   runs React Native's renderer without a device: a revealed screen is themed inside the commit that shows it. On a device they were
-  checked by hand on the iOS simulator ([DESIGN.md](DESIGN.md), [LOCAL_TESTING.md](LOCAL_TESTING.md)).
+  checked by hand on the iOS simulator ([DESIGN.md](design/DESIGN.md), [LOCAL_TESTING.md](LOCAL_TESTING.md)).
 - **Android:** the harness also builds the renderer as on Android and checks what the mounting layer sends each Java view (`rawProps`).
   The package compiles with the NDK (arm64) and the switch ran on an emulator. Physical Android devices and other ABIs were not tried.
 - **The Android commit worker** (`sw-commit`, `cpp/CommitWorker.hpp`) has 17 native tests under ThreadSanitizer, AddressSanitizer and

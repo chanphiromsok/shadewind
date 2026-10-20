@@ -103,7 +103,7 @@ Three checks, because they find different things:
   destroyed).
 
 The iOS and Android overlays (`ios/ShadewindNative.mm`, `ThemeTransitionOverlay.kt`) are not reached by any of these: check them on a
-device (docs/THEME_TRANSITION_AGENT_REVIEW.md, "Memory on a device").
+device (docs/design/THEME_TRANSITION_AGENT_REVIEW.md, "Memory on a device").
 
 ## Regenerating the resolver fixture
 

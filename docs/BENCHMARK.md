@@ -77,10 +77,10 @@ What is left for Shadewind, measured with throwaway builds that remove one per-v
 as each other, against the build with the first two changes at 51.31 ms): without the per-view ref and registration 45.42 ms
 (-5.89 ms, -31 MiB), without the layout effect 47.04 ms, without the reducer and the effect 45.39 ms; without all of them (another
 session) 42.14 ms against 54.84 ms. Removing the ref means registering the views at theme-switch time instead of at mount
-(docs/HANDOFF.md); it is not done because a view whose className changes would keep its old binding until the next switch.
+(docs/archive/HANDOFF.md); it is not done because a view whose className changes would keep its old binding until the next switch.
 
 For scale: StyleSheet's own median on the same screen was 37.28 ms (measure.py, 2026-10-18); plain Uniwind 1.12 61.86 ms in the
-owner's run (docs/HANDOFF.md, another protocol). One simulator, not a device.
+owner's run (docs/archive/HANDOFF.md, another protocol). One simulator, not a device.
 
 Correctness of this version: a theme switch, a className change on a bound view after a switch, and `Uniwind.updateCSSVariables` on the
 benchmark screen each end with all 2007 views right (`inspect()`: tree, native props and layer) and nothing stale; the `example-real`
@@ -208,7 +208,7 @@ Reading it:
 
 The example's authors publish about 60.7 ms for plain Uniwind rendering, close to the 61.86 ms measured here. The engine-off build
 exists to measure cost only: with the engine inactive, views do not follow a theme switch (a known gap, see
-[ARCHITECTURE.md](ARCHITECTURE.md), "Mount cost"). To repeat the runs yourself, see
+[RENDER_PIPELINE_DESIGN.md](archive/RENDER_PIPELINE_DESIGN.md), "Mount cost"). To repeat the runs yourself, see
 [DEMO.md](DEMO.md).
 
 Same screen and method, with the strategy as the only difference (both Release, code at `9ee5b93` for `hookAsync`):
@@ -279,7 +279,7 @@ Uniwind behind: `Uniwind.setTheme` still drives the switch, only the engine's st
    ms after a switch on the JavaScript thread).
 6. Time to the screen, the only measure fair to every arm: record the simulator (`xcrun simctl io booted recordVideo out.mp4`) and
    count the frames from one switch to the next change on screen (per-frame brightness with ffmpeg `signalstats`, as in
-   `THEME_TRANSITION_TESTS.md`). A 60 Hz recording resolves 16.7 ms: it tells "same frame or N frames later", not milliseconds.
+   `design/THEME_TRANSITION_TESTS.md`). A 60 Hz recording resolves 16.7 ms: it tells "same frame or N frames later", not milliseconds.
 7. Check correctness once per arm with a Debug build and `shadewind/diagnostics`: every registered view matches the theme after a
    switch.
 
@@ -549,14 +549,14 @@ React Native with no engine. Not comparable with the simulator tables above; com
 | reveal a frozen tab (commit + flush), after a sync / async switch | 11.04 / 9.55 ms | 20.29 / 23.94 ms | 12.40 / 15.35 ms |
 | stale views in a reveal commit | - | 800 | 0 |
 
-The 44eb043 mount numbers grow with the number of re-mounts (see `docs/ARCHITECTURE.md` section 18).
+The 44eb043 mount numbers grow with the number of re-mounts (see `docs/archive/RENDER_PIPELINE_DESIGN.md` section 18).
 
 ### Same harness on React Native 0.88.0 (2026-10-17, one run each, back to back)
 
 The engine builds against 0.88.0 unchanged and passes all 15 tests (`docker build --build-arg RN_VERSION=0.88.0 ...`). React
 Native's own commits are cheaper (unrelated React commit on the 2003-view screen with no engine: 0.30 -> 0.09 ms), the engine's
 costs are about the same (sync switch 5.5 -> 4.8 ms, next React commit 3.8 -> 3.4 ms, reveal of a frozen tab 13.1 -> 12.3 ms), and
-the two Yoga costs described in `docs/ARCHITECTURE.md` section 18 are unchanged in 0.88.0 and in the 0.89 nightly of 2026-10-17
+the two Yoga costs described in `docs/archive/RENDER_PIPELINE_DESIGN.md` section 18 are unchanged in 0.88.0 and in the 0.89 nightly of 2026-10-17
 (`zeroOutLayoutRecursively` still clones hidden subtrees on a layout pass; a clone with new props still loses its Yoga
 configuration). With 4 frozen tabs an unrelated React commit costs about 9 ms with no engine on both versions.
 
@@ -654,7 +654,7 @@ component layer it measured 64.08 ms against 59.01 ms for the tree without it, t
 
 ### Node tagging spike: a `themeClassId` prop reaches the C++ props (2026-10-20, Android, React Native 0.86.2)
 
-The question from docs/ARCHITECTURE.md (spike 1): does a prop on a host view reach C++ without a JS ref? Adding `themeClassId` to
+The question from docs/archive/RENDER_PIPELINE_DESIGN.md (spike 1): does a prop on a host view reach C++ without a JS ref? Adding `themeClassId` to
 `validAttributes` of the `RCTView` and `RCTText` view configs (`ReactNativeViewConfigRegistry.get(String(NativeView))`, after the
 host component modules have loaded) made the prop appear in `node.getProps()->rawProps` of the shadow nodes: 2,100 `View`s rendered
 with it, tagged nodes seen at counts 1, 1,000 and 2,000 in the commit hook's walk. Without that patch the renderer drops it (it builds

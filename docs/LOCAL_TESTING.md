@@ -90,7 +90,7 @@ xcrun simctl launch --terminate-running-process booted org.reactjs.native.exampl
 ```
 
 5 launches per arm, arms interleaved (current, baseline, current, baseline, ...), reinstalling between arms (step 3 with the other checkout).
-Report per launch: `className` / `static` mount means, `className - static` (the in-launch statistic `docs/ARCHITECTURE.md` 17b
+Report per launch: `className` / `static` mount means, `className - static` (the in-launch statistic `docs/archive/RENDER_PIPELINE_DESIGN.md` 17b
 uses), idle and stall medians. Pass: `className - static` not worse than the baseline beyond the launch-to-launch spread; stall and idle
 not worse; `tree a/b` equal.
 

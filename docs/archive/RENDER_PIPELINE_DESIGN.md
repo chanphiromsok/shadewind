@@ -1,7 +1,7 @@
 # Shadewind render pipeline: architecture and ERD (own Tailwind compiler)
 
 Status: design, not implemented. Decision (2026-10-14): Shadewind no longer sits on top of Uniwind; it owns the style
-pipeline. The Opus memo (docs/STRATEGY.md) advised against building a compiler; that evidence is kept here as *requirements*.
+pipeline. The Opus memo (docs/archive/STRATEGY.md) advised against building a compiler; that evidence is kept here as *requirements*.
 
 ## 1. Requirements taken from the evidence
 

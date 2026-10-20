@@ -78,4 +78,4 @@ Off by default: switches are instant and the Account screen is exactly what the 
 That sets the default transition of the Uniwind adapter (every `Uniwind.setTheme` animates) and shows a "Theme transition (test)" row
 on Account: `hookDeferred` (Uniwind's setTheme), `hookAsync` (the engine alone, commit off the JS thread; Uniwind is not told, the
 next Uniwind switch puts them back in step) and `Toggle ×3` (three switches within 150 ms). What to record and measure:
-`docs/THEME_TRANSITION_TESTS.md` and `docs/THEME_TRANSITION_AGENT_REVIEW.md` at the repository root.
+`docs/design/THEME_TRANSITION_TESTS.md` and `docs/design/THEME_TRANSITION_AGENT_REVIEW.md` at the repository root.

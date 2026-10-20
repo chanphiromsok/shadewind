@@ -166,7 +166,7 @@ then `adb install` to keep app data).
    themed inside the reveal commit: 0 stale views, was 800), `display: none` subtrees are skipped, "proven" subtrees of the last
    committed root are skipped, one `registerMany` JSI call per commit. Harness numbers: mount of 2003 views (native part) 21.1 ms vs
    70.7 ms at 44eb043 (15.0 ms with no engine); unrelated React commit 0.26 ms vs 2.9 ms; the switch itself unchanged (~4.6 ms).
-   Details: `docs/ARCHITECTURE.md` section 18.
+   Details: `docs/archive/RENDER_PIPELINE_DESIGN.md` section 18.
 2. **`cn` fix**: `cpp/css/ClassMerge.hpp`, order-sensitive modifiers are sort barriers like tailwind-merge 3.
 3. **Native Tailwind class resolution** (the "Uniwind Pro 1 ms" idea): Uniwind's `resolveStyles` in C++.
    - `cpp/css/StyleResolver.hpp`: resolver over a per-theme table.
@@ -180,7 +180,7 @@ then `adb install` to keep app data).
      real bundler and Metro transformer); 25 resolver mutants all caught; `seam-check.mjs` 20 checks.
    - Real `react-native bundle` of example-real (iOS + Android): table in the bundle, `hermesc` compiles. Cost: 26 KB table,
      +29.6 KB JS bundle (+1.9 %), +26.2 KB Hermes bytecode (+1.2 %), parsed natively at startup.
-   - Details: `docs/ARCHITECTURE.md` section 19.
+   - Details: `docs/archive/RENDER_PIPELINE_DESIGN.md` section 19.
 4. **Native harness** (`cpp/harness`, README there): React Native 0.86.2's C++ renderer on Linux with a React stand-in; tests +
    benchmark; Docker. Also built **as on Android** (`HARNESS_ANDROID_STATE`): checks the colour each Java view would hold after
    Android's mount instructions, in all three React Native props modes. `docker run --rm shadewind-harness` runs everything
