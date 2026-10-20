@@ -250,12 +250,12 @@ const bump = (n: number) => n + 1;
 // A plan that left a theme-dependent className to React: the engine does not paint it and nothing else changes it on a switch. (A
 // className that does not depend on the theme, or has the same style in every theme, a scoped theme, and a view being pressed need no
 // re-render for a switch.)
-const needsThemeRerender = (plan: Plan): boolean =>
-  plan.themed === null &&
-  (plan.reason === 'data attributes' ||
-    plan.reason === 'inline style overlaps' ||
-    plan.reason === 'key missing in a theme' ||
-    plan.reason.startsWith('unsupported'));
+const needsThemeRerender = (result: Plan): boolean =>
+  result.themed === null &&
+  (result.reason === 'data attributes' ||
+    result.reason === 'inline style overlaps' ||
+    result.reason === 'key missing in a theme' ||
+    result.reason.startsWith('unsupported'));
 const NO_PLAN: Plan = { themed: null, reason: 'engine inactive' };
 
 // the dependencies of a resolved style without the theme, computed once per resolution (the store reuses `current`)

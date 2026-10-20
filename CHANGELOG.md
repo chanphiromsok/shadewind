@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - Fix: while the engine was active the adapter dropped the Theme dependency from every view's subscription, including views the engine does not
   paint (an inline `style` over a painted key, a property the engine does not paint such as `dark:opacity-40`, a key missing in a theme, data
