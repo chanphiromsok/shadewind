@@ -17,61 +17,20 @@ React Native 0.86 · New Architecture (Fabric) · iOS & Android · MIT · experi
 
 ## 📊 Benchmark
 
-![One theme switch of 2003 views, frame by frame: plain Uniwind against hookAsync, from 0 to 150 ms](docs/assets/benchmark-frames.png)
+The [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks) screen (thanks to the Uniwind team): 2003 views, one scenario
+re-mounting them and one switching light and dark, ten runs each. Release builds, median of twelve warm launches, time until the JS thread is idle.
 
-Thank you to the Uniwind team for publishing [`uniwind-benchmarks`](https://github.com/uni-stack/uniwind-benchmarks): we used its
-2003-view screen, switched between light and dark. Here is what one switch costs, one strategy at a time:
-
-| | JS thread busy | New theme on screen after |
+| | Mount 2003 views | Theme switch |
 |---|---|---|
-| **Uniwind (plain)** | 107.94 ms | 111 ms |
-| **`hookDeferred`** (what `Uniwind.setTheme` uses with shadewind) | 3.05 ms | 57 ms |
-| **`hookAsync`** | **0.11 ms** | **57 ms** |
+| iOS · `StyleSheet` (no styling library) | 38.94 ms | |
+| iOS · Uniwind 1.12 | 64.31 ms | 105.86 ms |
+| **iOS · Shadewind** | **49.93 ms** | **2.45 ms** |
+| Android · `StyleSheet` (numeric colours) | 55.38 ms | |
+| **Android · Shadewind 0.2.0** | **59 to 61 ms** | **0.14 ms** |
 
-How to read it, step by step:
-
-1. **Plain Uniwind** re-renders every component on the JS thread: busy for about 108 ms, and the cells show the new theme about 111 ms after the page background flips.
-2. **`hookDeferred`** writes the new theme into the views that are already mounted: about 3 ms on the JS thread, and the cells show it at about 57 ms.
-3. **`hookAsync`** gives the work to other threads: the JS thread is free after 0.11 ms. On screen it is not earlier: the cells show the new theme at about 57 ms, the same as `hookDeferred`. In a separate run (an earlier build) the main thread was busy for about 72 ms per switch with either strategy, so the remaining time looks like native work, not JavaScript. We have not traced it further.
-
-So `hookAsync` frees the JS thread *when you switch*; it does not make the screen update sooner. For all engine runs we also checked that all 2003 views ended in the new theme.
-
-All rows run the same 2003-view screen from this repository's `example-real` app (a port of the Uniwind benchmark, iOS simulator, Release build with dev tools on). "JS thread busy" is the median of six warm launches. "On screen" is measured from a screen recording: the time from the first frame that changes (the page background, taken as the moment of the `setTheme` call) to the frame where the cells change; one recording per row, median of its 10 switches. It is one simulator, not a device. One more caveat: with a component that reads the theme (`useCSSVariable`), `hookAsync` took about 12 ms of JS time on an earlier build; we did not re-measure that on the latest code. Details and how to repeat it: [docs/BENCHMARK.md](docs/BENCHMARK.md), or [run the 2003-view demo](docs/DEMO.md) yourself.
-
-**The Uniwind benchmark app itself** (`uniwind-benchmarks`, its own measuring script: Release, iOS simulator, twelve warm launches
-per build with StyleSheet control launches, all builds in one session):
-
-![Mount and theme switch on the uniwind-benchmarks app: StyleSheet 38.94 ms, Uniwind 64.31 ms, Shadewind 49.93 ms to mount; theme switch Uniwind 105.86 ms, Shadewind 2.45 ms](docs/assets/benchmark-e2e.png)
-
-| | Mount 2003 views | Theme switch (JS thread) |
-|---|---|---|
-| StyleSheet (no styling library) | 38.94 ms | |
-| Uniwind 1.12 | 64.31 ms | 105.86 ms |
-| **Shadewind** (this version) | **49.93 ms** | **2.45 ms** |
-
-Mount is down from 57.48 ms in the previous version (same session). The theme column is JS time only, like the first table's left
-column. Details, spreads and the method: [docs/BENCHMARK.md](docs/BENCHMARK.md#end-to-end-uniwind-benchmarks-render-and-theme-2026-10-19).
-
-**Android** (the same 2003-view screen, Pixel_8_Pro emulator, API 37, arm64 Release; one emulator, not a device; twelve warm launches
-per build, two sweeps in alternating order; absolute numbers depend on the machine):
-
-| | Before 0.2.0 (commit on the JS thread) | 0.2.0 (commit on a worker thread) |
-|---|---|---|
-| `hookAsync` theme switch, JS thread busy | 8.24 ms | **0.14 ms** |
-| New theme on screen after a switch | about 46 to 49 ms | about 46 to 48 ms |
-
-| Mounting the 2003 views | Median |
-|---|---|
-| Bare host components, no styling library, no engine (the floor on this emulator) | 37.17 ms |
-| `StyleSheet` with numeric colours | 55.38 ms |
-| **Shadewind** with Uniwind | **59 to 61 ms** |
-
-What this says, plainly: on Android 0.2.0 frees the JS thread during a switch (8.2 ms to 0.14 ms), but the colours reach the screen
-at the same time as before, because that is React Native's own main-thread mount (about 47 ms for this screen). Mounting is not
-faster than a numeric `StyleSheet` app: the engine's own share of a mount is up to about 11 ms of JS (timed, so an upper bound), and every className here reads CSS
-variables, so each view keeps its re-render subscription. We tried view recycling, skipping the prewarm and a cheaper path for
-theme-only classNames; none helped (measurements and why in
-[docs/BENCHMARK.md](docs/BENCHMARK.md#android-how-low-the-re-mount-can-go-2026-10-20)).
+The theme column is JS-thread time only; the colours reach the screen about 47 ms (Android) to 57 ms (iOS) after the call, because the
+main thread's mount is React Native's own work. iOS: iPhone 17 Pro simulator; Android: Pixel_8_Pro emulator; neither is a device.
+Spreads, the method and what did not help: [docs/BENCHMARK.md](docs/BENCHMARK.md).
 
 > 💚 **A note from the author.** Shadewind is vibe-coded with Claude Code by a dev who finds joy in programming. Take the code and numbers with a grain of salt, and kindly roast me where I’m wrong. 🤝
 
