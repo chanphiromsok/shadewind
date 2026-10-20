@@ -52,6 +52,27 @@ per build with StyleSheet control launches, all builds in one session):
 Mount is down from 57.48 ms in the previous version (same session). The theme column is JS time only, like the first table's left
 column. Details, spreads and the method: [docs/BENCHMARK.md](docs/BENCHMARK.md#end-to-end-uniwind-benchmarks-render-and-theme-2026-10-19).
 
+**Android** (the same 2003-view screen, Pixel_8_Pro emulator, API 37, arm64 Release; one emulator, not a device; twelve warm launches
+per build, two sweeps in alternating order; absolute numbers depend on the machine):
+
+| | Before 0.2.0 (commit on the JS thread) | 0.2.0 (commit on a worker thread) |
+|---|---|---|
+| `hookAsync` theme switch, JS thread busy | 8.24 ms | **0.14 ms** |
+| New theme on screen after a switch | about 46 to 49 ms | about 46 to 48 ms |
+
+| Mounting the 2003 views | Median |
+|---|---|
+| Bare host components, no styling library, no engine (the floor on this emulator) | 37.17 ms |
+| `StyleSheet` with numeric colours | 55.38 ms |
+| **Shadewind** with Uniwind | **59 to 61 ms** |
+
+What this says, plainly: on Android 0.2.0 frees the JS thread during a switch (8.2 ms to 0.14 ms), but the colours reach the screen
+at the same time as before, because that is React Native's own main-thread mount (about 47 ms for this screen). Mounting is not
+faster than a numeric `StyleSheet` app: the engine's own share of a mount is up to about 11 ms of JS (timed, so an upper bound), and every className here reads CSS
+variables, so each view keeps its re-render subscription. We tried view recycling, skipping the prewarm and a cheaper path for
+theme-only classNames; none helped (measurements and why in
+[docs/BENCHMARK.md](docs/BENCHMARK.md#android-how-low-the-re-mount-can-go-2026-10-20)).
+
 > 💚 **A note from the author.** Shadewind is vibe-coded with Claude Code by a dev who finds joy in programming. Take the code and numbers with a grain of salt, and kindly roast me where I’m wrong. 🤝
 
 > **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android has less testing
