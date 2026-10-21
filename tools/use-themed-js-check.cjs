@@ -32,6 +32,7 @@ const engine = { raw: [], unregistered: [], registered: new Set(), labels: [] };
 const stubs = {
   react: { createElement: (type, props) => ({ type, props }), useCallback: (f, deps) => useMemo(() => f, deps), useMemo, useSyncExternalStore() {} },
   'react-native': { Appearance: { addChangeListener: () => ({ remove() {} }), getColorScheme: () => 'light' }, Platform: { OS: 'ios' }, StyleSheet: { flatten: (s) => s }, Text: 'Text', View: 'View' },
+  './cn': {},
   './internal': {
     ShadewindEngine: {
       configure: () => ({ ok: true, maxThemes: 6 }),

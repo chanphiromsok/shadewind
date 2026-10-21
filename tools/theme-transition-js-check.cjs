@@ -11,6 +11,7 @@ const calls = [];
 const stubs = {
   react: { createElement() {}, useCallback: (f) => f, useMemo: (f) => f(), useSyncExternalStore() {} },
   'react-native': { Appearance: { addChangeListener: () => ({ remove() {} }), getColorScheme: () => 'light' }, Platform: { OS: 'ios' }, StyleSheet: {}, Text: {}, View: {} },
+  './cn': {},
   './internal': {
     ShadewindEngine: {
       configure: () => ({ ok: true, maxThemes: 6 }),

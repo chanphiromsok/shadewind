@@ -63,8 +63,8 @@ export const renderThemeOf = new WeakMap<object, string>();
 
 // Only a view's first attach is a fresh render of the current props. A re-attach (screen revealed after a freeze, Activity shown
 // again) finds whatever the tree holds now, which the commit hook may have re-themed while the view was unbound: claiming "rendered
-// with the current theme" there makes the engine skip it and the view stays on the old theme (measured: 77 of 174 views of a revealed
-// tab). So the render theme is passed once per node; a re-attach lets the next commit apply the current theme.
+// with the current theme" there makes the engine skip it and the view stays on the old theme. So the render theme is passed once per
+// node; a re-attach lets the next commit apply the current theme.
 const attachedNodes = new WeakSet<object>();
 
 export const renderThemeFor = (
@@ -87,8 +87,7 @@ type Plan = { themed: ThemedStyles | null; reason: string };
 
 // What getStyles would return for this className, state and (runtime) theme, without putting it in Uniwind's cache. A plan probes the
 // other themes and ALL_STATE once per className; through getStyles every probe stayed in Uniwind's cache with its own listener
-// subscription (about 1.2 KB of the 1.7 KB an entry costs on Hermes), three entries per className instead of the view's one, never
-// read again: a theme switch drops them unread (they depend on the theme). Same guards as getStyles (no className, a theme without
+// subscription, three entries per className instead of the view's one, never read again (docs/BENCHMARK.md, memory). Same guards as getStyles (no className, a theme without
 // a cache). The instance's own resolveStyles is the native resolver when the class table is loaded (nativeResolver.ts).
 export const resolveUncached = (
   className: string,
@@ -397,7 +396,7 @@ const useContext = () =>
 
 // One Uniwind subscription per distinct dependency list, shared by every view that has it: a view's layout effect then adds its
 // `rerender` to a Set instead of calling UniwindListener.subscribe, which builds a Map, a dispose closure and a closure per
-// dependency for each view (2000 of them on a 2003-view mount). The shared listener is subscribed to the same dependencies, so a
+// dependency for each view. The shared listener is subscribed to the same dependencies, so a
 // notify reaches each view as often as its own subscription would have.
 // Order: Uniwind's store adds its cache-delete listeners during render, so a group subscribed earlier is called before a newer
 // cache entry is dropped within the same notify. That is fine only because `rerender` schedules a React update and renders later.
