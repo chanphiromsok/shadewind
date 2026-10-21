@@ -1,14 +1,17 @@
 // `-soak 1`: mounts and unmounts a 1000-item list over and over, for a memory comparison of builds (scripts/memory-soak.sh samples the process
 // footprint). Per item: literal classNames (View + Text), every 10th item an expression className that changes with the cycle, and a wrapper
 // that forwards `{...props}` (the shape of an app's VStack). `-soakUnique N` adds N views per cycle with a className no earlier cycle used, the
-// worst case for a per-className cache. `-soakTheme 1` switches the theme every 20 cycles. `-soakCycles N` stops after N cycles (default 400).
+// worst case for a per-className cache. `-soakTheme 1` switches the theme every 20 cycles. `-soakCycles N` stops after N cycles (default 400, 0 means none).
 import { useEffect, useState } from 'react';
 import { ScrollView, Settings, Text, View, type ViewProps } from 'react-native';
 import { Uniwind } from 'uniwind';
 
 const ITEMS = 1000;
-const CYCLES = Number(Settings.get('soakCycles')) || 400;
+const cyclesArg = Settings.get('soakCycles');
+const CYCLES = cyclesArg === undefined || cyclesArg === null ? 400 : Number(cyclesArg);
 const UNIQUE = Number(Settings.get('soakUnique')) || 0;
+// `-soakUniqueStatic 1`: the unique classNames have no theme-dependent part (`size-10 w-[Npx]`), so Uniwind never invalidates their cache entries
+const UNIQUE_STATIC = Boolean(Settings.get('soakUniqueStatic'));
 // `-soakTheme 1`: a theme switch every 20 cycles (the engine's per-theme props and Uniwind's theme-dependent cache entries are part of the churn)
 const SWITCH = Boolean(Settings.get('soakTheme'));
 const THEMED = ['size-10 rounded-lg bg-brand', 'size-10 rounded-lg bg-card', 'size-10 rounded-lg bg-red-500'];
@@ -62,7 +65,7 @@ export function SoakBench() {
             <Box key={`s${i}`} className="size-10 bg-brand" testID={`soak-${i}`} />
           ))}
           {Array.from({ length: UNIQUE }, (_, i) => (
-            <View key={`u${i}`} className={`size-10 w-[${cycle * UNIQUE + i + 1}px] bg-card`} />
+            <View key={`u${i}`} className={`size-10 w-[${cycle * UNIQUE + i + 1}px]${UNIQUE_STATIC ? '' : ' bg-card'}`} />
           ))}
         </ScrollView>
       ) : null}
