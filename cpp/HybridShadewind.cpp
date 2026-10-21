@@ -2,10 +2,12 @@
 #include "CommitWorker.hpp"
 #include "css/ClassMerge.hpp"
 #include "css/StyleResolver.hpp"
+#include "ReactWarnings.hpp"
 #include "ResolveGlue.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
+SHADEWIND_REACT_HEADERS_BEGIN
 #include <react/renderer/components/root/RootShadowNode.h>
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/mounting/ShadowTree.h>
@@ -15,6 +17,7 @@
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/primitives.h>
+SHADEWIND_REACT_HEADERS_END
 #include <atomic>
 #include <cstring>
 #include <string>
@@ -45,21 +48,6 @@ std::atomic<double> gMaxBusyMs{0};
 
 double runLoopNowMs() {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-// Debug: counts of why a Paragraph clone could not skip layout (see RecoloredParagraph::reason); resets the counters.
-std::string reasonsText() {
-  std::string text;
-
-  for (int i = 0; i < 9; ++i) {
-    text += (i ? "," : "") + std::to_string(gReasons[i].exchange(0));
-  }
-
-  gRecolored = 0;
-  gRecolorSkipDirty = 0;
-  gRecolorSkipState = 0;
-
-  return text;
 }
 
 // ARGB of a SharedColor as an unsigned value. `Color` is an int on Android and a class on iOS (the template keeps the branch
@@ -185,7 +173,8 @@ void commitTick(UIManager& ui, bool mountSynchronously = true) {
 
 #if SHADEWIND_DEV_TOOLS
 // The hook's last commit, as the JS timing object (`ThemeTimings` in src/internal.tsx).
-jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs, double totalMs) {
+jsi::Object timingsOf(jsi::Runtime& rt, ThemeHook& hook, double commitMs, double totalMs) {
+  const HookStats stats = hook.stats();
   auto result = jsi::Object(rt);
 
   result.setProperty(rt, "views", static_cast<double>(stats.applied));
@@ -199,9 +188,7 @@ jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs,
   result.setProperty(
       rt,
       "misses",
-      std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
-          "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
-          reasonsText());
+      std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + hook.recolorCounters().takeReport());
   result.setProperty(rt, "commitMs", commitMs);
   result.setProperty(rt, "visualMs", gLastVisualMs.load());
   result.setProperty(rt, "totalMs", totalMs);
@@ -224,7 +211,6 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("registerMany", 4, &HybridShadewind::registerMany);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
     prototype.registerRawHybridMethod("flushPending", 0, &HybridShadewind::flushPending);
-    prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
     prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
     prototype.registerRawHybridMethod("loadClassTable", 1, &HybridShadewind::loadClassTable);
     prototype.registerRawHybridMethod("mergeClasses", 0, &HybridShadewind::mergeClasses);
@@ -534,17 +520,12 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 }
 #endif // SHADEWIND_DEV_TOOLS
 
-// Kept for API compatibility: registerMany flushes what this used to. A view registered alone (register) is themed here.
+// Themes the views registered since the last commit that registerMany did not flush (a view registered alone is themed here).
 jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
   if (auto* ui = attachedUIManager(rt); ui != nullptr && _engine.hook().hasStale()) {
     commitTick(*ui);
   }
 
-  return jsi::Value::undefined();
-}
-
-// Kept for API compatibility: it used to warm the pre-built nodes of the next switch, which are gone.
-jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
   return jsi::Value::undefined();
 }
 
@@ -811,7 +792,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 #if SHADEWIND_DEV_TOOLS
       const double elapsed = ms(clock.start, Clock::now());
 
-      return timingsOf(rt, _engine.hook().stats(), 0, elapsed);
+      return timingsOf(rt, _engine.hook(), 0, elapsed);
 #else
       return jsi::Value::undefined();
 #endif
@@ -856,7 +837,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
 #if SHADEWIND_DEV_TOOLS
     // the stats and the commit time are those of the previous run (this one finishes after the call returns)
-    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
+    return timingsOf(rt, _engine.hook(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
 #else
     return jsi::Value::undefined();
 #endif
@@ -891,7 +872,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
 #if SHADEWIND_DEV_TOOLS
     // the stats and the commit time are those of the previous run (this one finishes after the call returns)
-    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
+    return timingsOf(rt, _engine.hook(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
 #else
     return jsi::Value::undefined();
 #endif
@@ -903,13 +884,13 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   // `mountSynchronously = false` (hookDeferred without a scheduler) queues the mount with RuntimeScheduler::scheduleRenderingUpdate
   // (Scheduler.cpp), which only the JS thread may call, inside a task. Mounted at once instead, Android showed LinearGradient colours
   // 4-8 frames after the bound views. Mounted at the end of this task, it still came before React's commit of a render React did
-  // not do in this task (colours read with useResolveClassNames / useCSSVariable): that is why hookDeferred no longer commits here.
+  // not do in this task (colours read with useResolveClassNames / useCSSVariable): so hookDeferred does not commit here.
   commitTick(*ui, !deferred);
 
 #if SHADEWIND_DEV_TOOLS
   const double elapsed = ms(clock.start, Clock::now());
 
-  return timingsOf(rt, _engine.hook().stats(), elapsed, elapsed);
+  return timingsOf(rt, _engine.hook(), elapsed, elapsed);
 #else
   return jsi::Value::undefined(); // timings exist only with SHADEWIND_DEV_TOOLS
 #endif

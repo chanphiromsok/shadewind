@@ -2,13 +2,17 @@
 
 #include "DevTools.hpp"
 #include "Diagnostics.hpp"
+#include "ReactWarnings.hpp"
 
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <array>
 #include <cstring>
+#include <string>
 #include <folly/container/F14Map.h>
 #include <folly/dynamic.h>
+SHADEWIND_REACT_HEADERS_BEGIN
 #include <react/renderer/components/root/RootShadowNode.h>
 #include <react/renderer/components/text/ParagraphProps.h>
 #include <react/renderer/components/text/ParagraphShadowNode.h>
@@ -21,6 +25,7 @@
 #include <react/renderer/mounting/ShadowTree.h>
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerCommitHook.h>
+SHADEWIND_REACT_HEADERS_END
 #include <mutex>
 #include <optional>
 #include <string>
@@ -132,9 +137,26 @@ struct RecoloredParagraph {
   int reason = 0; // 0 ok, 1 children replaced, 2 no state, 3 not a Paragraph, 4 not Yoga/dirty, 5 state type mismatch, 6 no fragments, 7 no props, 8 no fragment carried the old colour
 };
 
-#if SHADEWIND_DEV_TOOLS
-inline std::atomic<int> gReasons[9];
-#endif
+// Debug counters of one hook: how many Paragraph clones took the no-layout path, and why the others did not (reasons are
+// RecoloredParagraph::reason). Touched only with SHADEWIND_DEV_TOOLS; a hook owns its own, so a second hook (or a test) starts at zero.
+struct RecolorCounters {
+  std::atomic<int> reasons[9]{};
+  std::atomic<int> recolored{0};
+  std::atomic<int> skipDirty{0};
+  std::atomic<int> skipState{0};
+
+  /** "recolored/skipDirty/skipState reasons r0,r1,...", and resets all of them. */
+  std::string takeReport() {
+    std::string text = std::to_string(recolored.exchange(0)) + "/" + std::to_string(skipDirty.exchange(0)) + "/" +
+        std::to_string(skipState.exchange(0)) + " reasons ";
+
+    for (int i = 0; i < 9; ++i) {
+      text += (i ? "," : "") + std::to_string(reasons[i].exchange(0));
+    }
+
+    return text;
+  }
+};
 
 inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const SharedColor& color, bool childrenReplaced) {
   RecoloredParagraph out;
@@ -233,13 +255,6 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
   return out;
 }
 
-#if SHADEWIND_DEV_TOOLS
-// Debug counters: how many Paragraph clones took the no-layout path, and why the others did not.
-inline std::atomic<int> gRecolored{0};
-inline std::atomic<int> gRecolorSkipDirty{0};
-inline std::atomic<int> gRecolorSkipState{0};
-#endif
-
 // ShadowNode::SharedListOfShared, spelled out: React Native 0.86 deprecates the alias
 using SharedChildren = std::shared_ptr<const std::vector<std::shared_ptr<const ShadowNode>>>;
 
@@ -249,6 +264,7 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
     const Props::Shared& props,
     const SharedChildren& children,
     const TypedDelta& delta,
+    RecolorCounters& counters,
     bool* textWithoutLayout = nullptr) {
   RecoloredParagraph recolored;
 
@@ -263,14 +279,14 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
 
 #if SHADEWIND_DEV_TOOLS
   if (delta.text && std::strcmp(node.getComponentName(), ParagraphComponentName) == 0) {
-    ++gReasons[recolored.reason];
+    ++counters.reasons[recolored.reason];
 
     if (recolored.keepClean) {
-      ++gRecolored;
+      ++counters.recolored;
     } else if (YogaAccess::node(static_cast<const YogaLayoutableShadowNode&>(node)).isDirty()) {
-      ++gRecolorSkipDirty;
+      ++counters.skipDirty;
     } else {
-      ++gRecolorSkipState;
+      ++counters.skipState;
     }
   }
 #endif
@@ -329,6 +345,12 @@ struct HookStats {
  */
 class ThemeHook final : public UIManagerCommitHook {
 public:
+  /**
+   * Proof that _mutex is held. The members that need it (syncTheme, internTheme, addLocked, ...) take one, so calling them without
+   * the lock does not compile. Lock order: _mutex, then _mountMutex or the diagnostic log's own.
+   */
+  using Lock = std::unique_lock<std::mutex>;
+
   void commitHookWasRegistered(const UIManager& uiManager) noexcept override {
     setContextContainer(uiManager.getContextContainer());
   }
@@ -336,19 +358,19 @@ public:
   void commitHookWasUnregistered(const UIManager&) noexcept override {}
 
   void setContextContainer(std::shared_ptr<const ContextContainer> container) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     _contextContainer = std::move(container);
   }
 
   // Interns the declared theme names in order, so slot ids are deterministic and a later typo cannot take a slot.
   // Returns false when more than kMaxThemes names are declared.
   bool declareThemes(const std::vector<std::string>& names) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     bool ok = true;
 
 
     for (const auto& name : names) {
-      ok = internTheme(name) != kNoTheme && ok;
+      ok = internTheme(lock, name) != kNoTheme && ok;
     }
 
     return ok;
@@ -362,13 +384,13 @@ public:
   std::shared_ptr<const ThemeStyle> makeStyle(
       const std::vector<std::pair<std::string, std::shared_ptr<const TypedDelta>>>& byName,
       int64_t id = -1) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     auto style = std::make_shared<ThemeStyle>();
 
     style->id = id;
 
     for (const auto& [name, delta] : byName) {
-      if (const auto id = internTheme(name); id != kNoTheme) {
+      if (const auto id = internTheme(lock, name); id != kNoTheme) {
         style->byTheme[id] = delta;
       }
     }
@@ -393,10 +415,10 @@ public:
       const char* componentName,
       SurfaceId surface,
       bool renderedWithCurrentTheme = false) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    syncTheme(); // "the current theme" is the one setTheme published last, also when no commit has run since
-    beforeAdding(1);
-    addLocked(family, std::move(style), std::move(base), componentName, surface, renderedWithCurrentTheme);
+    Lock lock(_mutex);
+    syncTheme(lock); // "the current theme" is the one setTheme published last, also when no commit has run since
+    beforeAdding(lock, 1);
+    addLocked(lock, family, std::move(style), std::move(base), componentName, surface, renderedWithCurrentTheme);
   }
 
   // The registrations of one React commit, under one lock hold (a mount registers thousands).
@@ -405,35 +427,34 @@ public:
       return;
     }
 
-    std::lock_guard<std::mutex> lock(_mutex);
-    syncTheme();
-    beforeAdding(batch.size());
+    Lock lock(_mutex);
+    syncTheme(lock);
+    beforeAdding(lock, batch.size());
 
     for (auto& r : batch) {
-      addLocked(r.family, std::move(r.style), std::move(r.base), r.componentName, r.surface, r.renderedWithCurrentTheme);
+      addLocked(lock, r.family, std::move(r.style), std::move(r.base), r.componentName, r.surface, r.renderedWithCurrentTheme);
     }
   }
 
-  // Caller holds _mutex.
-  void beforeAdding(size_t count) {
+  void beforeAdding(const Lock& held, size_t count) {
     const uint32_t diagnostics = _log.flags();
 
     // before the insert: a new view can take the address of a released one, whose unmount would then never be reported
     if (diagnostics & (diagnostics::kMounts | diagnostics::kUnmounts)) {
-      collectExpired(diagnostics);
+      collectExpired(held, diagnostics);
     }
 
     // unmounted views leave expired entries behind; drop them as the map grows, not only every 128 commits. Their props (the
     // prewarmed ones above all) are freed by the next prewarm, off the JS thread: a remount registers right after the unmount,
     // and freeing the old screen's props here was a third of the registration's cost.
     if (_entries.size() + count > _purgeAt) {
-      purgeExpired(&_graveyard);
+      purgeExpired(held, &_graveyard);
       _purgeAt = std::max<size_t>(1024, (_entries.size() + count) * 2);
     }
   }
 
-  // Caller holds _mutex.
   void addLocked(
+      const Lock&,
       const std::shared_ptr<const ShadowNodeFamily>& family,
       std::shared_ptr<const ThemeStyle> style,
       Props::Shared base,
@@ -488,7 +509,7 @@ public:
   }
 
   void remove(const ShadowNodeFamily* family) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     const auto it = _entries.find(family);
 
     if (it == _entries.end()) {
@@ -514,8 +535,8 @@ public:
     return _log;
   }
 
-  // Publishes the theme for the next commit without taking _mutex, which a background (hookAsync) commit holds for its whole walk:
-  // the JS thread used to wait for it here. A walk already running keeps the theme it started with; the commit that follows the
+  // Publishes the theme for the next commit without taking _mutex, which a background (hookAsync) commit holds for its whole walk,
+  // so the JS thread never waits for a walk. A walk already running keeps the theme it started with; the commit that follows the
   // switch picks the new one up (syncTheme).
   void setTheme(const std::string& theme) {
     // Only the JS thread writes the theme names (declareThemes, makeStyle, an undeclared name here), so it may look a declared
@@ -523,8 +544,8 @@ public:
     ThemeId id = findTheme(theme);
 
     if (id == kNoTheme) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      id = internTheme(theme);
+      Lock lock(_mutex);
+      id = internTheme(lock, theme);
     }
 
     const uint64_t epoch = (_requested.load(std::memory_order_relaxed) >> 8) + 1;
@@ -564,15 +585,15 @@ public:
   // True when `root`, a committed root, already shows the current theme: this hook returned it for the latest setTheme and no view
   // registered since. A deferred switch ('hookDeferred') asks this to tell whether a React commit carried the theme.
   bool carriesTheme(const RootShadowNode::Shared& root) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    syncTheme();
-    return _theme == kNoTheme || provenTree(root);
+    Lock lock(_mutex);
+    syncTheme(lock);
+    return _theme == kNoTheme || provenTree(lock, root);
   }
 
   // A view registered with another theme's props since the last commit: the caller commits once so it is themed now.
   bool hasStale() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    syncTheme();
+    Lock lock(_mutex);
+    syncTheme(lock);
     return _stale && _theme != kNoTheme;
   }
 
@@ -592,7 +613,7 @@ public:
     std::vector<Entry> released; // declared first: destroyed last, after every lock below is released
 
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      Lock lock(_mutex);
       std::vector<std::weak_ptr<const ShadowNodeFamily>> queue;
 
       released.swap(_graveyard);
@@ -640,7 +661,7 @@ public:
       }
     }
 
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
 
     for (size_t i = 0; i < jobs.size(); i++) {
       auto entry = _entries.find(jobs[i].family);
@@ -661,8 +682,8 @@ public:
 #if SHADEWIND_DEV_TOOLS
   // Debug (inspect): what the hook believes about one view, next to the props the committed tree holds for it.
   std::string describe(const ShadowNodeFamily* family, const Props* current) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    syncTheme();
+    Lock lock(_mutex);
+    syncTheme(lock);
     const auto it = _entries.find(family);
 
     if (it == _entries.end()) {
@@ -683,8 +704,8 @@ public:
   };
 
   std::vector<Registered> registered() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    syncTheme();
+    Lock lock(_mutex);
+    syncTheme(lock);
     std::vector<Registered> result;
 
     result.reserve(_entries.size());
@@ -700,19 +721,22 @@ public:
 #endif
 
   size_t size() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     return _entries.size();
   }
 
   // Entries of unmounted views waiting for the next prewarm to free them.
   size_t pendingRelease() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     return _graveyard.size();
   }
 
+  /** Debug: the Paragraph recolor counters of this hook (takeReport resets them). */
+  RecolorCounters& recolorCounters() { return _recolor; }
+
   // The last commit's counts and times. Filled only with SHADEWIND_DEV_TOOLS (zeros otherwise).
   HookStats stats() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
     return _stats;
   }
 
@@ -727,33 +751,33 @@ public:
 #endif
 
     // One pass over the new tree, under one lock hold: decide per registered view, clone it and record what was applied.
-    std::unique_lock<std::mutex> lock(_mutex);
+    Lock lock(_mutex);
 
     // once, here: the walk, remember() and provenTree() must all see the theme and epoch this tree is themed for, even when
     // setTheme publishes another one meanwhile
-    syncTheme();
+    syncTheme(lock);
     const uint32_t diagnostics = _log.flags();
 
     // diagnostics: released views are dropped (and reported) at every commit, so the registered count is the live one
     if (diagnostics & (diagnostics::kMounts | diagnostics::kUnmounts)) {
-      collectExpired(diagnostics);
+      collectExpired(lock, diagnostics);
     }
 
     if (_theme == kNoTheme || _entries.empty()) {
       // nothing registered can be wrong in it: the next commit may skip what it shares with this tree
       _stale = false;
-      remember(newRoot);
+      remember(lock, newRoot);
 
       return newRoot;
     }
 
     // views that unmounted never show up in a walk, so drop their entries now and then
     if ((++_commits & 127) == 0) {
-      purgeExpired();
+      purgeExpired(lock);
       _graveyard.clear(); // normally prewarm frees these; a backstop if none ran since
     }
 
-    Walk walk;
+    Walk walk{lock};
 
     walk.theme = _theme;
     walk.epoch = _epoch;
@@ -761,7 +785,7 @@ public:
 
     // The previous tree proves its unchanged subtrees right only if this hook produced it for the current theme and no view
     // registered late since. A commit that failed after the hook ran never becomes a previous tree, so it proves nothing.
-    const ShadowNode* old = provenTree(oldRoot) ? oldRoot.get() : nullptr;
+    const ShadowNode* old = provenTree(lock, oldRoot) ? oldRoot.get() : nullptr;
 
     _stale = false;
 
@@ -769,7 +793,7 @@ public:
     auto result = cloned ? std::static_pointer_cast<RootShadowNode>(cloned) : newRoot;
 
 
-    remember(result);
+    remember(lock, result);
 
 #if SHADEWIND_DEV_TOOLS || SHADEWIND_DIAGNOSTICS
     const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
@@ -839,6 +863,7 @@ private:
   };
 
   struct Walk {
+    const Lock& held; // the lock the whole walk runs under (walkTree and what it calls need it)
     ThemeId theme = kNoTheme;
     uint64_t epoch = 0;
     int scanned = 0;
@@ -864,16 +889,18 @@ private:
     return kNoTheme;
   }
 
-  // Caller holds _mutex: the theme and epoch setTheme published last become the hook's.
-  void syncTheme() {
+  // The theme and epoch setTheme published last become the hook's.
+  void syncTheme(const Lock& held) {
+    assert(held.owns_lock() && held.mutex() == &_mutex);
+    (void)held;
     const uint64_t requested = _requested.load(std::memory_order_acquire);
 
     _epoch = requested >> 8;
     _theme = static_cast<ThemeId>(requested & 0xFF);
   }
 
-  // Caller holds _mutex. Returns kNoTheme when more than kMaxThemes distinct themes exist.
-  ThemeId internTheme(const std::string& name) {
+  // Returns kNoTheme when more than kMaxThemes distinct themes exist.
+  ThemeId internTheme(const Lock&, const std::string& name) {
     for (size_t i = 0; i < _themeNames.size(); i++) {
       if (_themeNames[i] == name) {
         return static_cast<ThemeId>(i);
@@ -889,10 +916,9 @@ private:
     return static_cast<ThemeId>(_themeNames.size() - 1);
   }
 
-  // Caller holds _mutex.
-  // Caller holds _mutex. With `graveyard`, the dropped entries are moved there (to be freed later, without the lock) instead of
+  // With `graveyard`, the dropped entries are moved there (to be freed later, without the lock) instead of
   // being freed here.
-  void purgeExpired(std::vector<Entry>* graveyard = nullptr) {
+  void purgeExpired(const Lock&, std::vector<Entry>* graveyard = nullptr) {
     std::vector<const ShadowNodeFamily*> expired;
 
     for (const auto& [key, entry] : _entries) {
@@ -916,8 +942,8 @@ private:
     }
   }
 
-  // Caller holds _mutex. Diagnostics: drops the entries of released views, reporting each one when unmounts are reported.
-  void collectExpired(uint32_t diagnostics) {
+  // Diagnostics: drops the entries of released views, reporting each one when unmounts are reported.
+  void collectExpired(const Lock&, uint32_t diagnostics) {
     std::vector<const ShadowNodeFamily*> expired;
 
     for (const auto& [key, entry] : _entries) {
@@ -945,8 +971,8 @@ private:
     }
   }
 
-  // Caller holds _mutex. The committed tree is the very root object a hook returned (ShadowTree::tryCommit stores it as is).
-  bool provenTree(const RootShadowNode::Shared& oldRoot) const {
+  // The committed tree is the very root object a hook returned (ShadowTree::tryCommit stores it as is).
+  bool provenTree(const Lock&, const RootShadowNode::Shared& oldRoot) const {
     for (const auto& proof : _proofs) {
       if (proof.pointer == oldRoot.get() && !proof.root.expired()) {
         return proof.epoch == _epoch && proof.registrations == _registrationGeneration;
@@ -956,8 +982,8 @@ private:
     return false;
   }
 
-  // Caller holds _mutex. Several surfaces and retried commits interleave, hence a few slots.
-  void remember(const std::shared_ptr<const ShadowNode>& root) {
+  // Several surfaces and retried commits interleave, hence a few slots.
+  void remember(const Lock&, const std::shared_ptr<const ShadowNode>& root) {
     _proofs[_nextProof] = Proof{root, root.get(), _epoch, _registrationGeneration};
     _nextProof = (_nextProof + 1) % _proofs.size();
 
@@ -991,7 +1017,7 @@ private:
   }
 
   // Returns the replacement for `node`, or nullptr when nothing under it changed. `old` is the same view in a proven previous
-  // tree (or null). Caller holds _mutex.
+  // tree (or null).
   std::shared_ptr<ShadowNode> walkTree(const ShadowNode& node, const ShadowNode* old, Walk& walk) {
 #if SHADEWIND_DEV_TOOLS
     using Clock = std::chrono::steady_clock;
@@ -1101,7 +1127,7 @@ private:
         ++walk.missChildren;
       }
 
-      result = cloneThemed(node, target, newChildren, *delta, textWithoutLayout);
+      result = cloneThemed(node, target, newChildren, *delta, _recolor, textWithoutLayout);
       applied = target.get();
     } else {
       ++walk.missNotOurs;
@@ -1109,13 +1135,13 @@ private:
 #if SHADEWIND_DEV_TOOLS
       const auto p0 = Clock::now();
 #endif
-      auto props = buildProps(node, *delta);
+      auto props = buildProps(walk.held, node, *delta);
 
 #if SHADEWIND_DEV_TOOLS
       walk.propsNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - p0).count();
 #endif
 
-      result = cloneThemed(node, props, newChildren, *delta, textWithoutLayout);
+      result = cloneThemed(node, props, newChildren, *delta, _recolor, textWithoutLayout);
       applied = props.get();
 
       // React changed the props: they are the new source of truth. Everything built from the old ones is stale; the next
@@ -1211,8 +1237,7 @@ private:
     return nullptr;
   }
 
-  // Caller holds _mutex.
-  Props::Shared buildProps(const ShadowNode& node, const TypedDelta& delta) {
+  Props::Shared buildProps(const Lock&, const ShadowNode& node, const TypedDelta& delta) {
     const auto surface = node.getFamily().getSurfaceId();
 
     if (auto typed = buildPropsFrom(*_contextContainer, surface, node.getComponentName(), *node.getProps(), delta)) {
@@ -1283,6 +1308,7 @@ private:
   uint64_t _commits = 0;
   size_t _purgeAt = 1024;
   HookStats _stats;
+  RecolorCounters _recolor;
   std::shared_ptr<const ContextContainer> _contextContainer;
   DiagnosticLog _log; // lock order: _mutex, then the log's own
 };
