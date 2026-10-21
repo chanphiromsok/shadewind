@@ -50,9 +50,9 @@ classNames) and after 400 cycles (80,000))
 |---|---|---|---|
 | Uniwind 1.12 | 154 MB | 300 MB | +146 MB |
 | Shadewind 0.3.1 | 249 MB | 733 MB | +484 MB |
-| **Shadewind, fix in the next release** | **106 MB** | **81 MB** | **none** |
+| **Shadewind 0.3.2** | **106 MB** | **81 MB** | **none** |
 | Shadewind 0.3.1 + `precompileClassNames` | 262 MB | 769 MB | +507 MB |
-| **Shadewind + `precompileClassNames`, fix in the next release** | **93 MB** | **77 MB** | **none** |
+| **Shadewind 0.3.2 + `precompileClassNames`** | **93 MB** | **77 MB** | **none** |
 
 With classNames that have no theme-dependent part, which Uniwind never clears, plain Uniwind grew from 156 to 254 MB, the fixed adapter held
 98 to 80 MB and the fixed precompile build 92 to 74 MB. The lower second reading of the fixed builds is warm-up, not shrinkage. A normal app

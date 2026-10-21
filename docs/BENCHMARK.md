@@ -53,9 +53,9 @@ cycles. iOS simulator, Release builds, one launch per build. Memory is the proce
 |---|---|---|---|
 | Uniwind 1.12 | 154 MB | 300 MB | +146 MB |
 | Shadewind 0.3.1 | 249 MB | 733 MB | +484 MB |
-| Shadewind, `fix/classname-memory` | 106 MB | 81 MB | none |
+| Shadewind 0.3.2 | 106 MB | 81 MB | none |
 | Shadewind 0.3.1 + precompile | 262 MB | 769 MB | +507 MB |
-| Shadewind + precompile, `fix/classname-memory` | 93 MB | 77 MB | none |
+| Shadewind 0.3.2 + precompile | 93 MB | 77 MB | none |
 
 Unique classNames with no theme-dependent part (`-soakUniqueStatic 1`): Uniwind 156 to 254 MB, the fixed adapter 98 to 80 MB, the fixed precompile
 build 92 to 74 MB.

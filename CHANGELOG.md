@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - Fix: memory. Every distinct className stayed in Uniwind's style cache for the life of the app, and the adapter's plan added two more cache entries per className
   (the other themes, the pressed state), each with its own listener subscription. A className built from unbounded values (`w-[${px}px]`) grew the Hermes heap
