@@ -52,23 +52,51 @@ const compileSource = (name, out) => {
 
   // ---- files: the specifiers shadewind/metro maps (uniwind-internal/*) and the files it replaces
   const src = (...parts) => path.join(uniwind.root, 'src', ...parts);
-  const exists = (base) => ['.ts', '.tsx', '/index.ts', '/index.tsx'].some((ext) => fs.existsSync(base + ext));
+    // the names shadewind imports from each module (grep: `from 'uniwind-internal/...'` in src/, plus the Store / Listener / enum it reads)
+  const NAMES = [
+    [['core', 'native'], ['UniwindStore']],
+    [['core', 'listener'], ['UniwindListener']],
+    [['core', 'context'], ['UniwindContext', 'useUniwindContext']],
+    [['common', 'consts'], ['StyleDependency']],
+    [['components', 'utils'], ['copyComponentProperties']],
+    [['components', 'native', 'useAccentColor'], ['useAccentColor']],
+    [['hoc', 'withUniwind.native'], ['withUniwind']],
+  ];
+  const fileOf = (base) => ['.ts', '.tsx', '/index.ts', '/index.tsx'].map((ext) => base + ext).find((file) => fs.existsSync(file));
+  const exportsName = (file, name, seen = new Set()) => {
+    if (seen.has(file)) {
+      return false;
+    }
 
-  check('files: every uniwind-internal/* module shadewind imports exists in src/', () => {
-    for (const parts of [
-      ['core', 'native'],
-      ['core', 'listener'],
-      ['core', 'context'],
-      ['common', 'consts'],
-      ['components', 'utils'],
-      ['components', 'native', 'useAccentColor'],
-      ['hoc', 'withUniwind.native'],
-    ]) {
-      assert.ok(exists(src(...parts)), `uniwind/src/${parts.join('/')} is gone (metro.cjs PREFIX, uniwind-internal.d.ts)`);
+    seen.add(file);
+
+    const text = fs.readFileSync(file, 'utf8');
+
+    if (new RegExp(`export (const|function|class|enum) ${name}\\b|export \\{[^}]*\\b${name}\\b[^}]*\\}`).test(text)) {
+      return true;
+    }
+
+    // `export * from './x'`
+    return [...text.matchAll(/export \* from '(\.[^']+)'/g)].some(([, from]) => {
+      const next = fileOf(path.resolve(path.dirname(file), from));
+
+      return next !== undefined && exportsName(next, name, seen);
+    });
+  };
+
+  check('[#1] every uniwind-internal/* module shadewind imports exists in src/ and exports the names it takes', () => {
+    for (const [parts, names] of NAMES) {
+      const file = fileOf(src(...parts));
+
+      assert.ok(file, `uniwind/src/${parts.join('/')} is gone (metro.cjs PREFIX, uniwind-internal.d.ts)`);
+
+      for (const name of names) {
+        assert.ok(exportsName(file, name), `uniwind/src/${parts.join('/')} no longer exports ${name}`);
+      }
     }
   });
 
-  check('files: the components metro.cjs REPLACED swaps still exist under the names its patterns match', () => {
+  check('[#2] files: the components metro.cjs REPLACED swaps still exist under the names its patterns match', () => {
     for (const name of ['View', 'Text', 'Pressable', 'TouchableOpacity']) {
       assert.ok(fs.existsSync(src('components', 'native', `${name}.tsx`)), `src/components/native/${name}.tsx`);
     }
@@ -76,7 +104,7 @@ const compileSource = (name, out) => {
     assert.ok(fs.existsSync(src('hoc', 'withUniwind.native.tsx')), 'src/hoc/withUniwind.native.tsx');
   });
 
-  check('files: the replaced components export the names shadewind\'s replacements stand in for', () => {
+  check('[#2] files: the replaced components export the names shadewind\'s replacements stand in for', () => {
     for (const name of ['View', 'Text', 'Pressable', 'TouchableOpacity']) {
       const text = fs.readFileSync(src('components', 'native', `${name}.tsx`), 'utf8');
 
@@ -89,20 +117,20 @@ const compileSource = (name, out) => {
   // ---- the CSS module (metro-babel-transformer.cjs, nativeResolver prebuilt table)
   const cssModule = await compileStylesheet(app, CLASSES);
 
-  check('css module: starts with `const { Uniwind } = require(\'uniwind\');Uniwind.__reinit(rt => ` (metro-babel-transformer.cjs CSS_MODULE)', () => {
+  check('[#3] css module: starts with `const { Uniwind } = require(\'uniwind\');Uniwind.__reinit(rt => ` (metro-babel-transformer.cjs CSS_MODULE)', () => {
     assert.ok(/^const \{ Uniwind \} = require\('uniwind'\);Uniwind\.__reinit\(rt => /.test(cssModule), cssModule.slice(0, 120));
   });
 
   let reinit;
 
-  check('css module: __reinit(generate, themes[, fingerprint]) with a function and a theme list', () => {
+  check('[#3] css module: __reinit(generate, themes[, fingerprint]) with a function and a theme list', () => {
     reinit = reinitStore(uniwind, cssModule);
     assert.strictEqual(typeof reinit.generate, 'function');
     assert.ok(Array.isArray(reinit.themes) && reinit.themes.length >= 2, String(reinit.themes));
   });
 
   // ---- UniwindStore
-  check('store: vars (object per theme), runtime.currentThemeName, runtime.screen.width, stylesheet, cache (Map per theme)', () => {
+  check('[#4] store: vars (object per theme), runtime.currentThemeName, runtime.screen.width, stylesheet, cache (Map per theme)', () => {
     const themes = Object.keys(store.vars);
 
     assert.ok(themes.length >= 2, `vars: ${themes}`);
@@ -112,7 +140,7 @@ const compileSource = (name, out) => {
     assert.ok(store.cache && themes.every((theme) => store.cache[theme] instanceof Map), 'cache: a Map for every theme');
   });
 
-  check('store: getStyles lives on the prototype, resolveStyles is callable (installBoundedStyleCache, nativeResolver)', () => {
+  check('[#4] store: getStyles lives on the prototype, resolveStyles is callable (installBoundedStyleCache, nativeResolver)', () => {
     const prototype = Object.getPrototypeOf(store);
 
     assert.strictEqual(typeof prototype.getStyles, 'function');
@@ -124,14 +152,14 @@ const compileSource = (name, out) => {
 
   const result = store.getStyles('bg-card p-4', {}, undefined, ROOT);
 
-  check('getStyles result: styles object, dependencies number[], dependencySum number', () => {
+  check('[#5] getStyles result: styles object, dependencies number[], dependencySum number', () => {
     assert.ok(result.styles && typeof result.styles === 'object', 'styles');
     assert.ok(Array.isArray(result.dependencies) && result.dependencies.every((d) => typeof d === 'number'), 'dependencies');
     assert.strictEqual(typeof result.dependencySum, 'number', 'dependencySum');
     assert.ok(result.styles.backgroundColor !== undefined && result.styles.padding === 16, JSON.stringify(result.styles));
   });
 
-  check('StyleDependency: numeric Theme and Variables; every dependency is a bit of dependencySum (styleCache.ts: 1 << dependency)', () => {
+  check('[#6] StyleDependency: numeric Theme and Variables; every dependency is a bit of dependencySum (styleCache.ts: 1 << dependency)', () => {
     assert.ok(Number.isInteger(StyleDependency.Theme) && Number.isInteger(StyleDependency.Variables));
     assert.notStrictEqual(StyleDependency.Theme, StyleDependency.Variables);
 
@@ -148,7 +176,7 @@ const compileSource = (name, out) => {
     assert.strictEqual(themed.dependencies.reduce((sum, d) => sum | (1 << d), 0), themed.dependencySum, 'dependencySum is the bit set of dependencies');
   });
 
-  check('cache: the entry key is `${className}${disabled}${focused}${pressed}${scoped}${rtl}${variablesKey}` in store.cache[theme] (styleCache.ts)', () => {
+  check('[#7] cache: the entry key is `${className}${disabled}${focused}${pressed}${scoped}${rtl}${variablesKey}` in store.cache[theme] (styleCache.ts)', () => {
     // the formula styleCache.ts copies, over states and contexts that leave each field out
     const keyOf = (className, state, context) =>
       `${className}${state?.isDisabled ?? false}${state?.isFocused ?? false}${state?.isPressed ?? false}${context.scopedTheme !== null}${
@@ -173,7 +201,7 @@ const compileSource = (name, out) => {
     }
   });
 
-  check('cache: an entry goes when its dependency notifies (the invalidation styleCache.ts reproduces)', () => {
+  check('[#8] cache: an entry goes when its dependency notifies (the invalidation styleCache.ts reproduces)', () => {
     const fresh = store.getStyles('bg-card', {}, undefined, ROOT);
 
     assert.strictEqual(store.getStyles('bg-card', {}, undefined, ROOT), fresh);
@@ -182,7 +210,7 @@ const compileSource = (name, out) => {
   });
 
   // ---- UniwindListener
-  check('listener: subscribe(fn, deps) returns a dispose, notify(deps) calls it, getSnapshot(deps) counts notifies', () => {
+  check('[#9] listener: subscribe(fn, deps) returns a dispose, notify(deps) calls it, getSnapshot(deps) counts notifies', () => {
     let calls = 0;
     const dispose = listener.subscribe(() => calls++, [StyleDependency.Variables]);
     const before = listener.getSnapshot([StyleDependency.Variables]);
@@ -196,6 +224,28 @@ const compileSource = (name, out) => {
     assert.strictEqual(calls, 1, 'dispose');
   });
 
+  check('[#11] install.ts TESTED, the uniwind peer range and this Uniwind agree', () => {
+    const tested = /const TESTED = \[([^\]]*)\]/.exec(fs.readFileSync(path.join(repo, 'src', 'uniwind', 'install.ts'), 'utf8'));
+
+    assert.ok(tested, 'install.ts has no `const TESTED = [...]`');
+
+    const minors = [...tested[1].matchAll(/'(\d+)\.(\d+)'/g)].map(([, major, minor]) => [Number(major), Number(minor)]);
+    const peer = /^>=(\d+)\.(\d+)\.\d+ <(\d+)\.(\d+)\.\d+$/.exec(require(path.join(repo, 'package.json')).peerDependencies.uniwind);
+
+    assert.ok(peer, 'the uniwind peer range is not `>=X.Y.Z <X.Y.Z`');
+
+    const at = (major, minor) => major * 1000 + minor;
+
+    for (const [major, minor] of minors) {
+      assert.ok(at(major, minor) >= at(+peer[1], +peer[2]) && at(major, minor) < at(+peer[3], +peer[4]), `TESTED ${major}.${minor} is outside the peer range`);
+    }
+
+    const highest = Math.max(...minors.map(([major, minor]) => at(major, minor)));
+
+    assert.strictEqual(at(+peer[3], +peer[4]), highest + 1, 'the peer upper bound is not one minor above the highest TESTED');
+    assert.ok(!(at(...uniwind.version.split('.').slice(0, 2).map(Number)) > highest), `Uniwind ${uniwind.version} is above every TESTED minor: the adapter is off for it`);
+  });
+
   // ---- shadewind's code against the real store
   const out = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shadewind-contract-src-')));
 
@@ -203,7 +253,7 @@ const compileSource = (name, out) => {
     const { buildStyleTable } = compileSource('styleTable.ts', out);
     const { installBoundedStyleCache, STYLE_CACHE_LIMIT } = compileSource('styleCache.ts', out);
 
-    check('styleTable: buildStyleTable reads the stylesheet format (classes > 0), or refuses with a reason (never an empty table)', () => {
+    check('[#10] styleTable: buildStyleTable reads the stylesheet format (classes > 0), or refuses with a reason (never an empty table)', () => {
       let table = null;
       let refusal = null;
 
@@ -221,7 +271,7 @@ const compileSource = (name, out) => {
       }
     });
 
-    check('styleCache: the bounded cache returns what Uniwind\'s own returns, for classNames x states x themes', () => {
+    check('[#4,#7,#8] styleCache: the bounded cache returns what Uniwind\'s own returns, for classNames x states x themes', () => {
       const own = {};
 
       for (const theme of Object.keys(store.vars)) {
@@ -252,7 +302,7 @@ const compileSource = (name, out) => {
       }
     });
 
-    check('styleCache: same key (a hit returns the same object), invalidated by the dependency, bounded', () => {
+    check('[#7,#8] styleCache: same key (a hit returns the same object), invalidated by the dependency, bounded', () => {
       store.runtime.currentThemeName = 'light';
 
       const a = store.getStyles('bg-card text-primary', {}, undefined, ROOT);

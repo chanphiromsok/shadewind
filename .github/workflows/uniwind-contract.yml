@@ -29,8 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # the minors in src/uniwind/install.ts TESTED (and the peer range), then whatever npm calls latest
-        uniwind: ['~1.12', '~1.13', 'latest']
+        # the peer floor, the latest patch of each minor in src/uniwind/install.ts TESTED, then whatever npm calls latest
+        uniwind: ['1.12.0', '~1.12', '~1.13', 'latest']
 
     steps:
       - name: Checkout
