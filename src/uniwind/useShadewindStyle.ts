@@ -1,7 +1,8 @@
 import { type Ref, useLayoutEffect, useReducer, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
-import { getInternals, installUniwind } from './install';
+import { getInternals, installUniwind, type Resolved } from './install';
+import { resolveUncached, stylesByTheme } from './uniwindAccess';
 
 // Metro's inline requires turn every use of an imported binding into a module lookup at the call site (`_$$_REQUIRE(...)`), once
 // per render of every view. The per-view functions below read them from this object instead, filled once at module load.
@@ -44,20 +45,6 @@ const debugOn = () =>
 export const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 
-// UniwindStore.getStyles(..., { scopedTheme }) is wrong for light-dark() (spike A): make `theme` the runtime theme for the call.
-export const withTheme = <T>(theme: string, fn: () => T): T => {
-  const runtime = getInternals()!.UniwindStore.runtime;
-  const previous = runtime.currentThemeName;
-
-  runtime.currentThemeName = theme;
-
-  try {
-    return fn();
-  } finally {
-    runtime.currentThemeName = previous;
-  }
-};
-
 // the theme a plan was resolved for: passed at register so C++ knows React's props are already current
 export const renderThemeOf = new WeakMap<object, string>();
 
@@ -80,40 +67,7 @@ export const renderThemeFor = (
   return renderThemeOf.get(themed);
 };
 
-type Resolved = ReturnType<
-  NonNullable<ReturnType<typeof getInternals>>['UniwindStore']['getStyles']
->;
 type Plan = { themed: ThemedStyles | null; reason: string };
-
-// What getStyles would return for this className, state and (runtime) theme, without putting it in Uniwind's cache. A plan probes the
-// other themes and ALL_STATE once per className; through getStyles every probe stayed in Uniwind's cache with its own listener
-// subscription, three entries per className instead of the view's one, never read again (docs/BENCHMARK.md, memory). Same guards as getStyles (no className, a theme without
-// a cache). The instance's own resolveStyles is the native resolver when the class table is loaded (nativeResolver.ts).
-export const resolveUncached = (
-  className: string,
-  props: Record<string, any>,
-  state: State | undefined,
-  context: { scopedTheme: string | null }
-): Resolved => {
-  const store = getInternals()!.UniwindStore as unknown as {
-    cache?: Record<string, unknown>;
-    runtime: { currentThemeName: string };
-    resolveStyles?: (...args: unknown[]) => Resolved;
-    getStyles: (...args: unknown[]) => Resolved;
-  };
-  const theme = context.scopedTheme ?? store.runtime.currentThemeName;
-
-  if (
-    className === '' ||
-    typeof store.resolveStyles !== 'function' ||
-    store.cache?.[theme] === undefined
-  ) {
-    // not Uniwind 1.12's store shape: the cached path, as before
-    return store.getStyles(className, props, state, context);
-  }
-
-  return store.resolveStyles(className, props, state, context);
-};
 
 // One `themed` object per distinct per-theme colours (and render theme): every className whose theme-dependent part is `bg-card`
 // shares it, so the native conversion (nativeByStyles), the style id and the native ThemeStyle are made once, and a view that moves to
@@ -178,20 +132,8 @@ const plan = (
   }
 
   const themes = Object.keys(UniwindStore.vars);
-  const perTheme: Record<string, Record<string, unknown>> = {};
-
   const renderTheme = UniwindStore.runtime.currentThemeName;
-
-  for (const theme of themes) {
-    // the render theme's style is `current` (what getStyles returned for this render); the others are probed without caching
-    perTheme[theme] =
-      theme === renderTheme
-        ? current.styles
-        : withTheme(
-            theme,
-            () => resolveUncached(className, props, state, context).styles
-          );
-  }
+  const perTheme = stylesByTheme(className, props, state, context, current);
 
   // State variants (pressed, focused) change styles without a theme change. The resting state is bound to the engine; while the
   // view is pressed or focused it is unbound (React draws the state style, the engine must not paint over it). A Pressable

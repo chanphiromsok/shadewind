@@ -441,7 +441,7 @@ const runtime = async () => {
   // the sources, compiled with TypeScript (no type check: tsc does that)
   const out = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shadewind-precompile-src-')));
 
-  for (const name of ['precompiled.tsx', 'useShadewindStyle.ts', 'native.ts', 'styleCache.ts', 'styleTable.ts']) {
+  for (const name of ['precompiled.tsx', 'useShadewindStyle.ts', 'native.ts', 'styleCache.ts', 'styleTable.ts', 'uniwindAccess.ts']) {
     const source = fs.readFileSync(path.join(repo, 'src', 'uniwind', name), 'utf8');
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },

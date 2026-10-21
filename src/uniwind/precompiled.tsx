@@ -39,13 +39,8 @@ import {
   textIsPlain,
 } from './native';
 import { Text } from './Text';
-import {
-  cachedPlan,
-  decisions,
-  resolveUncached,
-  same,
-  withTheme,
-} from './useShadewindStyle';
+import { resolveUncached, stylesByTheme } from './uniwindAccess';
+import { cachedPlan, decisions, same } from './useShadewindStyle';
 import { View } from './View';
 
 // read once at module load (Metro's inline requires, see useShadewindStyle.ts)
@@ -175,18 +170,7 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
   }
 
   const themes = Object.keys(store.vars);
-  const raw: Record<string, Record<string, unknown>> = {};
-
-  for (const theme of themes) {
-    raw[theme] =
-      theme === store.runtime.currentThemeName
-        ? current.styles
-        : withTheme(
-            theme,
-            () =>
-              resolveUncached(className, NO_PROPS, state, ROOT_CONTEXT).styles
-          );
-  }
+  const raw = stylesByTheme(className, NO_PROPS, state, ROOT_CONTEXT, current);
 
   const byTheme: Record<string, unknown> = {};
 

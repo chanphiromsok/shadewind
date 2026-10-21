@@ -13,24 +13,35 @@ import { installBoundedStyleCache } from './styleCache';
 /** Uniwind minor versions the adapter was verified against (1.13: the engine and precompileClassNames; the native class resolver needs the 1.12 style format, styleTable.ts). */
 const TESTED = ['1.12', '1.13'];
 
+/** What UniwindStore.getStyles returns. */
+export type Resolved = {
+  styles: Record<string, unknown>;
+  dependencies: number[];
+  hasDataAttributes?: boolean;
+};
+
 export type InstallResult = { active: boolean; reason?: string };
 
 // Declared here, not as `typeof import('uniwind-internal/...')`: those specifiers exist only inside the app's Metro build, so
 // they must not appear in the .d.ts files this package ships.
-type Internals = {
+export type Internals = {
   UniwindStore: {
     vars: Record<string, unknown>;
     runtime: { currentThemeName: string };
+    /** one Map per theme (Uniwind's style cache) */
+    cache?: Record<string, unknown>;
+    resolveStyles?: (
+      className: string,
+      props: Record<string, any>,
+      state: any,
+      context: any
+    ) => Resolved;
     getStyles: (
       className: string | undefined,
       props: Record<string, any>,
       state: any,
       context: any
-    ) => {
-      styles: Record<string, unknown>;
-      dependencies: number[];
-      hasDataAttributes?: boolean;
-    };
+    ) => Resolved;
   };
   UniwindListener: {
     subscribe: (listener: () => void, dependencies: number[]) => () => void;

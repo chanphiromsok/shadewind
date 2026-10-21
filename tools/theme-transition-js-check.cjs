@@ -104,6 +104,12 @@ const refStubs = {
 };
 const refSrc = fs.readFileSync(path.join(root, 'src', 'uniwind', 'useShadewindStyle.ts'), 'utf8');
 const refOut = ts.transpileModule(refSrc, { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText;
+// uniwindAccess.ts, compiled the same way, on the same './install' stub
+const accessOut = ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'uniwindAccess.ts'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText;
+const am = new Module('uniwindAccess'); am.paths = [];
+am.require = (name) => { if (name in refStubs) return refStubs[name]; throw new Error('unexpected import ' + name); };
+am._compile(accessOut.replace(/require\(/g, 'module.require('), 'uniwindAccess.js');
+refStubs['./uniwindAccess'] = am.exports;
 const rm = new Module('useShadewindStyle'); rm.paths = [];
 rm.require = (name) => { if (name in refStubs) return refStubs[name]; throw new Error('unexpected import ' + name); };
 rm._compile(refOut.replace(/require\(/g, 'module.require('), 'useShadewindStyle.js');
