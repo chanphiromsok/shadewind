@@ -8073,7 +8073,7 @@ __metadata:
     react: "*"
     react-native: ^0.86.0
     react-native-nitro-modules: ^0.37.1
-    uniwind: ^1.12.0
+    uniwind: ">=1.12.0 <1.14.0"
   peerDependenciesMeta:
     uniwind:
       optional: true
