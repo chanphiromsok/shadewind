@@ -4,6 +4,7 @@
 #include "Diagnostics.hpp"
 
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <array>
 #include <cstring>
@@ -886,7 +887,9 @@ private:
   }
 
   // The theme and epoch setTheme published last become the hook's.
-  void syncTheme(const Lock&) {
+  void syncTheme(const Lock& held) {
+    assert(held.owns_lock() && held.mutex() == &_mutex);
+    (void)held;
     const uint64_t requested = _requested.load(std::memory_order_acquire);
 
     _epoch = requested >> 8;

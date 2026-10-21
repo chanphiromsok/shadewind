@@ -144,7 +144,7 @@ void runLoopActivity(CFRunLoopObserverRef, CFRunLoopActivity activity, void*) {
 
 #if SHADEWIND_DEV_TOOLS
 // Results of the last background / main-thread pass, read by the next setTheme call (they finish after it returned).
-std::atomic<double> gLastAsyncCommitMs{0};
+[[maybe_unused]] std::atomic<double> gLastAsyncCommitMs{0};
 // setTheme call -> main thread done mounting (the screen update), of the last switch
 std::atomic<double> gLastVisualMs{0};
 
