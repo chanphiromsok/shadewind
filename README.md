@@ -68,7 +68,7 @@ between sessions with the host; compare rows from one table. Spreads, both proto
 > 💚 **A note from the author.** Shadewind is vibe-coded with Claude Code by a dev who finds joy in programming. Take the code and numbers with a grain of salt, and kindly roast me where I’m wrong. 🤝
 
 > **Status: experimental (0.x).** New Architecture only, React Native 0.86. iOS is the primary target; Android has less testing
-> (one emulator, no physical device). Uniwind support is verified against Uniwind 1.12.x.
+> (one emulator, no physical device). Uniwind support is verified against Uniwind 1.12.x (the engine, the native class resolver and `precompileClassNames`) and 1.13.x (the same, without the native class resolver, which needs 1.12's compiled-style format and reports why in `status()`). Other versions run as plain Uniwind.
 
 ## ✨ What you get
 

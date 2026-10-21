@@ -1,6 +1,6 @@
 {
   "name": "shadewind",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Zero-re-render theme styling for React Native (Fabric) via a Nitro module",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -125,7 +125,7 @@
     "react": "*",
     "react-native": "^0.86.0",
     "react-native-nitro-modules": "^0.37.1",
-    "uniwind": "^1.12.0"
+    "uniwind": ">=1.12.0 <1.14.0"
   },
   "workspaces": [
     "example"

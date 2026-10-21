@@ -30,6 +30,18 @@ See [PRECOMPILE.md](PRECOMPILE.md) for the mechanism.
 - **Measured on the iOS simulator in Release only.** Not on a physical device, on Android or in a Debug build. On the 30-card feed of
   `example-real` it was in line with `StyleSheet` ([BENCHMARK.md](BENCHMARK.md)); the gain depends on how many classNames are static.
 
+## Uniwind versions
+
+- **1.12.x** (tested on 1.12.0 and 1.12.2): the engine, the native class resolver (2,096 of 2,220 cases answered natively, no parity mismatches, about 8x
+  faster than Uniwind's JS on 1.12.2) and `precompileClassNames`.
+- **1.13.x** (tested on 1.13.0): the engine and `precompileClassNames`, pixel-identical to plain Uniwind on the edge-case screen. **Not the native class
+  resolver**: Uniwind 1.13 compiles each style to a `matches()` function and drops the condition fields the table builder reads, so the resolver reports
+  `failed` with that reason and Uniwind resolves every class itself.
+- On 1.13.0 the memory soak (80,000 distinct classNames) matches 1.12: plain Uniwind 137 to 290 MB, the adapter 98 to 81 MB, precompile 94 to 76 MB.
+- **Any other version:** the engine turns itself off (plain Uniwind) and says so.
+- A Uniwind patch inside a tested minor can still change behaviour (1.12.1 and 1.12.2 changed how competing styles are ranked); a check against newly
+  published versions is planned.
+
 ## Memory
 
 - **A className no longer leaves unbounded state behind** (0.3.2). Before, every distinct className stayed cached for the life of the app, and the

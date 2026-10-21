@@ -76,7 +76,7 @@ use because component modules can be evaluated before the native runtime exists)
 ### Uniwind adapter (`src/uniwind/`)
 
 - `install.ts` is the only file that reads Uniwind's runtime (`UniwindStore`, `UniwindListener`), lazily and inside `try/catch`. It
-  checks the Uniwind minor version (tested: 1.12). When Uniwind is missing or unsupported the adapter reports inactive and every
+  checks the Uniwind minor version (tested: 1.12 and 1.13). When Uniwind is missing or unsupported the adapter reports inactive and every
   component behaves as plain Uniwind.
 - `useShadewindStyle.ts` is Uniwind's `useStyle` plus a **plan** per className: resolve the style in every theme; if the themes differ
   only in `backgroundColor`, `borderColor` and `color`, hand the view to the engine (it is registered, and the adapter does not
@@ -88,7 +88,7 @@ use because component modules can be evaluated before the native runtime exists)
 - `styleCache.ts` replaces Uniwind 1.12's `getStyles` on the store instance with a bounded cache and one invalidation listener per dependency (see
   [KNOWN_LIMITS.md](KNOWN_LIMITS.md#memory)); `useShadewindStyle.ts` probes other themes without caching (`resolveUncached`) and shares one `themed` object per
   distinct set of colours.
-- `nativeResolver.ts` and `styleTable.ts` load Uniwind's per-theme class table into C++ so a `className` can be resolved natively.
+- `nativeResolver.ts` and `styleTable.ts` load Uniwind's per-theme class table into C++ (Uniwind 1.13 compiles styles to `matches()` functions: the table builder refuses that format with a reason and Uniwind resolves every class itself) so a `className` can be resolved natively.
 - `precompiled.tsx` is the runtime of `precompileClassNames`.
 
 ## Native engine (`cpp/`)

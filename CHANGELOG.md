@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+- Uniwind 1.13 is supported: the engine, the bounded style cache and `precompileClassNames` (the edge-case screen is pixel-identical to plain Uniwind 1.13.0;
+  the 1.12.2 checks pass too). The native class resolver is not: Uniwind 1.13 compiles each style to a `matches()` function and drops the fields the class table
+  builder reads, which used to leave an empty table without a word. `buildStyleTable` now refuses that format with a reason (`status()` reports it, Metro warns
+  once) and Uniwind resolves every class itself. The `uniwind` peer range is `>=1.12.0 <1.14.0`.
+
 ## 0.3.2
 
 - Fix: memory. Every distinct className stayed in Uniwind's style cache for the life of the app, and the adapter's plan added two more cache entries per className
