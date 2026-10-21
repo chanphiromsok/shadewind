@@ -441,7 +441,7 @@ const runtime = async () => {
   // the sources, compiled with TypeScript (no type check: tsc does that)
   const out = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shadewind-precompile-src-')));
 
-  for (const name of ['precompiled.tsx', 'useShadewindStyle.ts', 'native.ts', 'styleCache.ts']) {
+  for (const name of ['precompiled.tsx', 'useShadewindStyle.ts', 'native.ts', 'styleCache.ts', 'styleTable.ts']) {
     const source = fs.readFileSync(path.join(repo, 'src', 'uniwind', name), 'utf8');
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -818,6 +818,16 @@ const runtime = async () => {
     } finally {
       active = true;
     }
+  });
+
+  check('style table: a Uniwind whose styles are matches() functions (1.13) is refused with a reason, not turned into an empty table', () => {
+    const { buildStyleTable } = require(path.join(out, 'styleTable.js'));
+    const input = (style) => ({ stylesheet: { 'p-3': [style] }, varsByTheme: {}, themes: [], runtime: { currentThemeName: 'light' } });
+
+    assert.throws(
+      () => buildStyleTable(input({ entries: [], matches: () => true, hasDataAttributes: false, importantComplexity: 0, complexity: 1 })),
+      /matches\(\) functions/
+    );
   });
 
   // Uniwind's style cache, bounded from inside shadewind (styleCache.ts): the same results, a bound, one listener per dependency

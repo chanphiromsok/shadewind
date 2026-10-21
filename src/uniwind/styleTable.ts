@@ -126,7 +126,30 @@ const isPlain = (value: unknown): boolean => {
   return false;
 };
 
+// Uniwind 1.13 compiles a style to a `matches()` function and no longer has the condition fields (minWidth, maxWidth, theme, active, ...) this
+// builder reads, so every class would silently fall back and the table would be empty. Said once, with the reason: the app then runs Uniwind's own
+// resolution, which is correct, and `status()` reports it.
+const assertStyleFormat = (stylesheet: Record<string, unknown>) => {
+  for (const name in stylesheet) {
+    const styles = stylesheet[name];
+
+    if (Array.isArray(styles) && styles.length > 0) {
+      const sample = styles[0] as Record<string, unknown>;
+
+      if (typeof sample.matches === 'function' && !('minWidth' in sample)) {
+        throw new Error(
+          'this Uniwind compiles its styles to matches() functions (1.13 and later): the native class resolver reads the 1.12 format, so Uniwind resolves every class itself'
+        );
+      }
+
+      return;
+    }
+  }
+};
+
 export const buildStyleTable = (input: StyleTableInput): StyleTable => {
+  assertStyleFormat(input.stylesheet);
+
   const { runtime } = input;
   const runtimeReads = new Set<string>();
   const previousTheme = runtime.currentThemeName;

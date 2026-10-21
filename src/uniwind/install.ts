@@ -10,8 +10,8 @@ import { installBoundedStyleCache } from './styleCache';
 // evaluated while React Native is still setting up (Uniwind's component barrel), and a missing or unsupported Uniwind must
 // leave plain Uniwind behaviour, never an exception.
 
-/** Uniwind minor versions the adapter was verified against. */
-const TESTED = ['1.12'];
+/** Uniwind minor versions the adapter was verified against (1.13: the engine and precompileClassNames; the native class resolver needs the 1.12 style format, styleTable.ts). */
+const TESTED = ['1.12', '1.13'];
 
 export type InstallResult = { active: boolean; reason?: string };
 
