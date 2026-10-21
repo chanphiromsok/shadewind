@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4
+
+No change in behaviour for apps; the code is easier to change.
+
+- `shadewind/internal`: `prepare()` is removed. It did nothing (it warmed pre-built nodes that no longer exist) and nothing in the package called it.
+- Internal: the Uniwind adapter's style helpers (`withTheme`, `resolveUncached`, the per-theme styles) are one module, `cn` is its own file, and the stale "SPIKE" label on the
+  precompiled runtime is gone.
+- Native: the Paragraph recolor counters (development builds) belong to the hook, not the process; the `ThemeHook` members that need its mutex take a proof of the lock, so a call
+  without it no longer compiles; React Native 0.86's deprecated `SharedListOfShared` alias is spelled out; and React Native's own `@deprecated` documentation warning no longer
+  shows in the library's iOS (clang) builds.
+
 ## 0.3.3
 
 - Uniwind 1.13 is supported: the engine, the bounded style cache and `precompileClassNames` (the edge-case screen is pixel-identical to plain Uniwind 1.13.0;
