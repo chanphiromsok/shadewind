@@ -30,6 +30,22 @@ See [PRECOMPILE.md](PRECOMPILE.md) for the mechanism.
 - **Measured on the iOS simulator in Release only.** Not on a physical device, on Android or in a Debug build. On the 30-card feed of
   `example-real` it was in line with `StyleSheet` ([BENCHMARK.md](BENCHMARK.md)); the gain depends on how many classNames are static.
 
+## Memory
+
+- **A className no longer leaves unbounded state behind** (0.3.2). Before, every distinct className stayed cached for the life of the app, and the
+  engine's own probes (the other themes, the pressed state) added two more cache entries per className, each with a listener. In a soak that mounted 80,000
+  never-seen classNames (`w-[${px}px]`) the process grew by about 460 MB (plain Uniwind) to 760 MB (the adapter) and kept it. Now Uniwind's style cache is
+  replaced by a bounded one (4096 entries per theme, one invalidation listener per dependency; `src/uniwind/styleCache.ts`), the engine's probes bypass it,
+  colour sets are shared between classNames, and `precompileClassNames` keeps the 256 most recently rendered classNames per expression component. The same
+  soak stays flat (about 100 MB, the adapter and precompile); plain Uniwind, unmodified, still grows. `globalThis.__SHADEWIND_STYLE_CACHE_LIMIT__` sets the
+  per-theme limit, `0` leaves Uniwind's own cache alone. Measured on the iOS simulator (`example-real/scripts/memory-soak.sh`, `-soak 1 -soakUnique 200`), as
+  `footprint`; the Hermes heap and native malloc were measured separately by `heap` and `vmmap` after a forced GC.
+- **The bounded cache replaces a private Uniwind structure** (`UniwindStore.getStyles`, `cache`, `resolveStyles`). It is installed only for Uniwind 1.12's store
+  shape (the adapter's tested range) and leaves Uniwind's own cache otherwise.
+- **An entry evicted while views still use it is resolved again on their next render.** The result has the same values, so nothing else changes.
+- **Not measured:** Android, TovTam's own footprint, and a native change that frees the commit hook's entries for dead views sooner (a lag showed up with
+  `precompileClassNames`; the JS fix removed it in the soak).
+
 ## What the fast path covers
 
 - Up to 6 themes, and every theme must define every key a view registers.

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Fix: memory. Every distinct className stayed in Uniwind's style cache for the life of the app, and the adapter's plan added two more cache entries per className
+  (the other themes, the pressed state), each with its own listener subscription. A className built from unbounded values (`w-[${px}px]`) grew the Hermes heap
+  without bound (80,000 distinct classNames: about 460 MB with plain Uniwind, 760 MB with the adapter). Now: the plan probes without caching, `themed` objects are
+  shared per distinct colour set, `precompileClassNames` keeps the 256 most recently rendered classNames per expression component, and Uniwind 1.12's style cache is
+  replaced on the store instance by a bounded one (4096 per theme, one listener per dependency; `globalThis.__SHADEWIND_STYLE_CACHE_LIMIT__`, `0` leaves Uniwind's
+  alone). The same soak stays flat. The 2003-view mount benchmark is unchanged (48.3 to 48.8 ms adapter, 41.9 to 42.2 ms precompile). `example-real`: `-soak 1`,
+  `-soakUnique N`, `-soakTheme 1` and `scripts/memory-soak.sh`.
+
 ## 0.3.1
 
 - Fix: while the engine was active the adapter dropped the Theme dependency from every view's subscription, including views the engine does not

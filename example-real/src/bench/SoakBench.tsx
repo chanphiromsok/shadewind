@@ -1,13 +1,16 @@
 // `-soak 1`: mounts and unmounts a 1000-item list over and over, for a memory comparison of builds (scripts/memory-soak.sh samples the process
 // footprint). Per item: literal classNames (View + Text), every 10th item an expression className that changes with the cycle, and a wrapper
 // that forwards `{...props}` (the shape of an app's VStack). `-soakUnique N` adds N views per cycle with a className no earlier cycle used, the
-// worst case for a per-className cache. `-soakCycles N` stops after N cycles (default 400).
+// worst case for a per-className cache. `-soakTheme 1` switches the theme every 20 cycles. `-soakCycles N` stops after N cycles (default 400).
 import { useEffect, useState } from 'react';
 import { ScrollView, Settings, Text, View, type ViewProps } from 'react-native';
+import { Uniwind } from 'uniwind';
 
 const ITEMS = 1000;
 const CYCLES = Number(Settings.get('soakCycles')) || 400;
 const UNIQUE = Number(Settings.get('soakUnique')) || 0;
+// `-soakTheme 1`: a theme switch every 20 cycles (the engine's per-theme props and Uniwind's theme-dependent cache entries are part of the churn)
+const SWITCH = Boolean(Settings.get('soakTheme'));
 const THEMED = ['size-10 rounded-lg bg-brand', 'size-10 rounded-lg bg-card', 'size-10 rounded-lg bg-red-500'];
 
 function Box({ className, ...props }: ViewProps & { className?: string }) {
@@ -30,6 +33,10 @@ export function SoakBench() {
         } else {
           setShown(true);
           setCycle((c) => c + 1);
+
+          if (SWITCH && (cycle + 1) % 20 === 0) {
+            Uniwind.setTheme(Uniwind.currentTheme === 'dark' ? 'light' : 'dark');
+          }
         }
       },
       shown ? 250 : 100

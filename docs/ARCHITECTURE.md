@@ -85,6 +85,9 @@ use because component modules can be evaluated before the native runtime exists)
 - `View.tsx`, `Text.tsx`, `Pressable.tsx`, `LightPressable.tsx`, `TouchableOpacity.tsx`, `withUniwind.tsx` are the replacements the
   build swaps in. `native.ts` is the direct path: a plain `View` or `Text` (none of the props React Native's own components rewrite)
   renders the host component directly, skipping their wrapper fibers.
+- `styleCache.ts` replaces Uniwind 1.12's `getStyles` on the store instance with a bounded cache and one invalidation listener per dependency (see
+  [KNOWN_LIMITS.md](KNOWN_LIMITS.md#memory)); `useShadewindStyle.ts` probes other themes without caching (`resolveUncached`) and shares one `themed` object per
+  distinct set of colours.
 - `nativeResolver.ts` and `styleTable.ts` load Uniwind's per-theme class table into C++ so a `className` can be resolved natively.
 - `precompiled.tsx` is the runtime of `precompileClassNames`.
 
