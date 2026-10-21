@@ -47,21 +47,6 @@ double runLoopNowMs() {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Debug: counts of why a Paragraph clone could not skip layout (see RecoloredParagraph::reason); resets the counters.
-std::string reasonsText() {
-  std::string text;
-
-  for (int i = 0; i < 9; ++i) {
-    text += (i ? "," : "") + std::to_string(gReasons[i].exchange(0));
-  }
-
-  gRecolored = 0;
-  gRecolorSkipDirty = 0;
-  gRecolorSkipState = 0;
-
-  return text;
-}
-
 // ARGB of a SharedColor as an unsigned value. `Color` is an int on Android and a class on iOS (the template keeps the branch
 // that does not apply from being compiled).
 template <typename ColorT>
@@ -185,7 +170,8 @@ void commitTick(UIManager& ui, bool mountSynchronously = true) {
 
 #if SHADEWIND_DEV_TOOLS
 // The hook's last commit, as the JS timing object (`ThemeTimings` in src/internal.tsx).
-jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs, double totalMs) {
+jsi::Object timingsOf(jsi::Runtime& rt, ThemeHook& hook, double commitMs, double totalMs) {
+  const HookStats stats = hook.stats();
   auto result = jsi::Object(rt);
 
   result.setProperty(rt, "views", static_cast<double>(stats.applied));
@@ -199,9 +185,7 @@ jsi::Object timingsOf(jsi::Runtime& rt, const HookStats& stats, double commitMs,
   result.setProperty(
       rt,
       "misses",
-      std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + std::to_string(gRecolored.load()) +
-          "/" + std::to_string(gRecolorSkipDirty.load()) + "/" + std::to_string(gRecolorSkipState.load()) + " reasons " +
-          reasonsText());
+      std::to_string(stats.missNotOurs) + "/" + std::to_string(stats.missChildren) + " recolor " + hook.recolorCounters().takeReport());
   result.setProperty(rt, "commitMs", commitMs);
   result.setProperty(rt, "visualMs", gLastVisualMs.load());
   result.setProperty(rt, "totalMs", totalMs);
@@ -805,7 +789,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 #if SHADEWIND_DEV_TOOLS
       const double elapsed = ms(clock.start, Clock::now());
 
-      return timingsOf(rt, _engine.hook().stats(), 0, elapsed);
+      return timingsOf(rt, _engine.hook(), 0, elapsed);
 #else
       return jsi::Value::undefined();
 #endif
@@ -850,7 +834,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
 #if SHADEWIND_DEV_TOOLS
     // the stats and the commit time are those of the previous run (this one finishes after the call returns)
-    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
+    return timingsOf(rt, _engine.hook(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
 #else
     return jsi::Value::undefined();
 #endif
@@ -885,7 +869,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 
 #if SHADEWIND_DEV_TOOLS
     // the stats and the commit time are those of the previous run (this one finishes after the call returns)
-    return timingsOf(rt, _engine.hook().stats(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
+    return timingsOf(rt, _engine.hook(), gLastAsyncCommitMs.load(), ms(clock.start, Clock::now()));
 #else
     return jsi::Value::undefined();
 #endif
@@ -903,7 +887,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
 #if SHADEWIND_DEV_TOOLS
   const double elapsed = ms(clock.start, Clock::now());
 
-  return timingsOf(rt, _engine.hook().stats(), elapsed, elapsed);
+  return timingsOf(rt, _engine.hook(), elapsed, elapsed);
 #else
   return jsi::Value::undefined(); // timings exist only with SHADEWIND_DEV_TOOLS
 #endif

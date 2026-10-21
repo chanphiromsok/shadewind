@@ -7,6 +7,7 @@
 #include <chrono>
 #include <array>
 #include <cstring>
+#include <string>
 #include <folly/container/F14Map.h>
 #include <folly/dynamic.h>
 #include <react/renderer/components/root/RootShadowNode.h>
@@ -132,9 +133,26 @@ struct RecoloredParagraph {
   int reason = 0; // 0 ok, 1 children replaced, 2 no state, 3 not a Paragraph, 4 not Yoga/dirty, 5 state type mismatch, 6 no fragments, 7 no props, 8 no fragment carried the old colour
 };
 
-#if SHADEWIND_DEV_TOOLS
-inline std::atomic<int> gReasons[9];
-#endif
+// Debug counters of one hook: how many Paragraph clones took the no-layout path, and why the others did not (reasons are
+// RecoloredParagraph::reason). Touched only with SHADEWIND_DEV_TOOLS; a hook owns its own, so a second hook (or a test) starts at zero.
+struct RecolorCounters {
+  std::atomic<int> reasons[9]{};
+  std::atomic<int> recolored{0};
+  std::atomic<int> skipDirty{0};
+  std::atomic<int> skipState{0};
+
+  /** "recolored/skipDirty/skipState reasons r0,r1,...", and resets all of them. */
+  std::string takeReport() {
+    std::string text = std::to_string(recolored.exchange(0)) + "/" + std::to_string(skipDirty.exchange(0)) + "/" +
+        std::to_string(skipState.exchange(0)) + " reasons ";
+
+    for (int i = 0; i < 9; ++i) {
+      text += (i ? "," : "") + std::to_string(reasons[i].exchange(0));
+    }
+
+    return text;
+  }
+};
 
 inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const SharedColor& color, bool childrenReplaced) {
   RecoloredParagraph out;
@@ -233,13 +251,6 @@ inline RecoloredParagraph recolorParagraph(const ShadowNode& source, const Share
   return out;
 }
 
-#if SHADEWIND_DEV_TOOLS
-// Debug counters: how many Paragraph clones took the no-layout path, and why the others did not.
-inline std::atomic<int> gRecolored{0};
-inline std::atomic<int> gRecolorSkipDirty{0};
-inline std::atomic<int> gRecolorSkipState{0};
-#endif
-
 // ShadowNode::SharedListOfShared, spelled out: React Native 0.86 deprecates the alias
 using SharedChildren = std::shared_ptr<const std::vector<std::shared_ptr<const ShadowNode>>>;
 
@@ -249,6 +260,7 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
     const Props::Shared& props,
     const SharedChildren& children,
     const TypedDelta& delta,
+    RecolorCounters& counters,
     bool* textWithoutLayout = nullptr) {
   RecoloredParagraph recolored;
 
@@ -263,14 +275,14 @@ inline std::shared_ptr<ShadowNode> cloneThemed(
 
 #if SHADEWIND_DEV_TOOLS
   if (delta.text && std::strcmp(node.getComponentName(), ParagraphComponentName) == 0) {
-    ++gReasons[recolored.reason];
+    ++counters.reasons[recolored.reason];
 
     if (recolored.keepClean) {
-      ++gRecolored;
+      ++counters.recolored;
     } else if (YogaAccess::node(static_cast<const YogaLayoutableShadowNode&>(node)).isDirty()) {
-      ++gRecolorSkipDirty;
+      ++counters.skipDirty;
     } else {
-      ++gRecolorSkipState;
+      ++counters.skipState;
     }
   }
 #endif
@@ -710,6 +722,9 @@ public:
     return _graveyard.size();
   }
 
+  /** Debug: the Paragraph recolor counters of this hook (takeReport resets them). */
+  RecolorCounters& recolorCounters() { return _recolor; }
+
   // The last commit's counts and times. Filled only with SHADEWIND_DEV_TOOLS (zeros otherwise).
   HookStats stats() {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -1101,7 +1116,7 @@ private:
         ++walk.missChildren;
       }
 
-      result = cloneThemed(node, target, newChildren, *delta, textWithoutLayout);
+      result = cloneThemed(node, target, newChildren, *delta, _recolor, textWithoutLayout);
       applied = target.get();
     } else {
       ++walk.missNotOurs;
@@ -1115,7 +1130,7 @@ private:
       walk.propsNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - p0).count();
 #endif
 
-      result = cloneThemed(node, props, newChildren, *delta, textWithoutLayout);
+      result = cloneThemed(node, props, newChildren, *delta, _recolor, textWithoutLayout);
       applied = props.get();
 
       // React changed the props: they are the new source of truth. Everything built from the old ones is stale; the next
@@ -1283,6 +1298,7 @@ private:
   uint64_t _commits = 0;
   size_t _purgeAt = 1024;
   HookStats _stats;
+  RecolorCounters _recolor;
   std::shared_ptr<const ContextContainer> _contextContainer;
   DiagnosticLog _log; // lock order: _mutex, then the log's own
 };
