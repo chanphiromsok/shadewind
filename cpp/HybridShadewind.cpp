@@ -159,7 +159,7 @@ void runLoopActivity(CFRunLoopObserverRef, CFRunLoopActivity activity, void*) {
 
 #if SHADEWIND_DEV_TOOLS
 // Results of the last background / main-thread pass, read by the next setTheme call (they finish after it returned).
-[[maybe_unused]] std::atomic<double> gLastAsyncCommitMs{0};
+std::atomic<double> gLastAsyncCommitMs{0};
 // setTheme call -> main thread done mounting (the screen update), of the last switch
 std::atomic<double> gLastVisualMs{0};
 
@@ -224,7 +224,6 @@ void HybridShadewind::loadHybridMethods() {
     prototype.registerRawHybridMethod("registerMany", 4, &HybridShadewind::registerMany);
     prototype.registerRawHybridMethod("unregister", 1, &HybridShadewind::unregisterNode);
     prototype.registerRawHybridMethod("flushPending", 0, &HybridShadewind::flushPending);
-    prototype.registerRawHybridMethod("prepare", 0, &HybridShadewind::prepare);
     prototype.registerRawHybridMethod("configure", 1, &HybridShadewind::configure);
     prototype.registerRawHybridMethod("loadClassTable", 1, &HybridShadewind::loadClassTable);
     prototype.registerRawHybridMethod("mergeClasses", 0, &HybridShadewind::mergeClasses);
@@ -534,17 +533,12 @@ jsi::Value HybridShadewind::inspect(jsi::Runtime& rt, const jsi::Value&, const j
 }
 #endif // SHADEWIND_DEV_TOOLS
 
-// Kept for API compatibility: registerMany flushes what this used to. A view registered alone (register) is themed here.
+// Themes the views registered since the last commit that registerMany did not flush (a view registered alone is themed here).
 jsi::Value HybridShadewind::flushPending(jsi::Runtime& rt, const jsi::Value&, const jsi::Value*, size_t) {
   if (auto* ui = attachedUIManager(rt); ui != nullptr && _engine.hook().hasStale()) {
     commitTick(*ui);
   }
 
-  return jsi::Value::undefined();
-}
-
-// Kept for API compatibility: it used to warm the pre-built nodes of the next switch, which are gone.
-jsi::Value HybridShadewind::prepare(jsi::Runtime&, const jsi::Value&, const jsi::Value*, size_t) {
   return jsi::Value::undefined();
 }
 
@@ -903,7 +897,7 @@ jsi::Value HybridShadewind::setTheme(jsi::Runtime& rt, const jsi::Value&, const 
   // `mountSynchronously = false` (hookDeferred without a scheduler) queues the mount with RuntimeScheduler::scheduleRenderingUpdate
   // (Scheduler.cpp), which only the JS thread may call, inside a task. Mounted at once instead, Android showed LinearGradient colours
   // 4-8 frames after the bound views. Mounted at the end of this task, it still came before React's commit of a render React did
-  // not do in this task (colours read with useResolveClassNames / useCSSVariable): that is why hookDeferred no longer commits here.
+  // not do in this task (colours read with useResolveClassNames / useCSSVariable): so hookDeferred does not commit here.
   commitTick(*ui, !deferred);
 
 #if SHADEWIND_DEV_TOOLS

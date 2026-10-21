@@ -25,7 +25,6 @@ public:
   jsi::Value registerMany(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value unregisterNode(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value flushPending(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
-  jsi::Value prepare(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value configure(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value loadClassTable(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);
   jsi::Value mergeClasses(jsi::Runtime& rt, const jsi::Value& thisValue, const jsi::Value* args, size_t count);

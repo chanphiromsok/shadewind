@@ -24,7 +24,7 @@ path is an optimisation and never changes behaviour.**
 | `shadewind/uniwind` | yes | `installUniwind`, `registerPrebuiltStyleTable`, `nativeResolver`, `View`, `Text`, `Pressable`, `TouchableOpacity`, `withUniwind`, and the debug helpers `decisions`, `renders` |
 | `shadewind/metro` | yes (CJS) | `withShadewind(config, { prebuildStyleTable?, cacheColors? })`: wraps the config returned by `withUniwindConfig`; `prebuildStyleTable: false` builds the native class table on the device instead of at bundle time; `cacheColors: true` (off by default) caches React Native's colour parsing |
 | `shadewind/diagnostics` | yes, development only | `enableDiagnostics({ reportMounts, reportUnmounts, reportUpdates })`, `disableDiagnostics`, `flushDiagnostics`; no-ops outside `__DEV__`, native recorder in Debug builds only (`cpp/Diagnostics.hpp`) |
-| `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `prepare`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending`. `inspect`, `resetMainBusy`, `mainBusyMs` and the timings exist in debug builds or with `SHADEWIND_DEV_TOOLS` (`docs/LOCAL_TESTING.md`, "Release builds carry no debug code"); `hasDevTools()`, `setThemeTimed()` |
+| `shadewind/internal` | no semver | raw `register`/`unregister`, `setThemeWithStrategy`, `ThemeStrategy`, `ThemeTimings`, `inspect`, `resetMainBusy`, `mainBusyMs`, `refreshReactNodes`, `flushPending`. `inspect`, `resetMainBusy`, `mainBusyMs` and the timings exist in debug builds or with `SHADEWIND_DEV_TOOLS` (`docs/LOCAL_TESTING.md`, "Release builds carry no debug code"); `hasDevTools()`, `setThemeTimed()` |
 
 Benchmark strategies (`stock`, `fastAsync`, `direct`, `both`) move to the example app or a build flag. No `strategy` parameter on
 the public `setTheme`; the native side picks by capability.
@@ -127,7 +127,7 @@ installUniwind(); // Uniwind.setTheme('dark') now goes through the engine
 | `getTheme()` returning `''` | always a declared theme |
 | `useThemedRef(styles)` | `useThemed(styles).ref` plus `.style` |
 | `ThemedStyles` with `opacity` | three keys, typed names |
-| `inspect`, `prepare`, `mainBusyMs`, `resetMainBusy` | `shadewind/internal` |
+| `inspect`, `mainBusyMs`, `resetMainBusy` | `shadewind/internal` |
 | no declaration | `configure({ themes, initialTheme })` (new native method) |
 | `exports: { "." }` | `.`, `./uniwind`, `./metro`, `./internal` |
 

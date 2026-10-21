@@ -514,8 +514,8 @@ public:
     return _log;
   }
 
-  // Publishes the theme for the next commit without taking _mutex, which a background (hookAsync) commit holds for its whole walk:
-  // the JS thread used to wait for it here. A walk already running keeps the theme it started with; the commit that follows the
+  // Publishes the theme for the next commit without taking _mutex, which a background (hookAsync) commit holds for its whole walk,
+  // so the JS thread never waits for a walk. A walk already running keeps the theme it started with; the commit that follows the
   // switch picks the new one up (syncTheme).
   void setTheme(const std::string& theme) {
     // Only the JS thread writes the theme names (declareThemes, makeStyle, an undeclared name here), so it may look a declared

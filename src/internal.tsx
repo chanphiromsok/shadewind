@@ -36,7 +36,6 @@ type RawMethods = {
     transition?: NativeThemeTransition
   ): ThemeTimings | undefined;
   flushPending(): void;
-  prepare(): void;
   // inspect and measure: compiled in only with SHADEWIND_DEV_TOOLS (cpp/DevTools.hpp), absent from a release build
   resetMainBusy?: () => void;
   mainBusyMs?: () => number;
@@ -562,10 +561,6 @@ export const ShadewindEngine = {
   /** Measurement: longest main-thread run loop busy period in ms since resetMainBusy (iOS only). */
   mainBusyMs(): number {
     return callDevTool('mainBusyMs');
-  },
-  /** Kept for compatibility; does nothing. */
-  prepare(): void {
-    getNative().prepare();
   },
   /** Debug only. Compares the committed tree, UIKit and the expected theme colours. */
   inspect(): InspectReport {
