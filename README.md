@@ -42,6 +42,24 @@ shadewind; median of three launches)
 | Android · `StyleSheet` (numeric colours) | 55.38 ms | |
 | **Android · Shadewind 0.2.0** | **59 to 61 ms** | **0.14 ms** |
 
+**Memory** (iOS simulator, iPhone 17 Pro, 2026-10-21, Release; the `example-real` soak mounts and unmounts about 1,200 views per cycle, 200 of
+them with a className never seen before; process footprint after two forced garbage collections, at about 85 cycles (17,000 distinct
+classNames) and after 400 cycles (80,000))
+
+| | ~17,000 distinct classNames | 80,000 distinct classNames | Growth |
+|---|---|---|---|
+| Uniwind 1.12 | 154 MB | 300 MB | +146 MB |
+| Shadewind 0.3.1 | 249 MB | 733 MB | +484 MB |
+| **Shadewind, fix in the next release** | **106 MB** | **81 MB** | **none** |
+| Shadewind 0.3.1 + `precompileClassNames` | 262 MB | 769 MB | +507 MB |
+| **Shadewind + `precompileClassNames`, fix in the next release** | **93 MB** | **77 MB** | **none** |
+
+With classNames that have no theme-dependent part, which Uniwind never clears, plain Uniwind grew from 156 to 254 MB, the fixed adapter held
+98 to 80 MB and the fixed precompile build 92 to 74 MB. The lower second reading of the fixed builds is warm-up, not shrinkage. A normal app
+with a fixed set of classNames did not grow in any build (500 cycles, about 600,000 views). The fix bounds the style cache and does not
+change the mount time (2003 views: 48.3 to 48.8 ms adapter, 41.9 to 42.2 ms precompile). Not measured: Android, a device, long TovTam sessions
+(a 24-loop tab tour levelled off at 273 MB). Protocol: [docs/BENCHMARK.md](docs/BENCHMARK.md).
+
 The theme column is JS-thread time only; the colours reach the screen about 47 ms (Android) to 57 ms (iOS) after the call, because the
 main thread's mount is React Native's own work. iOS: iPhone 17 Pro simulator; Android: Pixel_8_Pro emulator. Absolute milliseconds move
 between sessions with the host; compare rows from one table. Spreads, both protocols, the method and what did not help:

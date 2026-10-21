@@ -39,6 +39,41 @@ record is a `useRef` per expression-className view and costs about 1 to 2 ms on 
 
 What is not measured: a physical device, Android, a Debug build, memory beyond a post-run `footprint` of about 165 MB for both builds.
 
+## Memory soak: distinct classNames (2026-10-21)
+
+`example-real` `-soak 1` (`src/bench/SoakBench.tsx`, `scripts/memory-soak.sh`): each cycle mounts a 1000-item list (literal classNames, expression
+classNames that change with the cycle, a wrapper that forwards `{...props}`), then unmounts it. `-soakUnique 200` adds 200 views per cycle with a
+className no earlier cycle used (`size-10 w-[Npx] bg-card`), `-soakUniqueStatic 1` drops `bg-card` so the className has no theme-dependent part
+(Uniwind clears the entries of theme-dependent classNames on a theme switch, never the others), `-soakTheme 1` switches the theme every 20
+cycles. iOS simulator, Release builds, one launch per build. Memory is the process `footprint` after two forced Hermes garbage collections
+(`touch <simulator data>/var/run/memory_warning_simulation`, twice), read at about 85 cycles (17,000 distinct classNames) and after 400 cycles
+(80,000), with the same list mounted both times.
+
+| Build | ~17,000 distinct | 80,000 distinct | Growth |
+|---|---|---|---|
+| Uniwind 1.12 | 154 MB | 300 MB | +146 MB |
+| Shadewind 0.3.1 | 249 MB | 733 MB | +484 MB |
+| Shadewind, `fix/classname-memory` | 106 MB | 81 MB | none |
+| Shadewind 0.3.1 + precompile | 262 MB | 769 MB | +507 MB |
+| Shadewind + precompile, `fix/classname-memory` | 93 MB | 77 MB | none |
+
+Unique classNames with no theme-dependent part (`-soakUniqueStatic 1`): Uniwind 156 to 254 MB, the fixed adapter 98 to 80 MB, the fixed precompile
+build 92 to 74 MB.
+
+- **A footprint reading is coarse.** The fixed builds read lower at 400 cycles than at 85: warm-up, not shrinkage. The investigation behind the fix
+  measured the Hermes heap itself after a forced collection: about 0.3 KB per distinct className for the adapter and about 0.06 KB for precompile
+  until the cache limit, against 4.2 KB for plain Uniwind's own cache and 9.5 KB / 7.9 KB for the unfixed adapter / precompile.
+- **The theme-switching variant (`-soakTheme 1`) hides the growth** in every build (the switch clears the theme-dependent entries), so it is a check that
+  nothing breaks, not a measurement of the cache.
+- **Normal classNames:** 500 cycles of about 1,200 views (about 600,000 views) stayed flat, about 97 MB, before and after the fix.
+- **Mount time is unchanged by the fix** (2003-view mount, six interleaved launches): adapter 48.3 ms (0.3.1) and 48.8 ms (fixed), precompile 41.9 ms and 42.2 ms.
+- **TovTam, Release build with the fix:** after two forced collections, 128 MB at the start, 251 MB after eight tab loops (Explore, Moment, Range,
+  Notification, Account; the first load of each screen), 267 MB after 16 and 273 MB after 24, with a theme switch every eight loops. A short
+  session; the growth levelled off.
+- **Earlier runs of the soak had two flaws, both fixed in the tooling:** `-soakCycles 0` meant the default 400, and the final `footprint` of a run read
+  an idle process (the list unmounted pages released), which is lower than a reading during the churn.
+- Not measured: Android, a device.
+
 ## End to end, uniwind-benchmarks render and theme (2026-10-19)
 
 The repository's own protocol (`scripts/bench/measure.py`), unchanged: Release builds, iPhone 17 Pro simulator (iOS 26.5), StyleSheet
