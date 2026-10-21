@@ -240,11 +240,14 @@ inline std::atomic<int> gRecolorSkipDirty{0};
 inline std::atomic<int> gRecolorSkipState{0};
 #endif
 
+// ShadowNode::SharedListOfShared, spelled out: React Native 0.86 deprecates the alias
+using SharedChildren = std::shared_ptr<const std::vector<std::shared_ptr<const ShadowNode>>>;
+
 // Clone `node` with the theme's props. A text colour change keeps the layout clean (see recolorParagraph).
 inline std::shared_ptr<ShadowNode> cloneThemed(
     const ShadowNode& node,
     const Props::Shared& props,
-    const ShadowNode::SharedListOfShared& children,
+    const SharedChildren& children,
     const TypedDelta& delta,
     bool* textWithoutLayout = nullptr) {
   RecoloredParagraph recolored;
@@ -1012,7 +1015,7 @@ private:
     ++walk.visited;
 
     // children first: a changed child makes this node a (cheap) clone with a new children list
-    ShadowNode::SharedListOfShared newChildren;
+    SharedChildren newChildren;
     {
       const auto& children = node.getChildren();
       const auto* oldChildren = old != nullptr ? &old->getChildren() : nullptr;
