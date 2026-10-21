@@ -33,6 +33,12 @@ set(RN "${DEPS}/react-native/ReactCommon")
 set(ENGINE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 find_package(Threads REQUIRED)
+if(APPLE) # Homebrew (brew install boost double-conversion gflags glog googletest ninja); its glog needs the export define
+  include_directories(SYSTEM /opt/homebrew/include)
+  link_directories(/opt/homebrew/lib)
+  list(APPEND CMAKE_PREFIX_PATH /opt/homebrew)
+  add_compile_definitions(GLOG_USE_GLOG_EXPORT)
+endif()
 find_package(GTest REQUIRED)
 
 # ---- third party, the versions React Native 0.86 pins (fmt, folly, fast_float from source; glog, boost, double-conversion from the OS)
@@ -137,7 +143,10 @@ if(HARNESS_ANDROID_STATE)
   target_include_directories(rn_renderer PUBLIC "${FBJNI_INCLUDE}" ${JNI_INCLUDE_DIRS})
 endif()
 target_compile_options(rn_renderer PRIVATE -w)
-target_link_libraries(rn_renderer PUBLIC yoga folly_runtime glog atomic)
+target_link_libraries(rn_renderer PUBLIC yoga folly_runtime glog)
+if(NOT APPLE) # macOS has no libatomic; its libc++ covers it
+  target_link_libraries(rn_renderer PUBLIC atomic)
+endif()
 
 # ---- the harness
 

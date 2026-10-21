@@ -16,7 +16,11 @@
 #if HARNESS_ASAN
 #include <sanitizer/allocator_interface.h>
 #else
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #endif
 
 #include <gtest/gtest.h>
@@ -532,10 +536,14 @@ TEST_F(Current, UnmountedViewsAndStylesAreDropped) {
 
 namespace {
 
-// Bytes the process has allocated and not freed (ASan's own count under AddressSanitizer, glibc's otherwise).
+// Bytes the process has allocated and not freed (ASan's own count under AddressSanitizer, the platform allocator's otherwise).
 size_t liveHeapBytes() {
 #if HARNESS_ASAN
   return __sanitizer_get_current_allocated_bytes();
+#elif defined(__APPLE__)
+  malloc_statistics_t stats;
+  malloc_zone_statistics(nullptr, &stats);
+  return stats.size_in_use;
 #else
   return mallinfo2().uordblks;
 #endif
