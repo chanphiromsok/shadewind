@@ -10,6 +10,7 @@ Start with the [README](../README.md) for the pitch, the benchmark and the quick
 | [API.md](API.md) | Every export |
 | [PRECOMPILE.md](PRECOMPILE.md) | The opt-in `precompileClassNames` build step |
 | [KNOWN_LIMITS.md](KNOWN_LIMITS.md) | What it does not do and where it is not proven |
+| [UNIWIND_CONTRACT.md](UNIWIND_CONTRACT.md) | Every private Uniwind thing shadewind relies on, and the check that guards it |
 | [DEMO.md](DEMO.md) | Run the 2003-view demo yourself |
 
 ## Understand it

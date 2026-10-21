@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "uniwind";
+
+/* The tokens tools/uniwind-contract-check.cjs resolves; a theme variable per colour so classes depend on Theme. */
+@layer theme {
+  :root {
+    @variant light {
+      --color-brand: oklch(0.6486 0.1749 150.71);
+      --color-primary: oklch(0.2178 0 0);
+      --color-background: oklch(0.9761 0 0);
+      --color-card: oklch(1 0 0);
+    }
+
+    @variant dark {
+      --color-brand: rgb(4, 171, 82);
+      --color-primary: oklch(0.9461 0 0);
+      --color-background: oklch(0.1776 0 0);
+      --color-card: oklch(0.2178 0 0);
+    }
+  }
+}

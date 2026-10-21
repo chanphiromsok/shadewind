@@ -1,0 +1,50 @@
+name: Uniwind contract
+# shadewind sits on Uniwind's private code (docs/UNIWIND_CONTRACT.md). This runs tools/uniwind-contract-check.cjs against the Uniwind
+# versions shadewind claims to support (the latest patch of each tested minor) and against the newest release, so a Uniwind change
+# shows up here, named, before a user's app finds it.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/uniwind/**'
+      - 'metro*.cjs'
+      - 'tools/uniwind-*.cjs'
+      - 'tools/contract-fixture/**'
+      - '.github/workflows/uniwind-contract.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # the minors in src/uniwind/install.ts TESTED (and the peer range), then whatever npm calls latest
+        uniwind: ['~1.12', '~1.13', 'latest']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Install the fixture app with Uniwind ${{ matrix.uniwind }}
+        working-directory: tools/contract-fixture
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund uniwind@${{ matrix.uniwind }}
+          node -p "'uniwind ' + require('uniwind/package.json').version"
+
+      - name: Contract check
+        run: node tools/uniwind-contract-check.cjs tools/contract-fixture
