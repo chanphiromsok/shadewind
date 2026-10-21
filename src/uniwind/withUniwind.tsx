@@ -37,12 +37,14 @@ export const withUniwind = (
     useEffectSubscription(styled);
     const ref = useEngineRef({ ...styled, deps: NO_DEPS }, props.ref);
 
+    // className is resolved here and handed down as `style`: forwarded too, the host view inside (an icon's Text) would resolve it again,
+    // find the same colours in the inline style and re-render itself on every switch ("inline style overlaps").
+    const { className, ...rest } = props;
+
     return createElement(Component, {
-      ...props,
+      ...rest,
       ref,
-      ...(props.className
-        ? { style: withUserStyle(style, props.style) }
-        : null),
+      ...(className ? { style: withUserStyle(style, props.style) } : null),
     });
   };
 
