@@ -1,6 +1,7 @@
 import './global.css';
 import { EdgeCases } from './src/bench/EdgeCases';
 import { MountBench } from './src/bench/MountBench';
+import { SoakBench } from './src/bench/SoakBench';
 import { RenderBench } from './src/bench/RenderBench';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, Settings, Text, View } from 'react-native';
@@ -118,6 +119,10 @@ function Probe() {
 }
 
 export default function App() {
+  if (Settings.get('soak')) {
+    return <SoakBench />;
+  }
+
   if (Settings.get('edgeCases')) {
     return <EdgeCases />;
   }
