@@ -1,0 +1,1042 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><title>shadewind: theming inside the shadow tree</title>
+<meta name="description" content="shadewind: light and dark themes switched inside React Native's shadow tree. Zero re-renders.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+</head><body>
+<style>
+/* Layout: full-bleed hero = the wordmark itself, cut by a moving shade line (light | dark), wind streaks over it.
+   Below: stat strip, live "no re-render" demo, quick start, how it works, tabbed animated benchmark, docs grid.
+   The page has its own theme flip (circular reveal) to show the product's point. */
+:root {
+  --bg: #eef1f5; --fg: #10141a; --surface: #ffffff; --line: #d3d9e2; --muted: #586274;
+  --accent: #0a8a84; --accent-ink: #ffffff; --soft: #dcefee; --rival: #9aa6b8;
+  --code: #0d1117; --code-fg: #e2e8f0; --code-dim: #6b7789;
+  --hl: #eef1f5; --hd: #0b0e13;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0b0e13; --fg: #e8edf4; --surface: #12171f; --line: #232c39; --muted: #8e9bb0; --accent: #4fe0d2; --accent-ink: #062320; --soft: #0f2e2c; --rival: #3c4757; --code: #070a0e; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #0b0e13; --fg: #e8edf4; --surface: #12171f; --line: #232c39; --muted: #8e9bb0; --accent: #4fe0d2; --accent-ink: #062320; --soft: #0f2e2c; --rival: #3c4757; --code: #070a0e; color-scheme: dark; }
+/* page-level flip driven by the demo toggle */
+.page[data-sw="light"] { --bg: #eef1f5; --fg: #10141a; --surface: #ffffff; --line: #d3d9e2; --muted: #586274; --accent: #0a8a84; --accent-ink: #ffffff; --soft: #dcefee; --rival: #9aa6b8; --code: #0d1117; }
+.page[data-sw="dark"] { --bg: #0b0e13; --fg: #e8edf4; --surface: #12171f; --line: #232c39; --muted: #8e9bb0; --accent: #4fe0d2; --accent-ink: #062320; --soft: #0f2e2c; --rival: #3c4757; --code: #070a0e; }
+
+* { box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { color: var(--fg); font: 400 16px/1.65 var(--display); }
+.page { background: var(--bg); color: var(--fg); }
+a { color: var(--accent); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.05; margin: 0; }
+code { font-family: var(--mono); font-size: .86em; }
+.wrap { max-width: 1160px; margin: 0 auto; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); }
+.mono { font-family: var(--mono); }
+.eyebrow { font: 600 11px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+
+/* ---------- top bar ---------- */
+.bar { position: absolute; inset: 0 0 auto; z-index: 5; }
+.bar .wrap { display: flex; justify-content: space-between; align-items: center; padding-block: 18px; gap: 12px; }
+.brand { font: 600 15px/1 var(--mono); color: #fff; mix-blend-mode: difference; text-decoration: none; letter-spacing: .02em; }
+.bar nav { display: flex; gap: 18px; font: 500 13px/1 var(--mono); }
+.bar nav a { color: #fff; mix-blend-mode: difference; text-decoration: none; }
+@media (max-width: 560px) { .bar nav a.hide-s { display: none; } }
+
+/* ---------- hero ---------- */
+.hero { position: relative; overflow: hidden; height: clamp(380px, 62vw, 640px); max-height: 640px; cursor: ew-resize; touch-action: pan-y; }
+.layer { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.layer.l { background: var(--hl); }
+.layer.d { background: var(--hd); clip-path: polygon(calc(var(--x, 55%) + 9%) 0, 100% 0, 100% 100%, calc(var(--x, 55%) - 9%) 100%); }
+.word { font-weight: 800; letter-spacing: -.06em; line-height: .78; font-size: clamp(84px, 22vw, 320px); white-space: nowrap; transform: translateY(6%); user-select: none; }
+.layer.l .word { color: #10141a; }
+.layer.d .word { color: #eef1f5; }
+.edge { position: absolute; inset: 0; pointer-events: none; }
+.edge::after { content: ""; position: absolute; top: -10%; bottom: -10%; left: var(--x, 55%); width: 2px; background: #4fe0d2; transform: skewX(-9.5deg); box-shadow: 0 0 24px 4px rgba(79,224,210,.55); }
+canvas.wind { position: absolute; inset: 0; width: 100%; height: 100%; mix-blend-mode: difference; pointer-events: none; }
+.tag { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; color: #fff; mix-blend-mode: difference; pointer-events: none; }
+.tag .wrap { padding-block: 0 26px; display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
+.tag p { margin: 0; font-size: clamp(17px, 2.2vw, 24px); font-weight: 600; max-width: 30ch; line-height: 1.25; }
+.tag .hint { font: 500 12px/1.4 var(--mono); opacity: .8; }
+
+/* ---------- intro band ---------- */
+.intro { border-bottom: 1px solid var(--line); }
+.intro .wrap { padding-block: 34px; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px 48px; align-items: center; }
+.intro h1 { font-size: clamp(30px, 4.4vw, 52px); font-weight: 800; letter-spacing: -.035em; }
+.intro h1 em { font-style: normal; color: var(--accent); }
+.intro-right { display: grid; gap: 12px; min-width: 0; }
+.install { display: flex; align-items: center; gap: 10px; background: var(--code); color: var(--code-fg); border-radius: 12px; padding: 6px 6px 6px 16px; font: 400 14px/1 var(--mono); min-width: 0; }
+.install span { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding-block: 10px; }
+.install span::before { content: "$ "; color: var(--code-dim); }
+.btn { font: 600 14px/1 var(--display); padding: 12px 16px; border-radius: 9px; border: 1px solid var(--fg); background: transparent; color: var(--fg); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; transition: transform .15s; }
+.btn:hover { transform: translateY(-1px); }
+.btn.solid { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.sm { padding: 9px 12px; font: 600 12px/1 var(--mono); background: #1f2733; color: #e2e8f0; border-color: #2c3645; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 500 11.5px/1 var(--mono); padding: 6px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.warn { color: #b7791f; border-color: color-mix(in srgb, #b7791f 45%, transparent); }
+
+/* ---------- stats ---------- */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+.stat { padding: 26px 20px; border-right: 1px solid var(--line); display: grid; gap: 4px; }
+.stat:last-child { border-right: 0; }
+.stat b { font-size: clamp(30px, 4vw, 46px); font-weight: 800; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat b small { font-size: .45em; font-weight: 600; letter-spacing: 0; color: var(--muted); margin-left: 3px; }
+.stat span { font: 400 12.5px/1.4 var(--mono); color: var(--muted); }
+.stat.hot b { color: var(--accent); }
+
+/* ---------- sections ---------- */
+main { display: grid; gap: 0; }
+section { padding-block: 72px; border-bottom: 1px solid var(--line); scroll-margin-top: 10px; }
+.head { display: grid; gap: 12px; margin-bottom: 30px; max-width: 70ch; }
+.head h2 { font-size: clamp(30px, 4.6vw, 50px); font-weight: 800; letter-spacing: -.035em; }
+.head p { margin: 0; color: var(--muted); font-size: 17px; }
+
+.note-s { font: 400 12px/1.5 var(--mono); color: var(--muted); }
+/* demo: two phones */
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 28px; align-items: center; }
+.side { margin: 0; display: grid; gap: 14px; justify-items: center; min-width: 0; }
+.side figcaption { display: grid; gap: 2px; text-align: center; }
+.side figcaption b { font-size: 18px; font-weight: 600; }
+.side.sw figcaption b { color: var(--accent); }
+.side figcaption span { font: 400 12px/1.3 var(--mono); color: var(--muted); }
+.ctl { display: grid; gap: 12px; justify-items: center; text-align: center; max-width: 170px; }
+.switch { width: 84px; height: 44px; border-radius: 999px; border: 1px solid var(--line); background: #dfe5ed; position: relative; cursor: pointer; padding: 0; transition: background .3s; }
+.switch[aria-pressed="true"] { background: #0b0e13; border-color: #2c3645; }
+.knob { position: absolute; top: 4px; left: 4px; width: 34px; height: 34px; border-radius: 50%; background: #ffffff; display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.25); transition: transform .35s cubic-bezier(.7,0,.2,1), background .3s; }
+.switch[aria-pressed="true"] .knob { transform: translateX(40px); background: #4fe0d2; }
+.knob svg { width: 18px; height: 18px; fill: none; stroke: #10141a; stroke-width: 2; stroke-linecap: round; }
+.knob .moon { display: none; fill: #062320; stroke: none; }
+.switch[aria-pressed="true"] .sun { display: none; }
+.switch[aria-pressed="true"] .moon { display: block; }
+.call { font: 600 13px/1 var(--mono); color: var(--accent); background: var(--soft); padding: 7px 10px; border-radius: 6px; }
+
+.phone { position: relative; width: 100%; max-width: 290px; border-radius: 2.6em; padding: .55em; background: #1a1f27; box-shadow: 0 0 0 1px #2c3440, 0 24px 60px -24px rgba(0,0,0,.45); font-size: clamp(8px, 2.25vw, 12.5px); transition: box-shadow .5s; }
+.phone.commit { box-shadow: 0 0 0 2px #4fe0d2, 0 0 40px 4px rgba(79,224,210,.45), 0 24px 60px -24px rgba(0,0,0,.45); }
+.commit-tag { position: absolute; top: -.9em; left: 50%; transform: translate(-50%, 0); z-index: 3; font: 600 1em/1 var(--mono); background: #4fe0d2; color: #062320; padding: .5em .8em; border-radius: 999px; white-space: nowrap; opacity: 0; transition: opacity .25s, transform .25s; }
+.phone.commit .commit-tag { opacity: 1; transform: translate(-50%, -.3em); }
+
+.cmp[data-t="light"] { --s-bg: #f3f5f8; --s-card: #ffffff; --s-fg: #121820; --s-mut: #6a7485; --s-line: #e3e8ef; --s-acc: #0a8a84; --s-acc-ink: #ffffff; }
+.cmp[data-t="dark"]  { --s-bg: #0b0e13; --s-card: #161c25; --s-fg: #e8edf4; --s-mut: #8794a8; --s-line: #232c39; --s-acc: #4fe0d2; --s-acc-ink: #062320; }
+.rr .cmp { outline: 2px solid transparent; outline-offset: -2px; }
+.cmp.fl { animation: fl .7s ease-out; }
+@keyframes fl { 0% { outline-color: #ffb020; } 60% { outline-color: rgba(255,176,32,.6); } 100% { outline-color: transparent; } }
+
+.scr { background: var(--s-bg); color: var(--s-fg); border-radius: 2.1em; overflow: hidden; display: grid; gap: .9em; padding: .9em 1em 1em; font-family: var(--display); line-height: 1.3; }
+.sb { display: flex; justify-content: space-between; align-items: center; font: 600 .9em/1 var(--mono); color: var(--s-fg); padding: .2em .6em; border-radius: .5em; }
+.sb i { display: inline-block; width: 1.6em; height: .7em; border-radius: .2em; background: var(--s-fg); opacity: .8; }
+.hdr { display: flex; justify-content: space-between; align-items: center; padding: .2em .3em; border-radius: .5em; }
+.hdr b { font-size: 1.9em; font-weight: 800; letter-spacing: -.03em; color: var(--s-fg); }
+.hdr span { width: 2.2em; height: 2.2em; border-radius: 50%; background: var(--s-card); border: 1px solid var(--s-line); }
+.prof { display: flex; gap: .9em; align-items: center; background: var(--s-card); border: 1px solid var(--s-line); border-radius: 1.1em; padding: .9em; }
+.av { width: 3.4em; height: 3.4em; border-radius: 50%; display: grid; place-items: center; background: var(--s-acc); color: var(--s-acc-ink); font-weight: 800; font-size: 1.05em; flex: none; }
+.prof b { display: block; font-size: 1.15em; color: var(--s-fg); }
+.prof small { font: 400 .85em/1.3 var(--mono); color: var(--s-mut); }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55em; }
+.tile { background: var(--s-card); border: 1px solid var(--s-line); border-radius: .9em; padding: .7em .6em; display: grid; gap: .1em; }
+.tile b { font-size: 1.25em; font-weight: 800; color: var(--s-fg); letter-spacing: -.02em; }
+.tile small { font-size: .78em; color: var(--s-mut); }
+.list { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 1.1em; overflow: hidden; display: grid; }
+.lrow { display: flex; align-items: center; gap: .8em; padding: .75em .9em; border-top: 1px solid var(--s-line); color: var(--s-fg); font-size: 1em; background: var(--s-card); }
+.lrow:first-child { border-top: 0; }
+.lrow .ic { width: 1.8em; height: 1.8em; border-radius: .5em; background: var(--s-bg); border: 1px solid var(--s-line); flex: none; }
+.lrow span { flex: 1; min-width: 0; }
+.lrow em { font-style: normal; color: var(--s-mut); font-size: 1.2em; line-height: 1; }
+.tg { width: 2.6em; height: 1.5em; border-radius: 999px; background: var(--s-line); position: relative; flex: none; }
+.tg::after { content: ""; position: absolute; top: .2em; left: .2em; width: 1.1em; height: 1.1em; border-radius: 50%; background: #fff; }
+.tg.on { background: var(--s-acc); }
+.tg.on::after { left: 1.3em; }
+.cta { background: var(--s-acc); color: var(--s-acc-ink); border-radius: .9em; padding: .85em; text-align: center; font-weight: 700; font-size: 1.05em; }
+.tabbar { display: flex; justify-content: space-around; padding: .6em .4em .2em; border-top: 1px solid var(--s-line); }
+.tabbar i { width: 1.5em; height: 1.5em; border-radius: .45em; background: var(--s-mut); opacity: .35; }
+.tabbar i:first-child { background: var(--s-acc); opacity: 1; }
+
+.js { width: 100%; max-width: 290px; display: grid; gap: 6px; }
+.js-top { display: flex; justify-content: space-between; font: 400 11.5px/1 var(--mono); color: var(--muted); }
+.js-top b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.sw .js-top b { color: var(--accent); }
+.frames { position: relative; height: 54px; display: flex; align-items: flex-end; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.frames span { flex: 1; min-width: 0; border-radius: 1px; background: var(--muted); opacity: .35; }
+.frames span.hot { background: #ffb020; opacity: 1; }
+.frames span.ok { background: var(--accent); opacity: 1; }
+.frames .budget { position: absolute; left: 0; right: 0; bottom: 60%; border-top: 1px dashed var(--muted); opacity: .5; }
+
+@media (max-width: 760px) {
+  .stage { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 12px; }
+  .ctl { grid-column: 1 / -1; grid-row: 1; max-width: none; grid-template-columns: auto auto; align-items: center; }
+  .ctl .note-s { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cmp.fl { animation: none; outline-color: #ffb020; }
+  .knob, .switch, .phone { transition: none; }
+}
+
+/* quick start: steps + editor */
+.qs-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 20px 32px; margin-bottom: 30px; }
+[hidden] { display: none !important; }
+.seg.big button { font-size: 13px; padding: 10px 14px; }
+.qs2 { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 20px; align-items: stretch; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; align-content: start; counter-reset: st; }
+.steps button { width: 100%; text-align: left; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 2px 12px; align-items: center; padding: 14px; border-radius: 12px; border: 1px solid transparent; background: none; color: var(--fg); cursor: pointer; font: inherit; transition: background .2s, border-color .2s; }
+.steps button:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.steps button[aria-current="step"] { background: var(--surface); border-color: var(--line); }
+.steps .num { grid-row: span 2; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 600 13px/1 var(--mono); border: 1px solid var(--line); color: var(--muted); }
+.steps button[aria-current="step"] .num { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.steps button.past .num { color: var(--accent); border-color: var(--accent); }
+.steps b { font-size: 16px; font-weight: 600; }
+.steps small { font: 400 12px/1.4 var(--mono); color: var(--muted); }
+
+.editor { background: #0d1117; border: 1px solid #1f2733; border-radius: 16px; overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; min-width: 0; min-height: 330px; box-shadow: 0 30px 60px -30px rgba(0,0,0,.5); }
+.ed-bar { display: flex; justify-content: space-between; align-items: stretch; gap: 10px; background: #0a0d12; border-bottom: 1px solid #1f2733; padding-right: 8px; flex-wrap: wrap; }
+.ed-tab { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: #0d1117; border-right: 1px solid #1f2733; font: 500 12.5px/1 var(--mono); color: #e2e8f0; position: relative; }
+.ed-tab::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: #4fe0d2; }
+.ed-ic { width: 14px; height: 14px; border-radius: 3px; background: #f5c97a; flex: none; }
+.ed-ic.sh { background: #4fe0d2; } .ed-ic.ts { background: #7cc4ff; }
+.ed-tools { display: flex; align-items: center; gap: 8px; padding-block: 6px; flex-wrap: wrap; }
+.seg.pm { border-color: #232c39; }
+.seg.pm button { color: #8794a8; padding: 6px 9px; font-size: 11.5px; }
+.seg.pm button[aria-pressed="true"] { background: #0f2e2c; color: #4fe0d2; }
+.ed-copy, .ed-next { font: 600 12px/1 var(--mono); border-radius: 7px; padding: 8px 11px; cursor: pointer; border: 1px solid #2c3645; background: #161c25; color: #e2e8f0; }
+.ed-copy:hover, .ed-next:hover { border-color: #4fe0d2; }
+.ed-body { overflow-x: auto; }
+.ed-code { margin: 0; padding: 14px 0; font: 400 13.5px/1.75 var(--mono); color: #d5dde8; counter-reset: ln; min-width: max-content; }
+.ed-code .l { display: block; padding: 0 22px 0 0; position: relative; }
+.ed-code .l::before { counter-increment: ln; content: counter(ln); display: inline-block; width: 3.2em; padding-right: 1.4em; text-align: right; color: #3a4554; user-select: none; }
+.ed-code .l.add { background: rgba(79,224,210,.07); }
+.ed-code .l.add::after { content: "+"; position: absolute; left: 2.9em; top: 0; color: #4fe0d2; user-select: none; }
+.ed-code .l.add::before { color: #4fe0d2; opacity: .6; }
+.tk-kw { color: #ff8fb8; } .tk-str { color: #f5c97a; } .tk-fn { color: #4fe0d2; } .tk-tag { color: #7cc4ff; }
+.tk-attr { color: #c9b3ff; } .tk-prop { color: #9ecbff; } .tk-com { color: #5d6b7e; font-style: italic; } .tk-num { color: #f7a072; }
+.tk-pun { color: #7d8899; } .tk-cmd { color: #4fe0d2; font-weight: 600; } .tk-flag { color: #c9b3ff; } .tk-prompt { color: #3a4554; user-select: none; }
+.ed-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-top: 1px solid #1f2733; font: 400 12px/1.5 var(--mono); color: #8794a8; flex-wrap: wrap; }
+.ed-foot a { color: #4fe0d2; }
+.ed-foot code { color: #e2e8f0; }
+@media (max-width: 860px) {
+  .qs2 { grid-template-columns: minmax(0, 1fr); }
+  .steps { grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); overflow-x: auto; padding-bottom: 4px; }
+  .steps button { grid-template-columns: 28px minmax(0, 1fr); padding: 10px; }
+  .steps .num { width: 28px; height: 28px; }
+  .steps small { display: none; }
+}
+
+/* how */
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface); }
+.flow > div { padding: 22px 18px; border-right: 1px solid var(--line); display: grid; gap: 8px; align-content: start; position: relative; }
+.flow > div:last-child { border-right: 0; }
+.flow b { font: 600 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.flow p { margin: 0; font-size: 15px; }
+.flow .skip { grid-column: 1 / -1; border-top: 1px dashed var(--line); border-right: 0; color: var(--muted); font: 400 13px/1.5 var(--mono); }
+.feat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px 32px; margin-top: 40px; }
+.feat div { display: grid; gap: 6px; align-content: start; }
+.feat h3 { font-size: 17px; font-weight: 600; }
+.feat p { margin: 0; color: var(--muted); font-size: 15px; }
+
+/* bench */
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; background: var(--surface); flex-wrap: wrap; }
+.tabs button { font: 600 13px/1 var(--mono); border: 0; background: none; color: var(--muted); padding: 10px 14px; border-radius: 7px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--fg); color: var(--bg); }
+.chart { margin-top: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; display: grid; gap: 16px; }
+.chart-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.chart-top p { margin: 0; color: var(--muted); font: 400 12.5px/1.5 var(--mono); max-width: 70ch; }
+.bars { display: grid; gap: 12px; }
+.b { display: grid; grid-template-columns: minmax(0, 210px) minmax(0, 1fr) 92px; gap: 14px; align-items: center; }
+.b .lbl { font-size: 14px; min-width: 0; }
+.b .lbl small { display: block; font: 400 11px/1.3 var(--mono); color: var(--muted); }
+.b .track { height: 22px; background: color-mix(in srgb, var(--line) 45%, transparent); border-radius: 5px; overflow: hidden; }
+.b .fill { height: 100%; width: var(--w); background: var(--rival); border-radius: 5px; transform-origin: left; transition: transform .9s cubic-bezier(.2,.8,.2,1); }
+.b.us .fill { background: var(--accent); }
+.b.us .lbl { font-weight: 600; }
+.b .val { font: 600 13px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.b.us .val { color: var(--accent); }
+.chart.replay .fill { transform: scaleX(0); transition: none; }
+.legend { display: flex; gap: 16px; font: 400 12px/1 var(--mono); color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.mem-pair { display: grid; gap: 3px; }
+.mem-pair .track { height: 12px; }
+.callout { font: 400 13px/1.6 var(--mono); color: var(--muted); border-left: 2px solid var(--accent); padding-left: 12px; max-width: 75ch; }
+
+/* status + docs */
+.split2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; display: grid; gap: 8px; align-content: start; }
+.card h3 { font-size: 18px; font-weight: 600; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.docs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-top: 16px; }
+.docs a { background: var(--surface); padding: 20px; text-decoration: none; color: var(--fg); display: grid; gap: 4px; transition: background .2s; }
+.docs a:hover { background: var(--soft); }
+.docs a b { font-size: 17px; font-weight: 600; }
+.docs a span { font: 400 11.5px/1.3 var(--mono); color: var(--muted); }
+footer .wrap { padding-block: 34px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--muted); font: 400 13px/1.5 var(--mono); }
+
+/* race */
+.race-top { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; justify-content: space-between; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
+.seg button { font: 600 12px/1 var(--mono); border: 0; background: none; color: var(--muted); padding: 8px 11px; border-radius: 5px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--soft); color: var(--accent); }
+.clock { font: 400 13px/1 var(--mono); color: var(--muted); display: flex; align-items: baseline; gap: 6px; }
+.clock b { font: 800 30px/1 var(--display); color: var(--fg); font-variant-numeric: tabular-nums; min-width: 3.4ch; text-align: right; letter-spacing: -.02em; }
+.clock em { font-style: normal; font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; }
+.lanes { display: grid; gap: 10px; }
+.lane { display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 1fr) 130px; gap: 14px; align-items: center; }
+.lane-lbl { font-size: 15px; font-weight: 600; min-width: 0; }
+.lane-lbl small { display: block; font: 400 11px/1.3 var(--mono); color: var(--muted); }
+.strip { position: relative; height: 34px; border-radius: 6px; background: color-mix(in srgb, var(--line) 40%, transparent); overflow: hidden; }
+.run { position: absolute; inset: 0 auto 0 0; width: 100%; background-image: radial-gradient(circle, var(--lane) 1.5px, transparent 1.8px); background-size: 6px 6px; background-position: 2px 2px; }
+.run::after { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 3px; background: var(--lane); box-shadow: 0 0 14px 2px var(--lane); opacity: 0; transition: opacity .2s; }
+.lane.going .run::after { opacity: 1; }
+.lane { --lane: var(--muted); }
+.lane.us { --lane: var(--accent); }
+.lane.dk .strip { background: #0b0e13; }
+.lane.dk .run { background-image: radial-gradient(circle, #4fe0d2 1.5px, transparent 1.8px); }
+.strip .flag { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font: 600 11px/1 var(--mono); padding: 5px 7px; border-radius: 5px; background: var(--fg); color: var(--bg); opacity: 0; transition: opacity .25s, transform .25s; }
+.lane.done .flag { opacity: 1; }
+.lane.done.us .flag { background: var(--accent); color: var(--accent-ink); }
+.read { font: 600 13px/1.35 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.read b { display: block; font-size: 17px; }
+.lane.us .read b { color: var(--accent); }
+.read span { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.race-foot { margin: 0; color: var(--muted); font: 400 12.5px/1.6 var(--mono); max-width: 80ch; }
+.slope-wrap { overflow-x: auto; }
+.slope { width: 100%; min-width: 480px; height: auto; display: block; }
+.slope text { font-family: var(--mono); font-size: 12px; fill: var(--muted); }
+.slope .t-us { fill: var(--accent); font-weight: 600; }
+.slope .t-old { fill: var(--fg); }
+.slope .grid-l { stroke: var(--line); stroke-width: 1; }
+.slope .ln { fill: none; stroke-width: 3; stroke-linecap: round; }
+.slope .ln.old { stroke: var(--muted); }
+.slope .ln.us { stroke: var(--accent); }
+.slope .ln.pc { stroke-dasharray: none; }
+.slope .dot-old { fill: var(--muted); } .slope .dot-us { fill: var(--accent); }
+@media (max-width: 560px) {
+  .lane { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+  .strip { grid-column: 1 / -1; grid-row: 2; }
+  .read { grid-row: 1; grid-column: 2; }
+  .read b { display: inline; font-size: 15px; margin-right: 6px; }
+}
+
+/* theme flip reveal */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+
+@media (max-width: 900px) {
+  .intro .wrap, .split2 { grid-template-columns: minmax(0, 1fr); }
+  .feat { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(2) { border-right: 0; }
+  .stat:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow > div:nth-child(2) { border-right: 0; }
+  .flow > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .docs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  section { padding-block: 52px; }
+  .b { grid-template-columns: minmax(0, 1fr) 76px; }
+  .b .track { grid-column: 1 / -1; grid-row: 2; }
+  .stat { padding: 20px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .b .fill, .btn, .grid { transition: none; }
+}
+</style>
+
+<div class="page" id="page">
+  <div class="bar">
+    <div class="wrap">
+      <a class="brand" href="#">◐ shadewind</a>
+      <nav>
+        <a href="#start">Start</a>
+        <a href="#bench">Benchmark</a>
+        <a class="hide-s" href="#docs">Docs</a>
+        <a href="https://github.com/chanphiromsok/shadewind" target="_blank" rel="noopener">GitHub ↗</a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="hero" id="hero" aria-label="shadewind">
+    <div class="layer l" aria-hidden="true"><span class="word">shadewind</span></div>
+    <div class="layer d" aria-hidden="true"><span class="word">shadewind</span></div>
+    <div class="edge" aria-hidden="true"></div>
+    <canvas class="wind" id="wind" aria-hidden="true"></canvas>
+    <div class="tag">
+      <div class="wrap">
+        <p>Light and dark, switched inside the shadow tree. Zero re-renders.</p>
+        <span class="hint">drag across to move the shade</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="intro">
+    <div class="wrap">
+      <div style="display:grid;gap:14px;min-width:0">
+        <span class="eyebrow">React Native 0.86 · Fabric · Nitro</span>
+        <h1>Mounts within <em>{{precompileRatio}}×</em> of StyleSheet. Switches themes in <em>{{switchIos}} ms</em>.</h1>
+        <div class="chips">
+          <span class="chip">New Architecture</span><span class="chip">iOS &amp; Android</span><span class="chip">Uniwind 1.12 / 1.13</span><span class="chip">MIT</span><span class="chip warn">experimental 0.x</span>
+        </div>
+      </div>
+      <div class="intro-right">
+        <div class="install"><span id="cmd">npm install shadewind react-native-nitro-modules@^0.37.1</span><button class="btn sm" type="button" data-copy="cmd">Copy</button></div>
+        <div class="row">
+          <a class="btn solid" href="#start">Get started</a>
+          <a class="btn" href="#demo">See the difference</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap"><div class="stats">
+    <div class="stat hot"><b>0</b><span>re-renders on a theme switch for views it paints</span></div>
+    <div class="stat"><b>{{switchIos}}<small>ms</small></b><span>iOS theme switch, 2003 views</span></div>
+    <div class="stat"><b>{{switchAndroid}}<small>ms</small></b><span>Android theme switch, 2003 views</span></div>
+    <div class="stat"><b>{{precompileRatio}}×</b><span>of StyleSheet mount time, with precompile (iOS)</span></div>
+  </div></div>
+
+  <main>
+    <section id="demo">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">Same screen, two engines</span>
+          <h2>Watch who has to re-render.</h2>
+          <p>Both phones run the same Account screen. On the left, every styled component renders again, and each one flashes as it does. On the right, shadewind writes the new props in one native commit, so nothing flashes and the JS thread stays flat.</p>
+        </div>
+        <div class="stage">
+          <figure class="side rr">
+            <figcaption><b>Runtime theming</b><span>every component re-renders</span></figcaption>
+            <div class="phone" data-phone="rr"></div>
+            <div class="js">
+              <div class="js-top"><span>JS thread</span><span><b data-count="rr">0</b> renders</span></div>
+              <div class="frames" data-frames="rr"><i class="budget"></i></div>
+            </div>
+          </figure>
+
+          <div class="ctl">
+            <button type="button" class="switch" id="flip" aria-pressed="false" aria-label="Switch theme">
+              <span class="knob"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 100 10 5 5 0 000-10zm0-5v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/><path class="moon" d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg></span>
+            </button>
+            <code class="call" id="call">setTheme('dark')</code>
+            <span class="note-s">tap to switch · illustration, not a measurement</span>
+          </div>
+
+          <figure class="side sw">
+            <figcaption><b>shadewind</b><span>one native commit, zero re-renders</span></figcaption>
+            <div class="phone" data-phone="sw"><span class="commit-tag">1 native commit</span></div>
+            <div class="js">
+              <div class="js-top"><span>JS thread</span><span><b data-count="sw">0</b> renders</span></div>
+              <div class="frames" data-frames="sw"><i class="budget"></i></div>
+            </div>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="start">
+      <div class="wrap">
+        <div class="qs-head">
+          <div class="head" style="margin:0">
+            <span class="eyebrow">Quick start</span>
+            <h2>Up and running in three files.</h2>
+            <p>Your existing <code>className</code>s don't change. Pick your setup, then walk the steps.</p>
+          </div>
+          <div class="seg big" role="group" aria-label="Setup">
+            <button type="button" aria-pressed="true" data-path="uniwind">With Uniwind</button>
+            <button type="button" aria-pressed="false" data-path="plain">Plain React Native</button>
+          </div>
+        </div>
+
+        <div class="qs2">
+          <ol class="steps" id="steps"></ol>
+          <div class="editor">
+            <div class="ed-bar">
+              <div class="ed-tab"><i class="ed-ic" id="ed-ic"></i><span id="ed-file">terminal</span></div>
+              <div class="ed-tools">
+                <div class="seg pm" id="pm" role="group" aria-label="Package manager">
+                  <button type="button" aria-pressed="true" data-pm="npm">npm</button>
+                  <button type="button" aria-pressed="false" data-pm="yarn">yarn</button>
+                  <button type="button" aria-pressed="false" data-pm="pnpm">pnpm</button>
+                  <button type="button" aria-pressed="false" data-pm="bun">bun</button>
+                </div>
+                <button type="button" class="ed-copy" id="ed-copy">Copy</button>
+              </div>
+            </div>
+            <div class="ed-body"><pre class="ed-code" id="ed-code"></pre></div>
+            <div class="ed-foot">
+              <span id="ed-note"></span>
+              <button type="button" class="ed-next" id="ed-next">Next step →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">How it works</span>
+          <h2>Props per theme, written in at commit time.</h2>
+          <p>Shadewind remembers each view's props for every theme and rewrites them inside React Native's own shadow tree commit.</p>
+        </div>
+        <div class="flow">
+          <div><b>JS</b><p><code>setTheme('dark')</code></p></div>
+          <div><b>C++</b><p>A native commit hook picks it up</p></div>
+          <div><b>Shadow tree</b><p>Each bound view's <code>dark</code> props are written in</p></div>
+          <div><b>Fabric</b><p>Mounted in the same commit</p></div>
+          <div class="skip">your React components → nothing to do</div>
+        </div>
+        <div class="feat">
+          <div><h3>Animated switch, optional</h3><p><code>setTheme('dark', { transition: { type: 'fade', durationMs: 250 } })</code> cross-fades. Instant by default.</p></div>
+          <div><h3>Precompile, optional</h3><p><code>precompileClassNames: true</code> turns <code>className</code>s on View and Text into hookless components to cut mount cost.</p></div>
+          <div><h3>See what it binds</h3><p>A dev-only diagnostics log lists every view it binds and every commit it themes.</p></div>
+          <div><h3>Tested natively</h3><p>A harness runs React Native's real C++ renderer, so commit logic is checked without a device.</p></div>
+          <div><h3>Honest fallbacks</h3><p>Inline backgrounds over a className colour and <code>active:</code> states re-render, as in plain Uniwind.</p></div>
+          <div><h3>Bounded memory</h3><p>Since 0.3.2 the style cache is bounded, so thousands of new classNames don't grow the process.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="bench">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">Benchmark · 2003 views · Release builds</span>
+          <h2>Against plain StyleSheet, the floor.</h2>
+          <p>StyleSheet is React Native with no styling library, the fastest anything can mount. Time is measured until the JS thread is idle, ten runs each. These are simulator and emulator numbers; nothing has been measured on a physical device yet.</p>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Benchmark">
+          <button role="tab" type="button" aria-selected="true" data-tab="mount">Mount race</button>
+          <button role="tab" type="button" aria-selected="false" data-tab="switch">Theme switch</button>
+          <button role="tab" type="button" aria-selected="false" data-tab="mem">Memory</button>
+        </div>
+
+        <div class="chart race" data-panel="mount" data-slow="60">
+          <div class="race-top">
+            <div class="seg" role="group" aria-label="Platform">
+              <button type="button" aria-pressed="true" data-plat="ios">iOS</button>
+              <button type="button" aria-pressed="false" data-plat="android">Android</button>
+            </div>
+            <div class="clock"><span>t =</span> <b data-clock>0.0</b> ms <em>slowed 60×</em></div>
+            <button class="btn sm" type="button" data-replay>▶ Run again</button>
+          </div>
+          <div class="lanes" data-lanes></div>
+          <p class="race-foot" data-foot></p>
+        </div>
+
+        <div class="chart race" data-panel="switch" data-slow="400" hidden>
+          <div class="race-top">
+            <div class="seg" aria-hidden="true"><button type="button" aria-pressed="true" tabindex="-1">2003 views → dark</button></div>
+            <div class="clock"><span>t =</span> <b data-clock>0.00</b> ms <em>slowed 400×</em></div>
+            <button class="btn sm" type="button" data-replay>▶ Run again</button>
+          </div>
+          <div class="lanes" data-lanes></div>
+          <p class="race-foot">JS-thread time; zero components re-render. Colours reach the screen about {{visualIos}} ms (iOS) and {{visualAndroid}} ms (Android) after the call, and that main-thread mount is React Native's own work. A StyleSheet app has no runtime theme switch to time, so there is no baseline lane here.</p>
+        </div>
+
+        <div class="chart" data-panel="mem" hidden>
+          <div class="race-top">
+            <div class="seg" aria-hidden="true"><button type="button" aria-pressed="true" tabindex="-1">soak test · iOS</button></div>
+            <div class="clock"><span>classNames seen</span> <b data-cn>{{memoryTo}}</b></div>
+            <button class="btn sm" type="button" data-replay>▶ Run again</button>
+          </div>
+          <div class="slope-wrap"><svg class="slope" viewBox="0 0 640 330" role="img" aria-label="{{memoryAria}}" data-slope></svg></div>
+          <p class="race-foot">The example-real soak mounts and unmounts about 1,200 views per cycle, 200 of them with a className never seen before. Each reading is the process footprint after two forced GCs. 0.3.2 bounds the style cache. Its lower second reading is warm-up, not shrinkage, and mount time did not change. A normal app with a fixed set of classNames did not grow in any build.</p>
+        </div>
+        <p class="note-s" style="margin-top:16px">Full protocol, spreads and what didn't help: <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/BENCHMARK.md" target="_blank" rel="noopener">docs/BENCHMARK.md</a></p>
+      </div>
+    </section>
+
+    <section id="docs" style="border-bottom:0">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">Status &amp; docs</span>
+          <h2>Experimental, and upfront about it.</h2>
+        </div>
+        <div class="split2">
+          <div class="card"><h3>0.x · New Architecture only</h3><p>React Native 0.86. iOS is the primary target; Android has one emulator of testing so far. Verified with Uniwind 1.12.x, and 1.13.x without the native class resolver. Other versions run as plain Uniwind.</p></div>
+          <div class="card"><h3>From the author</h3><p>Vibe-coded with Claude Code by a dev who loves programming. Take the code and numbers with a grain of salt, and kindly roast where it's wrong.</p></div>
+        </div>
+        <div class="docs">
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/GUIDE.md" target="_blank" rel="noopener"><b>Guide</b><span>GUIDE.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/API.md" target="_blank" rel="noopener"><b>API</b><span>API.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noopener"><b>Architecture</b><span>ARCHITECTURE.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/PRECOMPILE.md" target="_blank" rel="noopener"><b>Precompile</b><span>PRECOMPILE.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/BENCHMARK.md" target="_blank" rel="noopener"><b>Benchmark</b><span>BENCHMARK.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/KNOWN_LIMITS.md" target="_blank" rel="noopener"><b>Known limits</b><span>KNOWN_LIMITS.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/docs/DEMO.md" target="_blank" rel="noopener"><b>Run the demo</b><span>DEMO.md</span></a>
+          <a href="https://github.com/chanphiromsok/shadewind/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><b>Contributing</b><span>CONTRIBUTING.md</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap"><span>◐ shadewind · MIT</span><a href="https://github.com/chanphiromsok/shadewind" target="_blank" rel="noopener">github.com/chanphiromsok/shadewind</a></div></footer>
+</div>
+
+<script>
+(function () {
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- hero shade line: idle drift, follows pointer ---- */
+  var hero = document.getElementById('hero');
+  var x = 55, target = 55, pointing = false, t0 = performance.now();
+  function setX(v) { hero.style.setProperty('--x', v.toFixed(2) + '%'); }
+  hero.addEventListener('pointermove', function (e) {
+    var r = hero.getBoundingClientRect();
+    target = Math.max(4, Math.min(96, (e.clientX - r.left) / r.width * 100)); pointing = true;
+  });
+  hero.addEventListener('pointerleave', function () { pointing = false; });
+
+  /* ---- wind streaks ---- */
+  var cv = document.getElementById('wind'), ctx = cv.getContext('2d'), W = 0, H = 0, dpr = Math.min(2, devicePixelRatio || 1);
+  var streaks = [];
+  function size() {
+    W = hero.clientWidth; H = hero.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    streaks = [];
+    var n = Math.round(W / 28);
+    for (var i = 0; i < n; i++) streaks.push({ x: Math.random() * W, y: Math.random() * H, l: 40 + Math.random() * 160, v: .6 + Math.random() * 2.2, a: .08 + Math.random() * .22, w: Math.random() < .2 ? 1.6 : .8 });
+  }
+  size(); addEventListener('resize', size);
+
+  function frame(now) {
+    if (!pointing) target = 55 + Math.sin((now - t0) / 2600) * 22;
+    x += (target - x) * (pointing ? .18 : .04);
+    setX(x);
+    ctx.clearRect(0, 0, W, H);
+    for (var i = 0; i < streaks.length; i++) {
+      var s = streaks[i];
+      if (!reduce) { s.x += s.v; if (s.x - s.l > W) { s.x = -10; s.y = Math.random() * H; } }
+      var g = ctx.createLinearGradient(s.x - s.l, 0, s.x, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,' + s.a + ')');
+      ctx.strokeStyle = g; ctx.lineWidth = s.w;
+      ctx.beginPath(); ctx.moveTo(s.x - s.l, s.y); ctx.lineTo(s.x, s.y + Math.sin((s.x + now / 8) / 90) * 2); ctx.stroke();
+    }
+    if (!reduce || pointing) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  if (reduce) hero.addEventListener('pointermove', function () { requestAnimationFrame(frame); });
+
+  /* ---- demo: two phones ---- */
+  var SCREEN =
+    '<div class="scr cmp">' +
+      '<div class="sb cmp"><span>9:41</span><i></i></div>' +
+      '<div class="hdr cmp"><b>Account</b><span></span></div>' +
+      '<div class="prof cmp"><div class="av">DK</div><div><b>Dara Kim</b><small>@dara · Pro plan</small></div></div>' +
+      '<div class="tiles"><div class="tile cmp"><b>128</b><small>Posts</small></div><div class="tile cmp"><b>4.2k</b><small>Followers</small></div><div class="tile cmp"><b>312</b><small>Following</small></div></div>' +
+      '<div class="list cmp">' +
+        '<div class="lrow cmp"><i class="ic"></i><span>Notifications</span><i class="tg on"></i></div>' +
+        '<div class="lrow cmp"><i class="ic"></i><span>Dark mode</span><i class="tg" data-dm></i></div>' +
+        '<div class="lrow cmp"><i class="ic"></i><span>Privacy</span><em>›</em></div>' +
+        '<div class="lrow cmp"><i class="ic"></i><span>Storage</span><em>›</em></div>' +
+        '<div class="lrow cmp"><i class="ic"></i><span>Help</span><em>›</em></div>' +
+      '</div>' +
+      '<div class="cta cmp">Edit profile</div>' +
+      '<div class="tabbar cmp"><i></i><i></i><i></i><i></i></div>' +
+    '</div>';
+
+  var page = document.getElementById('page'), flip = document.getElementById('flip'), call = document.getElementById('call');
+  var phones = {};
+  ['rr', 'sw'].forEach(function (k) {
+    var ph = document.querySelector('[data-phone="' + k + '"]');
+    ph.insertAdjacentHTML('beforeend', SCREEN);
+    var frames = document.querySelector('[data-frames="' + k + '"]');
+    var bars = [];
+    for (var i = 0; i < 44; i++) { var s = document.createElement('span'); s.style.height = '6%'; frames.appendChild(s); bars.push(s); }
+    phones[k] = { ph: ph, cmps: Array.prototype.slice.call(ph.querySelectorAll('.cmp')), dm: ph.querySelector('[data-dm]'), count: document.querySelector('[data-count="' + k + '"]'), bars: bars, work: 0, total: 0, commit: 0 };
+  });
+
+  var dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  var rt = document.documentElement.getAttribute('data-theme'); if (rt) dark = rt === 'dark';
+  var mode = dark ? 'dark' : 'light', busy = false;
+
+  function setAll(p, m) { p.cmps.forEach(function (c) { c.setAttribute('data-t', m); }); p.dm.classList.toggle('on', m === 'dark'); }
+  setAll(phones.rr, mode); setAll(phones.sw, mode);
+  function syncCtl() { flip.setAttribute('aria-pressed', String(mode === 'dark')); call.textContent = "setTheme('" + (mode === 'dark' ? 'light' : 'dark') + "')"; }
+  syncCtl();
+
+  function applyPage(next, ev) {
+    var go = function () { page.setAttribute('data-sw', next); };
+    if (!reduce && document.startViewTransition && ev) {
+      var r = flip.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      var rad = Math.hypot(Math.max(cx, innerWidth - cx), Math.max(cy, innerHeight - cy));
+      try {
+        var vt = document.startViewTransition(go);
+        vt.ready.then(function () {
+          document.documentElement.animate({ clipPath: ['circle(0 at ' + cx + 'px ' + cy + 'px)', 'circle(' + rad + 'px at ' + cx + 'px ' + cy + 'px)'] },
+            { duration: 650, easing: 'cubic-bezier(.7,0,.2,1)', pseudoElement: '::view-transition-new(root)' });
+        }).catch(function () {});
+      } catch (e) { go(); }
+    } else go();
+  }
+
+  function switchTo(next) {
+    busy = true; mode = next; syncCtl();
+    // shadewind: every bound view in one commit
+    var sw = phones.sw;
+    setAll(sw, next); sw.commit = 1;
+    sw.ph.classList.remove('commit'); void sw.ph.offsetWidth; sw.ph.classList.add('commit');
+    setTimeout(function () { sw.ph.classList.remove('commit'); }, 1100);
+    // runtime theming: each component renders on its own, top-down
+    var rr = phones.rr, i = 0;
+    (function next1() {
+      for (var j = 0; j < 2 && i < rr.cmps.length; j++, i++) {
+        var c = rr.cmps[i];
+        c.setAttribute('data-t', next);
+        if (rr.dm.parentNode === c) rr.dm.classList.toggle('on', next === 'dark');
+        if (!reduce) { c.classList.remove('fl'); void c.offsetWidth; c.classList.add('fl'); }
+        rr.work += 1; rr.total += 1;
+      }
+      rr.count.textContent = rr.total;
+      if (i < rr.cmps.length) setTimeout(next1, reduce ? 0 : 70); else setTimeout(function () { busy = false; }, 250);
+    })();
+  }
+
+  var userTouched = false;
+  flip.addEventListener('click', function (ev) {
+    if (busy) return;
+    userTouched = true;
+    var next = mode === 'dark' ? 'light' : 'dark';
+    applyPage(next, ev);
+    switchTo(next);
+  });
+
+  // JS-thread frame graph: one bar per sample, scrolls left
+  var visible = false, last = 0;
+  function sample(now) {
+    if (visible && now - last > 70) {
+      last = now;
+      ['rr', 'sw'].forEach(function (k) {
+        var p = phones[k], h, cls = '';
+        if (p.work) { h = Math.min(98, 52 + p.work * 22 + Math.random() * 10); cls = 'hot'; p.work = 0; }
+        else if (p.commit) { h = 12; cls = 'ok'; p.commit = 0; }
+        else h = 4 + Math.random() * 5;
+        var b = p.bars.shift(); b.style.height = h + '%'; b.className = cls;
+        b.parentNode.appendChild(b); p.bars.push(b);
+      });
+    }
+    requestAnimationFrame(sample);
+  }
+  requestAnimationFrame(sample);
+
+  // autoplay while on screen, until the viewer takes over
+  var demoSec = document.getElementById('demo'), auto = 0;
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      visible = es[0].isIntersecting;
+      clearInterval(auto);
+      if (visible && !userTouched && !reduce) {
+        setTimeout(function () { if (!userTouched && !busy && visible) switchTo(mode === 'dark' ? 'light' : 'dark'); }, 700);
+        auto = setInterval(function () { if (userTouched || !visible) { clearInterval(auto); return; } if (!busy) switchTo(mode === 'dark' ? 'light' : 'dark'); }, 3600);
+      }
+    }, { threshold: .3 }).observe(demoSec);
+  } else visible = true;
+
+  /* ---- quick start editor ---- */
+  var PM = {
+    npm: 'npm install shadewind react-native-nitro-modules@^0.37.1',
+    yarn: 'yarn add shadewind react-native-nitro-modules@^0.37.1',
+    pnpm: 'pnpm add shadewind react-native-nitro-modules@^0.37.1',
+    bun: 'bun add shadewind react-native-nitro-modules@^0.37.1'
+  };
+  var INSTALL = { t: 'Install', s: 'shadewind + Nitro modules', file: 'terminal', lang: 'sh', install: 1,
+    note: 'Needs react-native-nitro-modules 0.37.1 or newer in the 0.37 line.' };
+  var QS = {
+    uniwind: [
+      INSTALL,
+      { t: 'Wrap Metro', s: 'metro.config.js', file: 'metro.config.js', lang: 'js',
+        code: [
+          "const { withUniwindConfig } = require('uniwind/metro');",
+          "+const { withShadewind } = require('shadewind/metro');",
+          "",
+          "// ...your existing config",
+          "",
+          "+module.exports = withShadewind(",
+          "  withUniwindConfig(config, { cssEntryFile: './global.css' })",
+          "+);"
+        ],
+        note: 'Wrap your existing Uniwind config. Nothing else in it changes.' },
+      { t: 'Install the adapter', s: 'index.js', file: 'index.js', lang: 'js',
+        code: [
+          "import { AppRegistry } from 'react-native';",
+          "import App from './App';",
+          "import { name as appName } from './app.json';",
+          "+import { installUniwind } from 'shadewind/uniwind';",
+          "",
+          "+installUniwind();",
+          "",
+          "AppRegistry.registerComponent(appName, () => App);"
+        ],
+        note: 'Call it once, after your app import.' },
+      { t: 'Use it', s: 'nothing to rewrite', file: 'Account.tsx', lang: 'js',
+        code: [
+          "import { Uniwind } from 'uniwind';",
+          "import { View, Text, Pressable } from 'react-native';",
+          "",
+          "export function Account() {",
+          "  return (",
+          "    // classNames stay exactly as they were",
+          "    <View className=\"flex-1 bg-white dark:bg-zinc-950\">",
+          "      <Text className=\"text-2xl text-zinc-900 dark:text-white\">Account</Text>",
+          "      <Pressable onPress={() => Uniwind.setTheme('dark')}>",
+          "        <Text className=\"text-teal-600 dark:text-teal-300\">Go dark</Text>",
+          "      </Pressable>",
+          "    </View>",
+          "  );",
+          "}"
+        ],
+        note: "Uniwind.setTheme('dark') now goes through the native engine: no re-render." }
+    ],
+    plain: [
+      INSTALL,
+      { t: 'Configure themes', s: 'index.js', file: 'index.js', lang: 'js',
+        code: [
+          "+import { configure } from 'shadewind';",
+          "",
+          "+configure({ themes: ['light', 'dark'], initialTheme: 'light' });"
+        ],
+        note: 'Run it once, before the first render. initialTheme must be a declared theme.' },
+      { t: 'Theme a view', s: 'Card.tsx', file: 'Card.tsx', lang: 'js',
+        code: [
+          "import { View, StyleSheet } from 'react-native';",
+          "import { useThemed } from 'shadewind';",
+          "",
+          "const card = {",
+          "  light: { backgroundColor: '#fff' },",
+          "  dark: { backgroundColor: '#111' },",
+          "};",
+          "",
+          "export function Card() {",
+          "  const t = useThemed(card);",
+          "  return <View ref={t.ref} style={[s.card, t.style]} />;",
+          "}"
+        ],
+        note: 'Props per theme are registered once and rewritten natively on a switch.' },
+      { t: 'Switch', s: 'setTheme', file: 'Settings.tsx', lang: 'js',
+        code: [
+          "import { setTheme, useTheme } from 'shadewind';",
+          "",
+          "// queued, idempotent, last call wins",
+          "setTheme('dark');",
+          "",
+          "// for UI the engine does not paint, e.g. the status bar",
+          "const theme = useTheme();"
+        ],
+        note: 'Unknown names throw ShadewindError (UNKNOWN_THEME).' }
+    ]
+  };
+
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var JS_RE = /(\/\/[^\n]*)|('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`[^`]*`)|(<\/?)([A-Z][\w.]*|[a-z][\w.]*)(?=[\s>\/])|\b(const|let|var|import|from|export|function|return|require|module|exports|new|default)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_$][\w$]*)(?=\s*\()|([A-Za-z_$][\w$]*)(?==[{"])|([A-Za-z_$][\w$]*)(?=\s*:\s)|([{}()[\];,.=>\/])/g;
+  function hlJS(line) {
+    var out = '', last = 0, m;
+    JS_RE.lastIndex = 0;
+    while ((m = JS_RE.exec(line))) {
+      out += esc(line.slice(last, m.index));
+      if (m[1]) out += '<span class="tk-com">' + esc(m[1]) + '</span>';
+      else if (m[2]) out += '<span class="tk-str">' + esc(m[2]) + '</span>';
+      else if (m[3]) out += '<span class="tk-pun">' + esc(m[3]) + '</span><span class="tk-tag">' + esc(m[4]) + '</span>';
+      else if (m[5]) out += '<span class="tk-kw">' + m[5] + '</span>';
+      else if (m[6]) out += '<span class="tk-num">' + m[6] + '</span>';
+      else if (m[7]) out += '<span class="tk-fn">' + m[7] + '</span>';
+      else if (m[8]) out += '<span class="tk-attr">' + m[8] + '</span>';
+      else if (m[9]) out += '<span class="tk-prop">' + m[9] + '</span>';
+      else if (m[10]) out += '<span class="tk-pun">' + esc(m[10]) + '</span>';
+      last = JS_RE.lastIndex;
+    }
+    return out + esc(line.slice(last));
+  }
+  function hlSH(line) {
+    return '<span class="tk-prompt">$ </span>' + esc(line)
+      .replace(/^(\S+)/, '<span class="tk-cmd">$1</span>')
+      .replace(/(&amp;&amp;)\s(\S+)/, '<span class="tk-pun">$1</span> <span class="tk-cmd">$2</span>')
+      .replace(/(@\^[\d.]+)/, '<span class="tk-num">$1</span>');
+  }
+
+  var path = 'uniwind', idx = 0, pm = 'npm';
+  var stepsEl = document.getElementById('steps'), codeEl = document.getElementById('ed-code');
+  var fileEl = document.getElementById('ed-file'), icEl = document.getElementById('ed-ic'), noteEl = document.getElementById('ed-note');
+  var pmEl = document.getElementById('pm'), nextBtn = document.getElementById('ed-next'), copyBtn = document.getElementById('ed-copy');
+
+  function lines(step) { return step.install ? [PM[pm], 'cd ios && pod install'] : step.code; }
+  function renderSteps() {
+    stepsEl.innerHTML = QS[path].map(function (s, i) {
+      return '<li><button type="button" data-i="' + i + '"' + (i === idx ? ' aria-current="step"' : '') + (i < idx ? ' class="past"' : '') + '><span class="num">' + (i < idx ? '✓' : i + 1) + '</span><b>' + s.t + '</b><small>' + s.s + '</small></button></li>';
+    }).join('');
+  }
+  function render() {
+    var step = QS[path][idx];
+    renderSteps();
+    fileEl.textContent = step.file;
+    icEl.className = 'ed-ic ' + (step.lang === 'sh' ? 'sh' : /\.tsx$/.test(step.file) ? 'ts' : '');
+    pmEl.hidden = !step.install;
+    codeEl.innerHTML = lines(step).map(function (l) {
+      var add = l.charAt(0) === '+'; if (add) l = l.slice(1);
+      return '<span class="l' + (add ? ' add' : '') + '">' + (step.lang === 'sh' ? hlSH(l) : hlJS(l)) + '\n</span>';
+    }).join('');
+    noteEl.textContent = step.note;
+    var last = idx === QS[path].length - 1;
+    nextBtn.textContent = last ? '↺ Start over' : 'Next: ' + QS[path][idx + 1].t + ' →';
+  }
+  stepsEl.addEventListener('click', function (e) { var b = e.target.closest('[data-i]'); if (!b) return; idx = +b.getAttribute('data-i'); render(); });
+  nextBtn.addEventListener('click', function () { idx = idx === QS[path].length - 1 ? 0 : idx + 1; render(); });
+  document.querySelectorAll('[data-path]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      path = b.getAttribute('data-path'); idx = 0;
+      document.querySelectorAll('[data-path]').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      render();
+    });
+  });
+  pmEl.querySelectorAll('[data-pm]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      pm = b.getAttribute('data-pm');
+      pmEl.querySelectorAll('[data-pm]').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      render();
+    });
+  });
+  copyBtn.addEventListener('click', function () {
+    var text = lines(QS[path][idx]).map(function (l) { return l.charAt(0) === '+' ? l.slice(1) : l; }).join('\n');
+    var done = function () { copyBtn.textContent = 'Copied ✓'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1400); };
+    var sel = function () { var r = document.createRange(); r.selectNodeContents(codeEl); var s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+    try { navigator.clipboard.writeText(text).then(done, sel); } catch (e) { sel(); }
+  });
+  render();
+
+  /* ---- copy ---- */
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var el = document.getElementById(b.getAttribute('data-copy'));
+      var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1400); };
+      var sel = function () { if (el.hidden) return; var r = document.createRange(); r.selectNodeContents(el); var s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+      try { navigator.clipboard.writeText(el.textContent).then(done, sel); } catch (e) { sel(); }
+    });
+  });
+
+  /* ---- benchmark: races + slope ---- */
+  var DATA = /*BENCHMARK_DATA*/null;
+
+  function ordinal(i) { return ['1st', '2nd', '3rd', '4th'][i]; }
+
+  function Race(panel, getLanes, opts) {
+    var box = panel.querySelector('[data-lanes]'), clock = panel.querySelector('[data-clock]'), foot = panel.querySelector('[data-foot]');
+    var slow = +panel.getAttribute('data-slow'), raf = 0, lanes = [], digits = opts.digits;
+    function build() {
+      var cfg = getLanes(); if (foot && cfg.foot) foot.textContent = cfg.foot;
+      var base = cfg.lanes.filter(function (l) { return !l.us; })[0];
+      var order = cfg.lanes.slice().sort(function (a, b) { return a.ms - b.ms; });
+      box.innerHTML = cfg.lanes.map(function (l) {
+        var ratio = base ? (l === base ? '1.00× baseline' : (l.ms / base.ms).toFixed(2) + '× StyleSheet') : 'views re-rendered: 0';
+        return '<div class="lane done' + (l.us ? ' us' : '') + (l.dk ? ' dk' : '') + '">' +
+          '<div class="lane-lbl">' + l.n + '<small>' + l.s + '</small></div>' +
+          '<div class="strip"><div class="run"></div><span class="flag">' + ordinal(order.indexOf(l)) + '</span></div>' +
+          '<div class="read"><b>' + (l.label || l.ms.toFixed(digits)) + ' ms</b><span>' + ratio + '</span></div></div>';
+      }).join('');
+      lanes = Array.prototype.map.call(box.children, function (el, i) {
+        return { el: el, run: el.querySelector('.run'), b: el.querySelector('.read b'), d: cfg.lanes[i] };
+      });
+      clock.textContent = Math.max.apply(null, cfg.lanes.map(function (l) { return l.ms; })).toFixed(digits);
+    }
+    function play() {
+      cancelAnimationFrame(raf);
+      if (reduce) return;
+      var end = Math.max.apply(null, lanes.map(function (l) { return l.d.ms; }));
+      lanes.forEach(function (l) { l.el.classList.remove('done'); l.el.classList.add('going'); l.run.style.width = '0%'; });
+      var start = null;
+      function step(now) {
+        if (start === null) start = now;
+        var t = (now - start) / slow; // simulated ms
+        clock.textContent = Math.min(t, end).toFixed(digits);
+        lanes.forEach(function (l) {
+          var p = Math.min(1, t / l.d.ms);
+          var e = 1 - Math.pow(1 - p, 1.6); // views arrive fast, tail settles
+          l.run.style.width = (e * 100).toFixed(2) + '%';
+          if (p < 1) l.b.textContent = Math.round(e * 2003).toLocaleString() + ' views';
+          else if (!l.el.classList.contains('done')) {
+            l.el.classList.add('done'); l.el.classList.remove('going');
+            l.b.textContent = (l.d.label || l.d.ms.toFixed(digits)) + ' ms';
+          }
+        });
+        if (t < end) raf = requestAnimationFrame(step);
+      }
+      raf = requestAnimationFrame(step);
+    }
+    build();
+    return { build: build, play: play };
+  }
+
+  var mountPanel = document.querySelector('[data-panel="mount"]');
+  var plat = 'ios';
+  var mountRace = Race(mountPanel, function () { return DATA.mount[plat]; }, { digits: 1 });
+  mountPanel.querySelectorAll('[data-plat]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      plat = b.getAttribute('data-plat');
+      mountPanel.querySelectorAll('[data-plat]').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      mountRace.build(); mountRace.play();
+    });
+  });
+  var switchPanel = document.querySelector('[data-panel="switch"]');
+  var switchRace = Race(switchPanel, function () { return DATA.switch; }, { digits: 2 });
+
+  /* memory slope chart */
+  var svg = document.querySelector('[data-slope]'), NS = 'http://www.w3.org/2000/svg';
+  var X0 = 210, X1 = 470, Y = function (mb) { return 300 - mb / 800 * 270; };
+  var series = DATA.memory.series;
+  function el(tag, attrs, text) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (text) e.textContent = text; svg.appendChild(e); return e; }
+  [0, 200, 400, 600, 800].forEach(function (v) {
+    el('line', { x1: 150, x2: 560, y1: Y(v), y2: Y(v), class: 'grid-l' });
+    el('text', { x: 140, y: Y(v) + 4, 'text-anchor': 'end' }, v + ' MB');
+  });
+  el('text', { x: X0, y: 324, 'text-anchor': 'middle' }, DATA.memory.fromLabel);
+  el('text', { x: X1, y: 324, 'text-anchor': 'middle' }, DATA.memory.toLabel + ' classNames');
+  var paths = [];
+  series.forEach(function (s, i) {
+    var p = el('path', { d: 'M' + X0 + ' ' + Y(s.a) + ' L' + X1 + ' ' + Y(s.b), class: 'ln ' + (s.us ? 'us' : 'old') });
+    if (i === 0 || i === 3) p.style.strokeWidth = '1.6';
+    el('circle', { cx: X0, cy: Y(s.a), r: 4.5, class: s.us ? 'dot-us' : 'dot-old' });
+    var end = el('circle', { cx: X1, cy: Y(s.b), r: 5, class: s.us ? 'dot-us' : 'dot-old' });
+    var dy = s.us ? (i === 2 ? -8 : 12) : (i === 0 ? -6 : 12);
+    var lab = el('text', { x: X1 + 12, y: Y(s.b) + dy + 4, class: s.us ? 't-us' : 't-old' }, s.n + ' · ' + s.b + ' MB');
+    var lab0 = el('text', { x: X0 - 12, y: Y(s.a) + (s.us ? (i === 2 ? -4 : 12) : (i === 0 ? -4 : 12)) , 'text-anchor': 'end' }, s.a);
+    paths.push({ p: p, end: end, lab: lab });
+  });
+  var cn = document.querySelector('[data-cn]');
+  function playSlope() {
+    if (reduce) return;
+    paths.forEach(function (o) {
+      var L = o.p.getTotalLength(); o.p.style.transition = 'none';
+      o.p.style.strokeDasharray = L; o.p.style.strokeDashoffset = L;
+      o.end.style.opacity = 0; o.lab.style.opacity = 0;
+      o.p.getBoundingClientRect();
+      o.p.style.transition = 'stroke-dashoffset 1.8s cubic-bezier(.4,0,.2,1)'; o.p.style.strokeDashoffset = 0;
+      setTimeout(function () { o.end.style.transition = o.lab.style.transition = 'opacity .3s'; o.end.style.opacity = 1; o.lab.style.opacity = 1; }, 1700);
+    });
+    var t0 = null;
+    (function tick(now) {
+      if (t0 === null) t0 = now;
+      var p = Math.min(1, (now - t0) / 1800);
+      cn.textContent = Math.round(DATA.memory.from + p * (DATA.memory.to - DATA.memory.from)).toLocaleString();
+      if (p < 1) requestAnimationFrame(tick);
+    })(performance.now());
+  }
+
+  var players = { mount: mountRace.play, switch: switchRace.play, mem: playSlope };
+  var tabs = document.querySelectorAll('[data-tab]'), panels = document.querySelectorAll('[data-panel]');
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      var id = t.getAttribute('data-tab');
+      tabs.forEach(function (x) { x.setAttribute('aria-selected', String(x === t)); });
+      panels.forEach(function (p) { p.hidden = p.getAttribute('data-panel') !== id; });
+      players[id]();
+    });
+  });
+  document.querySelectorAll('[data-replay]').forEach(function (b) {
+    b.addEventListener('click', function () { players[b.closest('[data-panel]').getAttribute('data-panel')](); });
+  });
+  // start the mount race the first time the benchmark scrolls into view
+  if ('IntersectionObserver' in window) {
+    var seen = false, io = new IntersectionObserver(function (es) {
+      if (!seen && es[0].isIntersecting) { seen = true; mountRace.play(); io.disconnect(); }
+    }, { threshold: .35 });
+    io.observe(mountPanel);
+  }
+})();
+</script>
+
+</body></html>

@@ -1,0 +1,45 @@
+{
+  "_": "The numbers on the site. Edit here, then docs/BENCHMARK.md: tools/build-site.cjs fails when a number here is not in BENCHMARK.md.",
+  "facts": {
+    "precompileRatio": "1.09",
+    "switchIos": "2.45",
+    "switchAndroid": "0.14",
+    "visualIos": "57",
+    "visualAndroid": "47"
+  },
+  "mount": {
+    "ios": {
+      "foot": "iOS · iPhone 17 Pro simulator · 2026-10-20 · median of three launches. The progress in each lane is views mounted out of 2003.",
+      "lanes": [
+        { "n": "StyleSheet", "s": "baseline · no library", "ms": 37.2 },
+        { "n": "shadewind + precompile", "s": "precompileClassNames · experimental", "ms": 40.7, "us": 1 },
+        { "n": "shadewind", "s": "adapter, no build step", "ms": 47.5, "us": 1 }
+      ]
+    },
+    "android": {
+      "foot": "Android · Pixel 8 Pro emulator · 2026-10-19 · median of twelve. shadewind 0.2.0 measured 59 to 61 ms, drawn at 60. Android has not been re-measured since.",
+      "lanes": [
+        { "n": "StyleSheet", "s": "baseline · numeric colours", "ms": 55.38 },
+        { "n": "shadewind 0.2.0", "s": "measured 59–61 ms", "ms": 60, "us": 1, "label": "59–61" }
+      ]
+    }
+  },
+  "switch": {
+    "lanes": [
+      { "n": "shadewind · Android", "s": "Pixel 8 Pro emulator · 0.2.0", "ms": 0.14, "us": 1, "dk": 1 },
+      { "n": "shadewind · iOS", "s": "iPhone 17 Pro simulator", "ms": 2.45, "us": 1, "dk": 1 }
+    ]
+  },
+  "memory": {
+    "from": 17000,
+    "to": 80000,
+    "fromLabel": "~17,000",
+    "toLabel": "80,000",
+    "series": [
+      { "n": "0.3.1 + precompile", "a": 262, "b": 769, "us": 0 },
+      { "n": "0.3.1", "a": 249, "b": 733, "us": 0 },
+      { "n": "0.3.2", "a": 106, "b": 81, "us": 1 },
+      { "n": "0.3.2 + precompile", "a": 93, "b": 77, "us": 1 }
+    ]
+  }
+}
