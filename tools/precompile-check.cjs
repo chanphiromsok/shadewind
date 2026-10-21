@@ -441,7 +441,7 @@ const runtime = async () => {
   // the sources, compiled with TypeScript (no type check: tsc does that)
   const out = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'shadewind-precompile-src-')));
 
-  for (const name of ['precompiled.tsx', 'useShadewindStyle.ts', 'native.ts']) {
+  for (const name of ['precompiled.tsx', 'useShadewindStyle.ts', 'native.ts', 'styleCache.ts']) {
     const source = fs.readFileSync(path.join(repo, 'src', 'uniwind', name), 'utf8');
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -470,14 +470,14 @@ const runtime = async () => {
     const a = DynView({ className: BENCH_VIEW, testID: 'a' });
 
     assert.strictEqual(a.type, 'RCTView');
-    assert.strictEqual(a.props.style, adapterStyle(BENCH_VIEW));
+    assert.deepStrictEqual(a.props.style, adapterStyle(BENCH_VIEW));
     assert.strictEqual(a.props.testID, 'a');
     assert.ok(!('className' in a.props), 'className stays out of the host props');
     assert.strictEqual(DynView({ className: BENCH_VIEW }).props.style, a.props.style, 'the same string, the same style object');
 
     const b = DynView({ className: 'p-3 flex-row' });
 
-    assert.strictEqual(b.props.style, adapterStyle('p-3 flex-row'));
+    assert.deepStrictEqual(b.props.style, adapterStyle('p-3 flex-row'));
     assert.notStrictEqual(b.props.style, a.props.style);
     assert.strictEqual(DynText({ className: BENCH_TEXT, children: 'x' }).type, 'RCTText');
   });
@@ -508,7 +508,7 @@ const runtime = async () => {
   check('runtime: an expression className that changes on a bound view: the old binding is dropped when React detaches the old ref, before the commit', () => {
     const node = {};
     const engineA = BENCH_VIEW;
-    const engineB = 'bg-bench-primary';
+    const engineB = 'bg-card';
 
     // one simulated view: render, then let React call the old ref with null (mutation phase) and the new ref with the node (layout phase)
     const swap = (from, to) => {
@@ -601,7 +601,7 @@ const runtime = async () => {
     const element = BenchView({ children: 'x' });
 
     assert.strictEqual(element.type, 'RCTView');
-    assert.strictEqual(element.props.style, adapterStyle(BENCH_VIEW));
+    assert.deepStrictEqual(element.props.style, adapterStyle(BENCH_VIEW));
     assert.strictEqual(element.props.style.backgroundColor, '#00a8ff');
     assert.strictEqual(element.props.children, 'x');
 
@@ -623,7 +623,7 @@ const runtime = async () => {
     const element = BenchText({ children: 7 });
 
     assert.strictEqual(element.type, 'RCTText');
-    assert.strictEqual(element.props.style, nativeTextStyle(adapterStyle(BENCH_TEXT, TEXT_STATE)));
+    assert.deepStrictEqual(element.props.style, nativeTextStyle(adapterStyle(BENCH_TEXT, TEXT_STATE)));
     assert.strictEqual(element.props.style.fontWeight, '700');
     assert.strictEqual(element.props.style.overflow, 'hidden');
     assert.strictEqual(element.props.style.color, '#000000');
@@ -643,7 +643,7 @@ const runtime = async () => {
     try {
       const element = BenchView({});
 
-      assert.strictEqual(element.props.style, adapterStyle(BENCH_VIEW));
+      assert.deepStrictEqual(element.props.style, adapterStyle(BENCH_VIEW));
       assert.strictEqual(element.props.style.backgroundColor, '#273c75');
       registered.length = 0;
       element.props.ref({});
@@ -753,7 +753,7 @@ const runtime = async () => {
     const element = precompiled.view('active:bg-brand bg-card')({});
 
     assert.strictEqual(element.type, 'RCTView');
-    assert.strictEqual(element.props.style, adapterStyle('active:bg-brand bg-card'));
+    assert.deepStrictEqual(element.props.style, adapterStyle('active:bg-brand bg-card'));
   });
 
   check('runtime: updateCSSVariables -> views rendered after it get the new value (mounted ones are not re-rendered)', () => {
@@ -769,7 +769,7 @@ const runtime = async () => {
 
       assert.strictEqual(before.backgroundColor, '#00a8ff');
       assert.strictEqual(after.backgroundColor, '#ff0000');
-      assert.strictEqual(after, adapterStyle(BENCH_VIEW));
+      assert.deepStrictEqual(after, adapterStyle(BENCH_VIEW));
     } finally {
       Object.defineProperty(light, '--color-bench-primary', previous);
       UniwindListener.notify([StyleDependency.Variables]);
@@ -818,6 +818,77 @@ const runtime = async () => {
     } finally {
       active = true;
     }
+  });
+
+  // Uniwind's style cache, bounded from inside shadewind (styleCache.ts): the same results, a bound, one listener per dependency
+  check('style cache: same results as Uniwind\'s own, bounded, no listener per entry, invalidated by its dependencies', () => {
+    const { installBoundedStyleCache } = require(path.join(out, 'styleCache.js'));
+    const prototype = Object.getPrototypeOf(UniwindStore);
+    const original = (className, state, context = ROOT) => prototype.getStyles.call(UniwindStore, className, {}, state, context);
+    const classNames = ['bg-card', 'p-3 flex-row', 'text-xl font-bold text-primary', 'h-25 w-[32%] bg-bench-primary', 'dark:bg-black', 'active:bg-brand bg-card', 'md:p-4 p-1'];
+    const states = [undefined, { isPressed: true, isDisabled: false }, { isPressed: false, isDisabled: true }];
+    const expected = [];
+
+    for (const theme of ['light', 'dark']) {
+      UniwindStore.runtime.currentThemeName = theme;
+
+      for (const className of classNames) {
+        for (const state of states) {
+          const { styles, dependencies, dependencySum } = original(className, state);
+
+          expected.push([theme, className, state, JSON.stringify(styles), JSON.stringify(dependencies), dependencySum]);
+        }
+      }
+    }
+
+    UniwindStore.runtime.currentThemeName = 'light';
+
+    const limit = 8;
+    const listeners = () => Object.values(UniwindListener.listeners).map((set) => set.size);
+
+    assert.strictEqual(installBoundedStyleCache(UniwindStore, UniwindListener, StyleDependency, limit), true);
+    assert.strictEqual(installBoundedStyleCache(UniwindStore, UniwindListener, StyleDependency, limit), true, 'idempotent');
+
+    for (const [theme, className, state, styles, dependencies, dependencySum] of expected) {
+      UniwindStore.runtime.currentThemeName = theme;
+
+      const result = UniwindStore.getStyles(className, {}, state, ROOT);
+
+      assert.strictEqual(JSON.stringify(result.styles), styles, `${theme} ${className}`);
+      assert.strictEqual(JSON.stringify(result.dependencies), dependencies, `${theme} ${className}`);
+      assert.strictEqual(result.dependencySum, dependencySum, `${theme} ${className}`);
+    }
+
+    UniwindStore.runtime.currentThemeName = 'light';
+    assert.strictEqual(UniwindStore.getStyles(undefined, {}, undefined, ROOT), UniwindStore.getStyles('', {}, undefined, ROOT), 'the one empty result');
+
+    // a hit is the same object
+    const first = UniwindStore.getStyles('bg-card', {}, undefined, ROOT);
+
+    assert.strictEqual(UniwindStore.getStyles('bg-card', {}, undefined, ROOT), first);
+
+    // bounded, and no listener per entry
+    const before = listeners();
+
+    for (let i = 1; i <= 300; i++) {
+      UniwindStore.getStyles(`w-[${i}px] bg-card`, {}, undefined, ROOT);
+    }
+
+    // the theme the entries were made in is bounded (the other theme's Map keeps what it held before the limit existed)
+    assert.ok(UniwindStore.cache.light.size <= limit, `light cache size ${UniwindStore.cache.light.size}`);
+    assert.deepStrictEqual(listeners(), before, 'the number of listeners does not depend on the number of classNames');
+
+    // the dependencies invalidate: a theme-dependent entry is resolved again after the Theme notification
+    const themed = UniwindStore.getStyles('bg-card', {}, undefined, ROOT);
+
+    assert.strictEqual(UniwindStore.getStyles('bg-card', {}, undefined, ROOT), themed);
+    UniwindListener.notify([StyleDependency.Theme]);
+    assert.notStrictEqual(UniwindStore.getStyles('bg-card', {}, undefined, ROOT), themed, 'resolved again after the theme notification');
+
+    // not Uniwind 1.12's store shape: left alone
+    const fake = { getStyles() {}, cache: { light: {} } };
+
+    assert.strictEqual(require(path.join(out, 'styleCache.js')).installBoundedStyleCache(fake, UniwindListener, StyleDependency), true, 'already installed on the module');
   });
 
   if (print) {

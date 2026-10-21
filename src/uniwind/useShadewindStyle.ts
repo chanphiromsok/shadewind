@@ -85,6 +85,62 @@ type Resolved = ReturnType<
 >;
 type Plan = { themed: ThemedStyles | null; reason: string };
 
+// What getStyles would return for this className, state and (runtime) theme, without putting it in Uniwind's cache. A plan probes the
+// other themes and ALL_STATE once per className; through getStyles every probe stayed in Uniwind's cache with its own listener
+// subscription (about 1.2 KB of the 1.7 KB an entry costs on Hermes), three entries per className instead of the view's one, never
+// read again: a theme switch drops them unread (they depend on the theme). Same guards as getStyles (no className, a theme without
+// a cache). The instance's own resolveStyles is the native resolver when the class table is loaded (nativeResolver.ts).
+export const resolveUncached = (
+  className: string,
+  props: Record<string, any>,
+  state: State | undefined,
+  context: { scopedTheme: string | null }
+): Resolved => {
+  const store = getInternals()!.UniwindStore as unknown as {
+    cache?: Record<string, unknown>;
+    runtime: { currentThemeName: string };
+    resolveStyles?: (...args: unknown[]) => Resolved;
+    getStyles: (...args: unknown[]) => Resolved;
+  };
+  const theme = context.scopedTheme ?? store.runtime.currentThemeName;
+
+  if (
+    className === '' ||
+    typeof store.resolveStyles !== 'function' ||
+    store.cache?.[theme] === undefined
+  ) {
+    // not Uniwind 1.12's store shape: the cached path, as before
+    return store.getStyles(className, props, state, context);
+  }
+
+  return store.resolveStyles(className, props, state, context);
+};
+
+// One `themed` object per distinct per-theme colours (and render theme): every className whose theme-dependent part is `bg-card`
+// shares it, so the native conversion (nativeByStyles), the style id and the native ThemeStyle are made once, and a view that moves to
+// another className with the same colours keeps its binding. Bounded: an evicted set is simply made again (a new style id).
+const INTERN_LIMIT = 512;
+const interned = new Map<string, ThemedStyles>();
+
+const intern = (
+  themed: Record<string, Record<string, unknown>>
+): ThemedStyles => {
+  const key = `${getInternals()!.UniwindStore.runtime.currentThemeName}\u0000${JSON.stringify(themed)}`;
+  const found = interned.get(key);
+
+  if (found) {
+    return found;
+  }
+
+  if (interned.size >= INTERN_LIMIT) {
+    interned.delete(interned.keys().next().value!);
+  }
+
+  interned.set(key, themed as unknown as ThemedStyles);
+
+  return themed as unknown as ThemedStyles;
+};
+
 const plan = (
   className: string | undefined,
   props: Record<string, any>,
@@ -125,18 +181,24 @@ const plan = (
   const themes = Object.keys(UniwindStore.vars);
   const perTheme: Record<string, Record<string, unknown>> = {};
 
+  const renderTheme = UniwindStore.runtime.currentThemeName;
+
   for (const theme of themes) {
-    perTheme[theme] = withTheme(
-      theme,
-      () => UniwindStore.getStyles(className, props, state, context).styles
-    );
+    // the render theme's style is `current` (what getStyles returned for this render); the others are probed without caching
+    perTheme[theme] =
+      theme === renderTheme
+        ? current.styles
+        : withTheme(
+            theme,
+            () => resolveUncached(className, props, state, context).styles
+          );
   }
 
   // State variants (pressed, focused) change styles without a theme change. The resting state is bound to the engine; while the
   // view is pressed or focused it is unbound (React draws the state style, the engine must not paint over it). A Pressable
   // pauses and resumes the binding from onPressIn / onPressOut (see Pressable.tsx), a view with React state passes it in `state`.
   const stateful = !same(
-    UniwindStore.getStyles(className, props, ALL_STATE, context).styles,
+    resolveUncached(className, props, ALL_STATE, context).styles,
     current.styles
   );
 
@@ -173,7 +235,8 @@ const plan = (
   for (const theme of themes) {
     for (const key of differing) {
       if (key === 'backgroundColor' && perTheme[theme]![key] === undefined) {
-        perTheme[theme]![key] = 'transparent';
+        // a copy: perTheme[renderTheme] is the style object Uniwind cached and React renders
+        perTheme[theme] = { ...perTheme[theme]!, [key]: 'transparent' };
       }
     }
   }
@@ -186,21 +249,23 @@ const plan = (
     return decide(null, 'key missing in a theme');
   }
 
-  const themed: Record<string, Record<string, unknown>> = {};
+  const fresh: Record<string, Record<string, unknown>> = {};
 
   for (const theme of themes) {
-    themed[theme] = Object.fromEntries(
+    fresh[theme] = Object.fromEntries(
       differing.map((key) => [key, perTheme[theme]![key]])
     );
   }
 
-  renderThemeOf.set(themed, UniwindStore.runtime.currentThemeName);
+  const themed = intern(fresh);
 
-  if (__DEV__) {
+  renderThemeOf.set(themed, renderTheme);
+
+  if (__DEV__ && themed === (fresh as unknown)) {
     engine().label(themed, `className: "${className}"`);
   }
 
-  return decide(themed as unknown as ThemedStyles, 'engine');
+  return decide(themed, 'engine');
 };
 
 // The store returns the same object for the same className / state / theme (and a new one after it invalidates its cache), so a

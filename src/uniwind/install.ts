@@ -4,6 +4,7 @@ import {
   offerPrebuiltTable,
   type ResolverStore,
 } from './nativeResolver';
+import { installBoundedStyleCache } from './styleCache';
 
 // The only file that reads Uniwind's runtime. Everything is loaded lazily and inside try/catch: the module that imports this is
 // evaluated while React Native is still setting up (Uniwind's component barrel), and a missing or unsupported Uniwind must
@@ -121,6 +122,21 @@ const probe = (): InstallResult => {
     UniwindListener,
     StyleDependency.Variables
   );
+
+  // Uniwind's style cache, bounded and without a listener subscription per entry (styleCache.ts); the resolver above stays behind it
+  // `globalThis.__SHADEWIND_STYLE_CACHE_LIMIT__`: entries kept per theme (default 4096); 0 leaves Uniwind's own cache alone
+  const cacheLimit = (
+    globalThis as { __SHADEWIND_STYLE_CACHE_LIMIT__?: number }
+  ).__SHADEWIND_STYLE_CACHE_LIMIT__;
+
+  if (cacheLimit !== 0) {
+    installBoundedStyleCache(
+      UniwindStore,
+      UniwindListener,
+      StyleDependency,
+      typeof cacheLimit === 'number' && cacheLimit > 0 ? cacheLimit : undefined
+    );
+  }
 
   return { active: true };
 };

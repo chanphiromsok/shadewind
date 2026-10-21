@@ -39,7 +39,13 @@ import {
   textIsPlain,
 } from './native';
 import { Text } from './Text';
-import { cachedPlan, decisions, same, withTheme } from './useShadewindStyle';
+import {
+  cachedPlan,
+  decisions,
+  resolveUncached,
+  same,
+  withTheme,
+} from './useShadewindStyle';
 import { View } from './View';
 
 // read once at module load (Metro's inline requires, see useShadewindStyle.ts)
@@ -150,7 +156,9 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
   }
 
   const state = kind === 'text' ? TEXT_STATE : undefined;
-  const current = store.getStyles(className, NO_PROPS, state, ROOT_CONTEXT);
+  // Not through Uniwind's cache: this resolution is kept in `entries` (one per className), so a cache entry (and its listener
+  // subscription, most of its cost) would only duplicate it for the life of the app.
+  const current = resolveUncached(className, NO_PROPS, state, ROOT_CONTEXT);
 
   if (current.hasDataAttributes) {
     return decide(slow, 'data attributes');
@@ -170,10 +178,14 @@ const resolve = (className: string, kind: Kind): Resolved | null => {
   const raw: Record<string, Record<string, unknown>> = {};
 
   for (const theme of themes) {
-    raw[theme] = withTheme(
-      theme,
-      () => store.getStyles(className, NO_PROPS, state, ROOT_CONTEXT).styles
-    );
+    raw[theme] =
+      theme === store.runtime.currentThemeName
+        ? current.styles
+        : withTheme(
+            theme,
+            () =>
+              resolveUncached(className, NO_PROPS, state, ROOT_CONTEXT).styles
+          );
   }
 
   const byTheme: Record<string, unknown> = {};
@@ -336,8 +348,13 @@ const wrapperFor = (
   return wrapper;
 };
 
+// An expression component keeps the resolutions of this many distinct classNames (least recently rendered dropped first). A className
+// built from unbounded values (`w-[${px}px]`) would otherwise keep one per value for the life of the app. A dropped className that
+// renders again is resolved again: a new `themed` unless interned (useShadewindStyle.ts), so a mounted view of it is registered once more.
+const EXPRESSION_ENTRIES = 256;
+
 // `fixed`: the className literal the plugin saw; null for `className={expression}`, read from the props of each render (one
-// resolution per distinct string, kept for the life of the app: the classNames of an app are a small set)
+// resolution per distinct string, the most recent EXPRESSION_ENTRIES kept)
 const make = (fixed: string | null, kind: Kind) => {
   type Entry = { resolved: Resolved | null; wasBound: boolean };
   const entries = new Map<string, Entry>();
@@ -400,6 +417,16 @@ const make = (fixed: string | null, kind: Kind) => {
 
     if (entry === undefined) {
       entry = { resolved: null, wasBound: false };
+
+      // only an expression component sees more than one className
+      if (fixed === null && entries.size >= EXPRESSION_ENTRIES) {
+        entries.delete(entries.keys().next().value!);
+      }
+
+      entries.set(className, entry);
+    } else if (fixed === null && entries.size > 1) {
+      // most recently rendered last (a Map keeps insertion order)
+      entries.delete(className);
       entries.set(className, entry);
     }
 
