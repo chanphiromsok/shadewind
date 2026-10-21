@@ -1,0 +1,64 @@
+name: Pages
+# The site (site/) published to GitHub Pages. One-time: Settings > Pages > Source: "GitHub Actions".
+# The benchmark numbers on the page come from site/benchmark.json; tools/build-site.cjs fails when one is not in docs/BENCHMARK.md.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'site/**'
+      - 'docs/BENCHMARK.md'
+      - 'README.md'
+      - 'tools/build-site.cjs'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'site/**'
+      - 'docs/BENCHMARK.md'
+      - 'tools/build-site.cjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Build the site
+        run: node tools/build-site.cjs
+
+      - name: Upload
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
