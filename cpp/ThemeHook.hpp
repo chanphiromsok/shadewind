@@ -2,6 +2,7 @@
 
 #include "DevTools.hpp"
 #include "Diagnostics.hpp"
+#include "ReactWarnings.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -11,6 +12,7 @@
 #include <string>
 #include <folly/container/F14Map.h>
 #include <folly/dynamic.h>
+SHADEWIND_REACT_HEADERS_BEGIN
 #include <react/renderer/components/root/RootShadowNode.h>
 #include <react/renderer/components/text/ParagraphProps.h>
 #include <react/renderer/components/text/ParagraphShadowNode.h>
@@ -23,6 +25,7 @@
 #include <react/renderer/mounting/ShadowTree.h>
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerCommitHook.h>
+SHADEWIND_REACT_HEADERS_END
 #include <mutex>
 #include <optional>
 #include <string>

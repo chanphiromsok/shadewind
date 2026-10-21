@@ -2,10 +2,12 @@
 #include "CommitWorker.hpp"
 #include "css/ClassMerge.hpp"
 #include "css/StyleResolver.hpp"
+#include "ReactWarnings.hpp"
 #include "ResolveGlue.hpp"
 
 #include <chrono>
 #include <jsi/JSIDynamic.h>
+SHADEWIND_REACT_HEADERS_BEGIN
 #include <react/renderer/components/root/RootShadowNode.h>
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/mounting/ShadowTree.h>
@@ -15,6 +17,7 @@
 #include <react/renderer/uimanager/UIManager.h>
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/primitives.h>
+SHADEWIND_REACT_HEADERS_END
 #include <atomic>
 #include <cstring>
 #include <string>
