@@ -201,6 +201,36 @@ ok('textIsPlain: a numeric weight in the className style stays on the direct pat
   ok('withUniwind path: the effect subscribes even if the ref never attaches; the ref with NO_DEPS does not subscribe again', () => { hooks.effects.length = 0; const styled = { themed: null, deps: [THEME], rerender: () => {}, onRegisterFailed: undefined }; useEffectSubscription(styled); assert.strictEqual(hooks.effects.length, 1); assert.deepStrictEqual(hooks.effects[0], [[THEME]]); const user = () => {}; assert.strictEqual(useEngineRef({ ...styled, deps: NO_DEPS }, user), user); });
 }
 
+// withUniwind (src/uniwind/withUniwind.tsx): className is resolved there and goes down as `style` only. Forwarded as well, the host view
+// inside an icon (its Text) resolves it a second time, finds the colours in the inline style and re-renders on every switch.
+{
+  const wuSrc = ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'withUniwind.tsx'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText;
+  const wm = new Module('withUniwind'); wm.paths = [];
+  const created = [];
+  const wuStubs = {
+    react: { createElement: (type, props) => { created.push({ type, props }); return { type, props }; } },
+    'uniwind-internal/hoc/withUniwind.native': { withUniwind: (component) => component },
+    './native': { withUserStyle: (style, user) => ({ style, user }) },
+    './useShadewindStyle': { NO_DEPS: [], useEffectSubscription: () => {}, useEngineRef: (_styled, ref) => ref ?? 'engine-ref', useShadewindStyle: () => ({ style: { color: 'red' }, themed: null, deps: [] }) },
+  };
+  wm.require = (name) => { if (name in wuStubs) return wuStubs[name]; throw new Error('unexpected import ' + name); };
+  wm._compile(wuSrc.replace(/require\(/g, 'module.require('), 'withUniwind.js');
+  const Inner = () => null;
+  const Wrapped = wm.exports.withUniwind(Inner);
+  const render = (props) => { created.length = 0; Wrapped(props); const engine = created[0]; return engine.type(engine.props), created[1]; };
+  ok('withUniwind: the wrapped component gets the resolved style and no className', () => {
+    const host = render({ className: 'text-brand', testID: 'icon', style: { margin: 1 } });
+    assert.strictEqual(host.type, Inner);
+    assert.ok(!('className' in host.props), 'className is not forwarded');
+    assert.deepStrictEqual(host.props.style, { style: { color: 'red' }, user: { margin: 1 } });
+    assert.strictEqual(host.props.testID, 'icon');
+  });
+  ok('withUniwind: without a className the props go through as they are', () => {
+    const host = render({ testID: 'icon', style: { margin: 1 } });
+    assert.deepStrictEqual(host.props.style, { margin: 1 });
+  });
+}
+
 // src/uniwind/nativeResolver.ts: a fresh module per check (it keeps module state), a fake engine and a fake Uniwind store
 {
   const resolverSrc = ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'uniwind', 'nativeResolver.ts'), 'utf8'), { compilerOptions: { module: 'commonjs', target: 'es2020' } }).outputText.replace(/require\(/g, 'module.require(');
