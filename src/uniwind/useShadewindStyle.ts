@@ -1,3 +1,4 @@
+/* eslint-disable no-bitwise -- colour byte order and the press flag are bit work */
 import { type Ref, useLayoutEffect, useReducer, useRef } from 'react';
 import { processColor, StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
@@ -28,10 +29,13 @@ export const ALL_STATE: State = {
   isPressed: true,
 };
 
-// lazy: this module is evaluated before the native runtime exists
+// lazy: this module is evaluated before the native runtime exists; looked up once, then the same object (a require per view is a module
+// registry lookup, twice per mounted view)
+let engineModule: typeof import('../internal').ShadewindEngine | undefined;
 const engine = () =>
-  (require('shadewind/internal') as typeof import('../internal'))
-    .ShadewindEngine;
+  (engineModule ??= (
+    require('shadewind/internal') as typeof import('../internal')
+  ).ShadewindEngine);
 
 /** Dev diagnostics: className -> 'engine' or why it fell back. Collected only when `__SHADEWIND_DEBUG__` or __DEV__. */
 export const decisions = new Map<string, string>();
@@ -252,7 +256,11 @@ export const cachedPlan = (
   return made;
 };
 
-const bump = (n: number) => n + 1;
+// bit 0: pressed (Text's press state, see `pressStates`); the rest counts the re-renders asked for with no action
+export const PRESS = 1;
+export const RELEASE = 2;
+const bump = (n: number, action?: number) =>
+  action === PRESS ? n | 1 : action === RELEASE ? n & ~1 : n + 2;
 
 // A plan that left a theme-dependent className to React: the engine does not paint it and nothing else changes it on a switch. (A
 // className that does not depend on the theme, or has the same style in every theme, a scoped theme, and a view being pressed need no
@@ -460,7 +468,10 @@ export const useShadewindStyle = (
   state?: State,
   // Text's selectionColorClassName, resolved here rather than with Uniwind's useAccentColor: that is three more hooks and a layout
   // effect for every Text, used or not
-  accentClassName?: string
+  accentClassName?: string,
+  // Text only: [pressed][disabled] -> the state object. The press state lives in the style reducer then (one hook, not a useState
+  // as well) and `state` is not used; press(true) / press(false) from the returned `press`.
+  pressStates?: readonly (readonly [State, State])[]
 ) => {
   'use no memo';
 
@@ -475,7 +486,12 @@ export const useShadewindStyle = (
 
   const context = useContext();
   // re-render for what is not the theme (orientation, viewport, RTL, font scale), like Uniwind does
-  const [, rerender] = R.useReducer(bump, 0);
+  const [reduced, rerender] = R.useReducer(bump, 0);
+
+  if (pressStates !== undefined) {
+    state = pressStates[reduced & 1]![props.disabled ? 1 : 0];
+  }
+
   const current = UniwindStore!.getStyles(className, props, state, context);
   let hasInlineOverlap = false;
 
@@ -528,6 +544,7 @@ export const useShadewindStyle = (
     style: unbinding ? nudgeUnbound(current.styles) : current.styles,
     themed: planned.themed,
     unbinding,
+    press: rerender as (action: number) => void,
     onRegisterFailed: warnUnbound,
     accentColor,
     deps,

@@ -46,9 +46,12 @@ const VIEW_TRANSFORMED = [
   'tabIndex',
 ] as const;
 
+const VIEW_TRANSFORMED_SET = new Set<string>(VIEW_TRANSFORMED);
+
+// walks the props the view was given (a few) instead of probing the 17 it could have been (a miss each)
 export const viewIsPlain = (props: Record<string, unknown>): boolean => {
-  for (let i = 0; i < VIEW_TRANSFORMED.length; i++) {
-    if (props[VIEW_TRANSFORMED[i]!] !== undefined) {
+  for (const key in props) {
+    if (VIEW_TRANSFORMED_SET.has(key) && props[key] !== undefined) {
       return false;
     }
   }

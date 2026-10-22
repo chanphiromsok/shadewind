@@ -1,4 +1,4 @@
-import { use, useState, type ComponentType } from 'react';
+import { use, type ComponentType } from 'react';
 import { Platform, Text as RNText, type TextProps } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import {
@@ -9,6 +9,8 @@ import {
   withUserStyle,
 } from './native';
 import {
+  PRESS,
+  RELEASE,
   useEngineRef,
   useShadewindStyle,
   userStyleOf,
@@ -18,7 +20,6 @@ import { jsx } from 'react/jsx-runtime';
 // read once at module load: Metro's inline requires would look each of these up on every render (see useShadewindStyle.ts)
 const M = {
   use,
-  useState,
   TextAncestorContext,
   textIsPlain,
   nativeTextStyle,
@@ -53,16 +54,12 @@ type Props = TextProps & {
 export const Text: ComponentType<Props> = copyComponentProperties(
   RNText,
   (props: Props) => {
-    const [isPressed, setIsPressed] = M.useState(false);
-    const state =
-      STATES[isPressed ? 1 : 0][
-        (props as { disabled?: boolean }).disabled ? 1 : 0
-      ];
     const styled = M.useShadewindStyle(
       props.className,
       props,
-      state,
-      props.selectionColorClassName
+      undefined,
+      props.selectionColorClassName,
+      STATES
     );
     const { style, accentColor: selectionColor } = styled;
     const ref = M.useEngineRef(styled, (props as { ref?: any }).ref);
@@ -101,11 +98,11 @@ export const Text: ComponentType<Props> = copyComponentProperties(
           props.numberOfLines
         }
         onPressIn={(event) => {
-          setIsPressed(true);
+          styled.press(PRESS);
           props.onPressIn?.(event);
         }}
         onPressOut={(event) => {
-          setIsPressed(false);
+          styled.press(RELEASE);
           props.onPressOut?.(event);
         }}
       />
