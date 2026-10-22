@@ -460,7 +460,7 @@ export const ShadewindEngine = {
       ref,
       native,
       renderTheme,
-      styleLabels.get(styles),
+      __DEV__ ? styleLabels.get(styles) : undefined,
       force
     );
   },
@@ -470,7 +470,12 @@ export const ShadewindEngine = {
     native: Record<string, Record<string, unknown>>,
     renderTheme?: string
   ) {
-    return registerNative(ref, native, renderTheme, styleLabels.get(native));
+    return registerNative(
+      ref,
+      native,
+      renderTheme,
+      __DEV__ ? styleLabels.get(native) : undefined
+    );
   },
   /** Development only: names a styles object (as passed to register / registerRaw) in shadewind/diagnostics. */
   label(styles: object, label: string): void {

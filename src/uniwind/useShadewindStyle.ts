@@ -28,10 +28,13 @@ export const ALL_STATE: State = {
   isPressed: true,
 };
 
-// lazy: this module is evaluated before the native runtime exists
+// lazy: this module is evaluated before the native runtime exists; looked up once, then the same object (a require per view is a module
+// registry lookup, twice per mounted view)
+let engineModule: typeof import('../internal').ShadewindEngine | undefined;
 const engine = () =>
-  (require('shadewind/internal') as typeof import('../internal'))
-    .ShadewindEngine;
+  (engineModule ??= (
+    require('shadewind/internal') as typeof import('../internal')
+  ).ShadewindEngine);
 
 /** Dev diagnostics: className -> 'engine' or why it fell back. Collected only when `__SHADEWIND_DEBUG__` or __DEV__. */
 export const decisions = new Map<string, string>();
