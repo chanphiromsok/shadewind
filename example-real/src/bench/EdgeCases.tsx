@@ -200,6 +200,11 @@ export function EdgeCases() {
           <Rotating />
         </Cell>
 
+        {/* a bound view that goes static, to a colour equal to the one it first rendered with (light: engine paints card, then `on` swaps to a class with no theme difference) */}
+        <Cell>
+          <View className={on ? 'size-16 bg-black' : 'size-16 bg-card dark:bg-black'} />
+        </Cell>
+
         {/* text */}
         <Cell>
           <Text className="text-xl text-primary">

@@ -1,5 +1,5 @@
 import { type Ref, useLayoutEffect, useReducer, useRef } from 'react';
-import { StyleSheet } from 'react-native';
+import { processColor, StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
 import { getInternals, installUniwind, type Resolved } from './install';
 import { resolveUncached, stylesByTheme } from './uniwindAccess';
@@ -11,6 +11,7 @@ const R = {
   useReducer,
   useRef,
   StyleSheet,
+  processColor,
   getInternals,
   installUniwind,
 };
@@ -392,6 +393,35 @@ export const subscribeShared = (
   };
 };
 
+/**
+ * The style for the render in which a view stops being bound to the engine. The engine painted the view natively, so what is on
+ * screen is not what React last sent; React diffs its own props only, and a colour equal to the one it sent before (the theme the
+ * view first rendered under) would never reach native, leaving the engine's colour on the unbound view. The same colours as numbers
+ * (RRGGBBAA, what the host's own processColor expects) differ from the strings React sent before, so the prop is sent again.
+ */
+export const nudgeUnbound = (style: any): any => {
+  if (!style || typeof style !== 'object' || Array.isArray(style)) {
+    return style;
+  }
+
+  const out: Record<string, unknown> = { ...style };
+
+  for (const key of SUPPORTED) {
+    const value = style[key];
+
+    if (typeof value === 'string') {
+      const n = R.processColor(value);
+
+      if (typeof n === 'number') {
+        // the host component runs processColor on it again, which reads a number as 0xRRGGBBAA: hand it that, not processColor's 0xAARRGGBB
+        out[key] = ((n << 8) | ((n >>> 24) & 0xff)) >>> 0;
+      }
+    }
+  }
+
+  return out;
+};
+
 // Per styled view: context and reducer here, the subscription in the ref (useEngineRef); Uniwind's useStyle has a layout effect too. With the engine active a theme change never
 // re-renders a view (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and
 // stale after a later switch. With the engine inactive the view subscribes to the theme like Uniwind's own components.
@@ -456,8 +486,16 @@ export const useShadewindStyle = (
   // no layout effect: the view subscribes from its ref (useEngineRef), which attaches and detaches at the same moments (commit,
   // unmount, a Suspense / Activity / freeze hide and reveal); one effect less per view. A caller whose ref may never attach
   // (withUniwind wraps any component) subscribes with useEffectSubscription instead.
+  // a view the engine painted that this render leaves unbound: React must send its colours again (nudgeUnbound)
+  const wasBoundRef = R.useRef(false);
+  /* eslint-disable react-hooks/refs -- the render-time hand-over, like useEngineRef's holder: a discarded render heals on the next one */
+  const unbinding = wasBoundRef.current && !planned.themed;
+
+  wasBoundRef.current = planned.themed != null;
+  /* eslint-enable react-hooks/refs */
+
   return {
-    style: current.styles,
+    style: unbinding ? nudgeUnbound(current.styles) : current.styles,
     themed: planned.themed,
     onRegisterFailed: warnUnbound,
     accentColor,

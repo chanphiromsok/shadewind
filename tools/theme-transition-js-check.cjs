@@ -91,7 +91,7 @@ const refStubs = {
     useReducer: () => { hooks.reducers++; return [0, () => {}]; },
     useRef: (v) => hooks.ref ?? { current: v }, // set hooks.ref to keep one component's ref across renders
   },
-  'react-native': { StyleSheet: { flatten: (s) => s } },
+  'react-native': { StyleSheet: { flatten: (s) => s }, processColor: (c) => (c === 'white' ? 0xffffffff : c === 'bad' ? undefined : (c === 'half' ? 0x80336699 : 0xff111111)) },
   './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: hooks.active }) },
   'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
   'shadewind/internal': {
@@ -141,6 +141,25 @@ ok('style: a className the engine cannot take (an inline style over a painted ke
   const out = useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } });
   assert.strictEqual(out.themed, null);
   assert.ok(out.deps.includes(THEME), 'the theme stays in the subscription');
+});
+ok('style: the render that unbinds a view the engine painted sends its colours again (as numbers, never equal to the strings before)', () => {
+  const { nudgeUnbound } = rm.exports;
+  // processColor's ARGB, rotated to the RRGGBBAA the host's second processColor reads: that pass must give the same colour back
+  const rot = (n) => ((n << 8) | ((n >>> 24) & 0xff)) >>> 0; // what the host does to a number (normalizeColor then ARGB)
+  const back = (n) => ((n << 24) | (n >>> 8)) >>> 0; // RRGGBBAA -> AARRGGBB
+  const out = nudgeUnbound({ backgroundColor: 'white', borderColor: 'bad', color: 'half', padding: 4 });
+  assert.strictEqual(out.borderColor, 'bad'); assert.strictEqual(out.padding, 4);
+  assert.strictEqual(back(out.backgroundColor), 0xffffffff); assert.strictEqual(back(out.color), 0x80336699);
+  assert.strictEqual(out.backgroundColor, 0xffffffff); assert.strictEqual(out.color, 0x33669980); assert.strictEqual(rot(0xff111111) >>> 0, 0x111111ff);
+  assert.deepStrictEqual(nudgeUnbound([{ a: 1 }]), [{ a: 1 }]);
+  hooks.ref = { current: true }; // bound by the previous render
+  try {
+    const out = useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } }); // not engine-bound now
+    assert.strictEqual(out.themed, null);
+    assert.strictEqual(out.style.backgroundColor, 0xffffffff); // white is the same in both byte orders
+    assert.strictEqual(hooks.ref.current, false);
+    assert.strictEqual(useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } }).style.backgroundColor, 'white', 'only the render that unbinds');
+  } finally { hooks.ref = null; }
 });
 console.warn = warn;
 
