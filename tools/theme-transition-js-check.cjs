@@ -88,7 +88,7 @@ const hooks = { reducers: 0, effects: [], active: true, ref: null };
 const refStubs = {
   react: {
     useLayoutEffect: (fn, deps) => { hooks.effects.push(deps); },
-    useReducer: () => { hooks.reducers++; return [0, () => {}]; },
+    useReducer: (reducer, init) => { hooks.reducers++; return [hooks.reduced ?? init, (action) => { hooks.reduced = reducer(hooks.reduced ?? init, action); }]; },
     useRef: (v) => hooks.ref ?? { current: v }, // set hooks.ref to keep one component's ref across renders
   },
   'react-native': { StyleSheet: { flatten: (s) => (Array.isArray(s) ? Object.assign({}, ...s.flat(Infinity).filter(Boolean)) : s) }, processColor: (c) => (c === 'white' ? 0xffffffff : c === 'bad' ? undefined : (c === 'half' ? 0x80336699 : 0xff111111)) },
@@ -163,6 +163,29 @@ ok('style: the render that unbinds a view the engine painted sends its colours a
     // a render run twice (StrictMode) or restarted sends the same
     assert.strictEqual(useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } }).style.backgroundColor, '#ffffffff');
   } finally { hooks.ref = null; }
+});
+ok('style: a Text\'s press state lives in the style reducer (no second hook): press / release switch the state object, a plain re-render keeps it', () => {
+  const seen = [];
+  const store = fakeInternals.UniwindStore, getStyles = store.getStyles;
+  store.getStyles = (className, props, state) => { seen.push(state); return getStyles(className); };
+  const table = [[{ p: 0, d: 0 }, { p: 0, d: 1 }], [{ p: 1, d: 0 }, { p: 1, d: 1 }]];
+  const PRESS = 1, RELEASE = 2;
+  try {
+    hooks.reduced = undefined; hooks.reducers = 0;
+    let out = (seen.length = 0, useShadewindStyle('bg-card', {}, undefined, undefined, table));
+    assert.strictEqual(hooks.reducers, 1, 'one reducer, no useState');
+    assert.strictEqual(seen[0], table[0][0]);
+    out.press(PRESS); out = (seen.length = 0, useShadewindStyle('bg-card', {}, undefined, undefined, table));
+    assert.strictEqual(seen[0], table[1][0]);
+    out = (seen.length = 0, useShadewindStyle('bg-card', { disabled: true }, undefined, undefined, table));
+    assert.strictEqual(seen[0], table[1][1]);
+    out.press(); out = (seen.length = 0, useShadewindStyle('bg-card', {}, undefined, undefined, table)); // what the shared group calls: a bare re-render
+    assert.strictEqual(seen[0], table[1][0], 'still pressed');
+    out.press(RELEASE); (seen.length = 0, useShadewindStyle('bg-card', {}, undefined, undefined, table));
+    assert.strictEqual(seen[0], table[0][0]);
+    // no table: the state argument is used as it is
+    const mine = { isPressed: true }; (seen.length = 0, useShadewindStyle('bg-card', {}, mine)); assert.strictEqual(seen[0], mine);
+  } finally { store.getStyles = getStyles; hooks.reduced = undefined; }
 });
 console.warn = warn;
 
