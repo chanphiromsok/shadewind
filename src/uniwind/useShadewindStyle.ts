@@ -434,6 +434,23 @@ export const nudgeUnbound = (style: any): any => {
   return out;
 };
 
+/**
+ * The user's own `style`, for the same render: a colour of theirs on a painted key wins over the className's, so it needs the same
+ * nudge or an inline value equal to the one React sent before would not reach native either.
+ */
+export const userStyleOf = (
+  styled: { unbinding: boolean },
+  user: unknown
+): any => {
+  if (!styled.unbinding || user == null || typeof user !== 'object') {
+    return user;
+  }
+
+  const flat = R.StyleSheet.flatten(user as never) as unknown;
+
+  return flat && typeof flat === 'object' ? nudgeUnbound(flat) : user;
+};
+
 // Per styled view: context and reducer here, the subscription in the ref (useEngineRef); Uniwind's useStyle has a layout effect too. With the engine active a theme change never
 // re-renders a view (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and
 // stale after a later switch. With the engine inactive the view subscribes to the theme like Uniwind's own components.
@@ -510,6 +527,7 @@ export const useShadewindStyle = (
   return {
     style: unbinding ? nudgeUnbound(current.styles) : current.styles,
     themed: planned.themed,
+    unbinding,
     onRegisterFailed: warnUnbound,
     accentColor,
     deps,

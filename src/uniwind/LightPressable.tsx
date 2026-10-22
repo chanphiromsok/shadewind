@@ -9,7 +9,11 @@ import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import { useUniwindContext } from 'uniwind-internal/core/context';
 import { getInternals } from './install';
 import { NativeView, TextAncestorContext, withUserStyle } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import {
+  useEngineRef,
+  useShadewindStyle,
+  userStyleOf,
+} from './useShadewindStyle';
 
 type Props = PressableProps & { className?: string };
 
@@ -108,7 +112,7 @@ export const LightPressable: ComponentType<Props> = copyComponentProperties(
         ];
       }
 
-      return withUserStyle(style, user);
+      return withUserStyle(style, userStyleOf(styled, user));
     };
 
     if (!light) {

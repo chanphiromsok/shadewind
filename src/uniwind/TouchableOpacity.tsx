@@ -5,7 +5,11 @@ import {
 } from 'react-native';
 import { copyComponentProperties } from 'uniwind-internal/components/utils';
 import { withUserStyle } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import {
+  useEngineRef,
+  useShadewindStyle,
+  userStyleOf,
+} from './useShadewindStyle';
 
 type Props = TouchableOpacityProps & { className?: string };
 
@@ -27,7 +31,7 @@ export const TouchableOpacity: ComponentType<Props> = copyComponentProperties(
       <RNTouchableOpacity
         {...props}
         ref={ref}
-        style={withUserStyle(style, props.style)}
+        style={withUserStyle(style, userStyleOf(styled, props.style))}
         onPressIn={(event) => {
           setIsPressed(true);
           props.onPressIn?.(event);

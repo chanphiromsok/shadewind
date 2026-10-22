@@ -385,7 +385,7 @@ const runtime = async () => {
     PixelRatio: { getFontScale: () => 1, get: () => 3 },
     StyleSheet: { hairlineWidth: 1 / 3, flatten: (style) => style },
     I18nManager: { isRTL: false },
-    processColor: (c) => (c === 'white' ? 0xffffffff : 0xff111111),
+    processColor: (c) => (/^#[0-9a-f]{6}$/i.test(c) ? (0xff000000 | parseInt(c.slice(1), 16)) >>> 0 : c === 'white' ? 0xffffffff : 0xff111111),
     Platform: { OS: 'ios', isTV: false },
   };
 
@@ -794,6 +794,7 @@ const runtime = async () => {
       unregistered.length = 0;
       assert.strictEqual(element.type, 'RCTView');
       assert.strictEqual(typeof element.props.ref, 'function');
+      assert.strictEqual(element.props.style.backgroundColor, '#00a8ffff', 'the unbound render sends the colour again (the engine painted the dark one)');
       element.props.ref(bound);
       element.props.ref({}); // never bound: nothing to do
       assert.deepStrictEqual(unregistered, [bound]);
@@ -807,6 +808,38 @@ const runtime = async () => {
     registered.length = 0;
     BenchView({}).props.ref(bound);
     assert.strictEqual(registered.length, 1, 'bound again');
+  });
+
+  check('runtime: an expression className that was bound and is static now sends its colours again, on every such render (StrictMode), and a never-bound one does not', () => {
+    const view = newInstance();
+    const first = DynView({ className: BENCH_VIEW });
+
+    assert.strictEqual(first.props.style.backgroundColor, '#00a8ff');
+    assert.strictEqual(typeof first.props.ref, 'function', 'bound');
+
+    const dark = UniwindStore.vars.dark;
+    const previous = Object.getOwnPropertyDescriptor(dark, '--color-bench-primary');
+
+    dark['--color-bench-primary'] = () => '#00a8ff';
+    UniwindListener.notify([StyleDependency.Variables]);
+
+    try {
+      const a = DynView({ className: BENCH_VIEW });
+      const b = DynView({ className: BENCH_VIEW }); // the same render again
+
+      assert.strictEqual(a.props.ref, undefined);
+      assert.strictEqual(a.props.style.backgroundColor, '#00a8ffff');
+      assert.strictEqual(b.props.style.backgroundColor, '#00a8ffff');
+      assert.strictEqual(b.props.style, a.props.style, 'one object per style');
+      assert.strictEqual(a.props.style.width, adapterStyle(BENCH_VIEW).width, 'the other properties are untouched');
+
+      newInstance(); // another view, never bound
+      assert.strictEqual(DynView({ className: BENCH_VIEW }).props.style.backgroundColor, '#00a8ff');
+    } finally {
+      Object.defineProperty(dark, '--color-bench-primary', previous);
+      UniwindListener.notify([StyleDependency.Variables]);
+      newInstance();
+    }
   });
 
   check('runtime: engine inactive -> the adapter\'s components', () => {
