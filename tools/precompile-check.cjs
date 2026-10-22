@@ -385,6 +385,7 @@ const runtime = async () => {
     PixelRatio: { getFontScale: () => 1, get: () => 3 },
     StyleSheet: { hairlineWidth: 1 / 3, flatten: (style) => style },
     I18nManager: { isRTL: false },
+    processColor: (c) => (c === 'white' ? 0xffffffff : 0xff111111),
     Platform: { OS: 'ios', isTV: false },
   };
 

@@ -297,6 +297,9 @@ type Wrapper = {
   node: object | null;
 };
 type Instance = { current: Wrapper | null };
+// an instance that was engine-bound once: every later render that leaves it unbound sends its colours again (nudgeUnbound), also a repeated
+// one (StrictMode, a restarted render)
+const boundOnce = new WeakSet<Instance>();
 
 const wrapperFor = (
   instance: Instance,
@@ -446,16 +449,21 @@ const make = (fixed: string | null, kind: Kind) => {
         if (wrapper === null || wrapper.base !== base) {
           wrapper = wrapperFor(instance, base, r.themed!);
           instance.current = wrapper;
+          boundOnce.add(instance);
         }
 
         ref = wrapper.fn;
       } else {
         // not engine-bound now: a wrapper from an earlier render is no longer current and unbinds its view when React detaches it
-        sent = instance.current !== null ? nudgeUnbound(style) : style;
+        sent = boundOnce.has(instance) ? nudgeUnbound(style) : style;
         instance.current = null;
       }
     } else {
       ref = r.refs ? r.refs[theme!] : entry.wasBound ? unbind : undefined;
+
+      if (!r.refs && entry.wasBound) {
+        sent = nudgeUnbound(style);
+      }
     }
 
     if (kind === 'view') {

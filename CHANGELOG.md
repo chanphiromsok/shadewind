@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix: a view the engine had painted kept the engine's colour when a render left it unbound with a colour equal to the one React had sent before (a tab bar that rendered under dark, was painted light, then took a class that is the same in both themes stayed light). The render that unbinds a view now sends its colours again, as 8-digit hex.
+
 ## 0.3.4
 
 No change in behaviour for apps; the code is easier to change.

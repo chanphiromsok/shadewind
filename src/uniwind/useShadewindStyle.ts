@@ -393,30 +393,42 @@ export const subscribeShared = (
   };
 };
 
+const nudged = new WeakMap<object, object>();
+
 /**
- * The style for the render in which a view stops being bound to the engine. The engine painted the view natively, so what is on
- * screen is not what React last sent; React diffs its own props only, and a colour equal to the one it sent before (the theme the
- * view first rendered under) would never reach native, leaving the engine's colour on the unbound view. The same colours as numbers
- * (RRGGBBAA, what the host's own processColor expects) differ from the strings React sent before, so the prop is sent again.
+ * The style for a render that leaves a view the engine painted unbound. The engine wrote the colours natively, so what is on screen
+ * is not what React last sent; React diffs its own props only, and a colour equal to the one it sent before (the theme the view first
+ * rendered under) would never reach native, leaving the engine's colour on the unbound view. The same colours as 8-digit hex differ
+ * from the strings React sent before (upper case when that was the form already), so the prop is sent again; it stays a string for
+ * a wrapped component that reads it in JS. One object per source style, so a repeated render keeps its identity.
  */
 export const nudgeUnbound = (style: any): any => {
   if (!style || typeof style !== 'object' || Array.isArray(style)) {
     return style;
   }
 
-  const out: Record<string, unknown> = { ...style };
+  let out = nudged.get(style);
 
-  for (const key of SUPPORTED) {
-    const value = style[key];
+  if (out === undefined) {
+    const copy: Record<string, unknown> = { ...style };
 
-    if (typeof value === 'string') {
-      const n = R.processColor(value);
+    for (const key of SUPPORTED) {
+      const value = style[key];
 
-      if (typeof n === 'number') {
-        // the host component runs processColor on it again, which reads a number as 0xRRGGBBAA: hand it that, not processColor's 0xAARRGGBB
-        out[key] = ((n << 8) | ((n >>> 24) & 0xff)) >>> 0;
+      if (typeof value === 'string') {
+        const n = R.processColor(value);
+
+        if (typeof n === 'number') {
+          // processColor gives 0xAARRGGBB (signed on Android): rotate to RRGGBBAA
+          const hex = `#${(((n << 8) | ((n >>> 24) & 0xff)) >>> 0).toString(16).padStart(8, '0')}`;
+
+          copy[key] = hex === value ? hex.toUpperCase() : hex;
+        }
       }
     }
+
+    out = copy;
+    nudged.set(style, out);
   }
 
   return out;
@@ -489,9 +501,10 @@ export const useShadewindStyle = (
   // a view the engine painted that this render leaves unbound: React must send its colours again (nudgeUnbound)
   const wasBoundRef = R.useRef(false);
   /* eslint-disable react-hooks/refs -- the render-time hand-over, like useEngineRef's holder: a discarded render heals on the next one */
+  // sticky: a render React restarts or runs twice (StrictMode) must send the same thing, and bound renders send the plain strings
   const unbinding = wasBoundRef.current && !planned.themed;
 
-  wasBoundRef.current = planned.themed != null;
+  wasBoundRef.current ||= planned.themed != null;
   /* eslint-enable react-hooks/refs */
 
   return {
