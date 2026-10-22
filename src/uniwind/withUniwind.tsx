@@ -6,6 +6,7 @@ import {
   useEffectSubscription,
   useEngineRef,
   useShadewindStyle,
+  userStyleOf,
 } from './useShadewindStyle';
 
 // Uniwind's `withUniwind(Component)` for the common case: a component that takes `className` and passes `style` (and `ref`)
@@ -44,7 +45,9 @@ export const withUniwind = (
     return createElement(Component, {
       ...rest,
       ref,
-      ...(className ? { style: withUserStyle(style, props.style) } : null),
+      ...(className
+        ? { style: withUserStyle(style, userStyleOf(styled, props.style)) }
+        : null),
     });
   };
 

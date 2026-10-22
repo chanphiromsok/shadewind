@@ -1,5 +1,5 @@
 import { type Ref, useLayoutEffect, useReducer, useRef } from 'react';
-import { StyleSheet } from 'react-native';
+import { processColor, StyleSheet } from 'react-native';
 import type { ThemedStyles } from '../internal';
 import { getInternals, installUniwind, type Resolved } from './install';
 import { resolveUncached, stylesByTheme } from './uniwindAccess';
@@ -11,6 +11,7 @@ const R = {
   useReducer,
   useRef,
   StyleSheet,
+  processColor,
   getInternals,
   installUniwind,
 };
@@ -392,6 +393,64 @@ export const subscribeShared = (
   };
 };
 
+const nudged = new WeakMap<object, object>();
+
+/**
+ * The style for a render that leaves a view the engine painted unbound. The engine wrote the colours natively, so what is on screen
+ * is not what React last sent; React diffs its own props only, and a colour equal to the one it sent before (the theme the view first
+ * rendered under) would never reach native, leaving the engine's colour on the unbound view. The same colours as 8-digit hex differ
+ * from the strings React sent before (upper case when that was the form already), so the prop is sent again; it stays a string for
+ * a wrapped component that reads it in JS. One object per source style, so a repeated render keeps its identity.
+ */
+export const nudgeUnbound = (style: any): any => {
+  if (!style || typeof style !== 'object' || Array.isArray(style)) {
+    return style;
+  }
+
+  let out = nudged.get(style);
+
+  if (out === undefined) {
+    const copy: Record<string, unknown> = { ...style };
+
+    for (const key of SUPPORTED) {
+      const value = style[key];
+
+      if (typeof value === 'string') {
+        const n = R.processColor(value);
+
+        if (typeof n === 'number') {
+          // processColor gives 0xAARRGGBB (signed on Android): rotate to RRGGBBAA
+          const hex = `#${(((n << 8) | ((n >>> 24) & 0xff)) >>> 0).toString(16).padStart(8, '0')}`;
+
+          copy[key] = hex === value ? hex.toUpperCase() : hex;
+        }
+      }
+    }
+
+    out = copy;
+    nudged.set(style, out);
+  }
+
+  return out;
+};
+
+/**
+ * The user's own `style`, for the same render: a colour of theirs on a painted key wins over the className's, so it needs the same
+ * nudge or an inline value equal to the one React sent before would not reach native either.
+ */
+export const userStyleOf = (
+  styled: { unbinding: boolean },
+  user: unknown
+): any => {
+  if (!styled.unbinding || user == null || typeof user !== 'object') {
+    return user;
+  }
+
+  const flat = R.StyleSheet.flatten(user as never) as unknown;
+
+  return flat && typeof flat === 'object' ? nudgeUnbound(flat) : user;
+};
+
 // Per styled view: context and reducer here, the subscription in the ref (useEngineRef); Uniwind's useStyle has a layout effect too. With the engine active a theme change never
 // re-renders a view (rule 1): an engine view is kept right by the commit hook, a view the engine cannot take is correct at mount and
 // stale after a later switch. With the engine inactive the view subscribes to the theme like Uniwind's own components.
@@ -456,9 +515,19 @@ export const useShadewindStyle = (
   // no layout effect: the view subscribes from its ref (useEngineRef), which attaches and detaches at the same moments (commit,
   // unmount, a Suspense / Activity / freeze hide and reveal); one effect less per view. A caller whose ref may never attach
   // (withUniwind wraps any component) subscribes with useEffectSubscription instead.
+  // a view the engine painted that this render leaves unbound: React must send its colours again (nudgeUnbound)
+  const wasBoundRef = R.useRef(false);
+  /* eslint-disable react-hooks/refs -- the render-time hand-over, like useEngineRef's holder: a discarded render heals on the next one */
+  // sticky: a render React restarts or runs twice (StrictMode) must send the same thing, and bound renders send the plain strings
+  const unbinding = wasBoundRef.current && !planned.themed;
+
+  wasBoundRef.current ||= planned.themed != null;
+  /* eslint-enable react-hooks/refs */
+
   return {
-    style: current.styles,
+    style: unbinding ? nudgeUnbound(current.styles) : current.styles,
     themed: planned.themed,
+    unbinding,
     onRegisterFailed: warnUnbound,
     accentColor,
     deps,

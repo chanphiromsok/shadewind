@@ -40,7 +40,7 @@ import {
 } from './native';
 import { Text } from './Text';
 import { resolveUncached, stylesByTheme } from './uniwindAccess';
-import { cachedPlan, decisions, same } from './useShadewindStyle';
+import { cachedPlan, decisions, nudgeUnbound, same } from './useShadewindStyle';
 import { View } from './View';
 
 // read once at module load (Metro's inline requires, see useShadewindStyle.ts)
@@ -297,6 +297,9 @@ type Wrapper = {
   node: object | null;
 };
 type Instance = { current: Wrapper | null };
+// an instance that was engine-bound once: every later render that leaves it unbound sends its colours again (nudgeUnbound), also a repeated
+// one (StrictMode, a restarted render)
+const boundOnce = new WeakSet<Instance>();
 
 const wrapperFor = (
   instance: Instance,
@@ -434,6 +437,8 @@ const make = (fixed: string | null, kind: Kind) => {
     }
 
     let ref: ((node: unknown) => void) | undefined;
+    // the style of the render that unbinds a view the engine painted: its colours are sent again (nudgeUnbound)
+    let sent = style;
 
     if (instance !== null) {
       const base = r.refs ? r.refs[theme!] : undefined;
@@ -444,28 +449,34 @@ const make = (fixed: string | null, kind: Kind) => {
         if (wrapper === null || wrapper.base !== base) {
           wrapper = wrapperFor(instance, base, r.themed!);
           instance.current = wrapper;
+          boundOnce.add(instance);
         }
 
         ref = wrapper.fn;
       } else {
         // not engine-bound now: a wrapper from an earlier render is no longer current and unbinds its view when React detaches it
+        sent = boundOnce.has(instance) ? nudgeUnbound(style) : style;
         instance.current = null;
       }
     } else {
       ref = r.refs ? r.refs[theme!] : entry.wasBound ? unbind : undefined;
+
+      if (!r.refs && entry.wasBound) {
+        sent = nudgeUnbound(style);
+      }
     }
 
     if (kind === 'view') {
       return M.jsx(
         M.NativeView,
-        ref ? { ...props, style, ref } : { ...props, style }
+        ref ? { ...props, style: sent, ref } : { ...props, style: sent }
       );
     }
 
     // what the adapter's direct Text path passes (Text.tsx)
     const text: Record<string, unknown> = {
       ...props,
-      style,
+      style: sent,
       accessible: M.accessible,
       allowFontScaling: true,
       ellipsizeMode: props.ellipsizeMode ?? 'tail',

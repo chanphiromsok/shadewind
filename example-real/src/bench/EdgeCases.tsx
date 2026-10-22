@@ -200,6 +200,11 @@ export function EdgeCases() {
           <Rotating />
         </Cell>
 
+        {/* a bound view that goes static, to a colour equal to the one it first rendered with (bound at phase 3 in light, so React sent the light card; the engine paints dark at phase 4; at phase 5 `bg-white` is the same string and unbinds it in dark) */}
+        <Cell>
+          <View className={on ? 'size-16 bg-card' : 'size-16 bg-white'} />
+        </Cell>
+
         {/* text */}
         <Cell>
           <Text className="text-xl text-primary">

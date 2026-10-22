@@ -91,7 +91,7 @@ const refStubs = {
     useReducer: () => { hooks.reducers++; return [0, () => {}]; },
     useRef: (v) => hooks.ref ?? { current: v }, // set hooks.ref to keep one component's ref across renders
   },
-  'react-native': { StyleSheet: { flatten: (s) => s } },
+  'react-native': { StyleSheet: { flatten: (s) => (Array.isArray(s) ? Object.assign({}, ...s.flat(Infinity).filter(Boolean)) : s) }, processColor: (c) => (c === 'white' ? 0xffffffff : c === 'bad' ? undefined : (c === 'half' ? 0x80336699 : 0xff111111)) },
   './install': { getInternals: () => fakeInternals, installUniwind: () => ({ active: hooks.active }) },
   'uniwind-internal/core/context': { useUniwindContext: () => ({ scopedTheme: null }) },
   'shadewind/internal': {
@@ -141,6 +141,28 @@ ok('style: a className the engine cannot take (an inline style over a painted ke
   const out = useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } });
   assert.strictEqual(out.themed, null);
   assert.ok(out.deps.includes(THEME), 'the theme stays in the subscription');
+});
+ok('style: the render that unbinds a view the engine painted sends its colours again (as numbers, never equal to the strings before)', () => {
+  const { nudgeUnbound } = rm.exports;
+  const out = nudgeUnbound({ backgroundColor: 'white', borderColor: 'bad', color: 'half', padding: 4 });
+  assert.strictEqual(out.borderColor, 'bad'); assert.strictEqual(out.padding, 4);
+  assert.strictEqual(out.backgroundColor, '#ffffffff'); assert.strictEqual(out.color, '#33669980'); // RRGGBBAA, a string
+  assert.strictEqual(nudgeUnbound({ backgroundColor: '#111111ff' }).backgroundColor, '#111111FF'); // already that form: upper case still differs
+  const src = { backgroundColor: 'white' }; assert.strictEqual(nudgeUnbound(src), nudgeUnbound(src), 'one object per source style');
+  assert.deepStrictEqual(nudgeUnbound([{ a: 1 }]), [{ a: 1 }]);
+  const { userStyleOf } = rm.exports;
+  const user = { backgroundColor: 'white', padding: 2 };
+  assert.strictEqual(userStyleOf({ unbinding: false }, user), user, 'not unbinding: the user style as it is');
+  assert.deepStrictEqual(userStyleOf({ unbinding: true }, [user, { padding: 4 }]), { backgroundColor: '#ffffffff', padding: 4 }, 'unbinding: flattened, colours sent again');
+  assert.strictEqual(userStyleOf({ unbinding: true }, undefined), undefined);
+  hooks.ref = { current: true }; // bound by the previous render
+  try {
+    const out = useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } }); // not engine-bound now
+    assert.strictEqual(out.themed, null);
+    assert.strictEqual(out.style.backgroundColor, '#ffffffff');
+    // a render run twice (StrictMode) or restarted sends the same
+    assert.strictEqual(useShadewindStyle('bg-card', { style: { backgroundColor: 'red' } }).style.backgroundColor, '#ffffffff');
+  } finally { hooks.ref = null; }
 });
 console.warn = warn;
 
@@ -211,7 +233,7 @@ ok('textIsPlain: a numeric weight in the className style stays on the direct pat
     react: { createElement: (type, props) => { created.push({ type, props }); return { type, props }; } },
     'uniwind-internal/hoc/withUniwind.native': { withUniwind: (component) => component },
     './native': { withUserStyle: (style, user) => ({ style, user }) },
-    './useShadewindStyle': { NO_DEPS: [], useEffectSubscription: () => {}, useEngineRef: (_styled, ref) => ref ?? 'engine-ref', useShadewindStyle: () => ({ style: { color: 'red' }, themed: null, deps: [] }) },
+    './useShadewindStyle': { NO_DEPS: [], useEffectSubscription: () => {}, userStyleOf: (_s, u) => u, useEngineRef: (_styled, ref) => ref ?? 'engine-ref', useShadewindStyle: () => ({ style: { color: 'red' }, themed: null, deps: [] }) },
   };
   wm.require = (name) => { if (name in wuStubs) return wuStubs[name]; throw new Error('unexpected import ' + name); };
   wm._compile(wuSrc.replace(/require\(/g, 'module.require('), 'withUniwind.js');

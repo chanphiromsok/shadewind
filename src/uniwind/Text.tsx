@@ -8,7 +8,11 @@ import {
   nativeTextStyle,
   withUserStyle,
 } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import {
+  useEngineRef,
+  useShadewindStyle,
+  userStyleOf,
+} from './useShadewindStyle';
 import { jsx } from 'react/jsx-runtime';
 
 // read once at module load: Metro's inline requires would look each of these up on every render (see useShadewindStyle.ts)
@@ -20,6 +24,7 @@ const M = {
   nativeTextStyle,
   withUserStyle,
   useEngineRef,
+  userStyleOf,
   useShadewindStyle,
   NativeText,
   RNText,
@@ -75,7 +80,10 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       return M.jsx(M.NativeText, {
         ...props,
         ref,
-        style: M.withUserStyle(M.nativeTextStyle(style), props.style),
+        style: M.withUserStyle(
+          M.nativeTextStyle(style),
+          M.userStyleOf(styled, props.style)
+        ),
         accessible: M.accessible,
         allowFontScaling: true,
         ellipsizeMode: props.ellipsizeMode ?? 'tail',
@@ -86,7 +94,7 @@ export const Text: ComponentType<Props> = copyComponentProperties(
       <RNText
         {...props}
         ref={ref}
-        style={withUserStyle(style, props.style)}
+        style={withUserStyle(style, userStyleOf(styled, props.style))}
         selectionColor={props.selectionColor ?? selectionColor}
         numberOfLines={
           (style as { WebkitLineClamp?: number }).WebkitLineClamp ??

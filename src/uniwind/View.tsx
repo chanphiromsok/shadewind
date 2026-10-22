@@ -8,7 +8,11 @@ import {
   viewIsPlain,
   withUserStyle,
 } from './native';
-import { useEngineRef, useShadewindStyle } from './useShadewindStyle';
+import {
+  useEngineRef,
+  useShadewindStyle,
+  userStyleOf,
+} from './useShadewindStyle';
 import { jsx } from 'react/jsx-runtime';
 
 // read once at module load: Metro's inline requires would look each of these up on every render (see useShadewindStyle.ts), the
@@ -16,6 +20,7 @@ import { jsx } from 'react/jsx-runtime';
 const M = {
   useShadewindStyle,
   useEngineRef,
+  userStyleOf,
   use,
   TextAncestorContext,
   viewIsPlain,
@@ -40,7 +45,11 @@ export const View: ComponentType<Props> = copyComponentProperties(
       !M.use(M.TextAncestorContext) && M.viewIsPlain(props)
         ? M.NativeView
         : M.RNView,
-      { ...props, ref, style: M.withUserStyle(style, props.style) }
+      {
+        ...props,
+        ref,
+        style: M.withUserStyle(style, M.userStyleOf(styled, props.style)),
+      }
     );
   }
 );
